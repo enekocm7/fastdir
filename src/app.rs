@@ -4,7 +4,7 @@
 use crate::drives::{self, Drive};
 use crate::format;
 use crate::fsops;
-use crate::model::{Node, NodePath, Tree};
+use crate::model::{NO_EXT, Node, NodePath, Tree};
 use crate::scanner::{self, Progress, ScanResult};
 use crate::settings::Settings;
 use crate::updater::{self, Release};
@@ -149,6 +149,8 @@ pub struct FastDir {
     /// Extension ids with files left, in rank order.
     ext_rows: Vec<u16>,
     selected: Option<usize>,
+    /// Extension rank highlighted in the treemap, picked from the ext list.
+    selected_ext: Option<u16>,
     sort: (SortKey, bool),
     list_scroll: UniformListScrollHandle,
     ext_scroll: UniformListScrollHandle,
@@ -204,6 +206,7 @@ impl FastDir {
             rows: Vec::new(),
             ext_rows: Vec::new(),
             selected: None,
+            selected_ext: None,
             sort: (SortKey::Size, true),
             list_scroll: UniformListScrollHandle::new(),
             ext_scroll: UniformListScrollHandle::new(),
@@ -247,6 +250,7 @@ impl FastDir {
         self.tree = None;
         self.rows.clear();
         self.selected = None;
+        self.selected_ext = None;
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
         window.set_window_title(&format!("FastDir — scanning {}", root.display()));
 
@@ -297,6 +301,7 @@ impl FastDir {
         self.last_scan = Some((elapsed, cancelled));
         self.phase = Phase::Ready;
         self.selected = Some(0);
+        self.selected_ext = None;
         self.rebuild_rows();
         self.treemap.update(cx, |t, cx| {
             t.set_tree(Some(tree), cx);
@@ -324,8 +329,15 @@ impl FastDir {
     }
 
     fn stop_scan(&mut self, _: &StopScan, _: &mut Window, cx: &mut Context<Self>) {
-        if let Phase::Scanning { progress, .. } = &self.phase {
+        let scanning = if let Phase::Scanning { progress, .. } = &self.phase {
             progress.cancel.store(true, Ordering::Relaxed);
+            true
+        } else {
+            false
+        };
+        // Esc also drops the treemap highlight.
+        self.set_selected_ext(None, cx);
+        if scanning {
             cx.notify();
         }
     }
@@ -1152,7 +1164,37 @@ impl FastDir {
             self.treemap
                 .update(cx, |t, cx| t.set_selection(Some(path), cx));
         }
+        self.highlight_ext_of_row(ix, cx);
         cx.notify();
+    }
+
+    /// Highlight one extension in the treemap (`None` clears it).
+    fn set_selected_ext(&mut self, ext: Option<u16>, cx: &mut Context<Self>) {
+        if self.selected_ext == ext {
+            return;
+        }
+        self.selected_ext = ext;
+        self.treemap.update(cx, |t, cx| t.set_highlight(ext, cx));
+        cx.notify();
+    }
+
+    /// Clicking an extension row toggles its treemap highlight.
+    fn toggle_ext(&mut self, ext: u16, cx: &mut Context<Self>) {
+        let ext = if self.selected_ext == Some(ext) { None } else { Some(ext) };
+        self.set_selected_ext(ext, cx);
+    }
+
+    /// A selected file row also highlights that file's extension.
+    fn highlight_ext_of_row(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let ext = self.tree.as_ref().and_then(|tree| {
+            let tree = tree.read();
+            let row = self.rows.get(ix)?;
+            let node = tree.get(&row.path)?;
+            (!node.is_dir() && node.ext != NO_EXT).then_some(node.ext)
+        });
+        if let Some(ext) = ext {
+            self.set_selected_ext(Some(ext), cx);
+        }
     }
 
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1232,12 +1274,17 @@ impl FastDir {
         let total = tree.root.size.max(1);
         let muted = theme.muted_foreground;
         let even = theme.list_even;
+        let active = theme.list_active;
+        let active_border = theme.list_active_border;
+        let hover = theme.list_hover;
+        let selected = self.selected_ext;
         let mut out = Vec::with_capacity(range.len());
         for ix in range {
             let Some(&ext) = self.ext_rows.get(ix) else { continue };
             let Some(e) = tree.exts.get(ext as usize) else { continue };
             let (r, g, b) = treemap::ext_color(ext);
             let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
+            let is_sel = selected == Some(ext);
             out.push(
                 h_flex()
                     .id(("ext", ix))
@@ -1246,7 +1293,17 @@ impl FastDir {
                     .px_2()
                     .gap_2()
                     .text_xs()
-                    .when(ix % 2 == 1, |d| d.bg(even))
+                    .cursor_pointer()
+                    .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
+                    .when(is_sel, |d| d.bg(active).border_l_2().border_color(active_border))
+                    .when(!is_sel, |d| d.border_l_2().border_color(transparent_black()).hover(|s| s.bg(hover)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.focus.focus(window, cx);
+                            this.toggle_ext(ext, cx);
+                        }),
+                    )
                     .child(div().size(px(10.)).rounded_sm().flex_shrink_0().bg(color))
                     .child(div().flex_1().min_w(px(50.)).overflow_hidden().whitespace_nowrap().child(SharedString::from(e.name.to_string())))
                     .child(div().w(px(70.)).text_right().font_weight(FontWeight::MEDIUM).child(format::bytes(e.bytes)))

@@ -28,6 +28,7 @@ struct Key {
     w: u32,
     h: u32,
     dark: bool,
+    highlight: Option<u16>,
 }
 
 pub struct TreemapView {
@@ -37,6 +38,7 @@ pub struct TreemapView {
     pending: Option<Key>,
     stale: Rc<std::cell::RefCell<Vec<Arc<RenderImage>>>>,
     selection: Option<NodePath>,
+    highlight: Option<u16>,
     hover: Option<(NodePath, SharedString)>,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     scale: Rc<Cell<f32>>,
@@ -55,6 +57,7 @@ impl TreemapView {
             pending: None,
             stale: Default::default(),
             selection: None,
+            highlight: None,
             hover: None,
             bounds: Rc::new(Cell::new(Bounds::default())),
             scale: Rc::new(Cell::new(1.0)),
@@ -66,6 +69,7 @@ impl TreemapView {
     pub fn set_tree(&mut self, tree: Option<Arc<RwLock<Tree>>>, cx: &mut Context<Self>) {
         self.tree = tree;
         self.selection = None;
+        self.highlight = None;
         self.hover = None;
         if let Some(img) = self.image.take() {
             self.stale.borrow_mut().push(img);
@@ -78,6 +82,15 @@ impl TreemapView {
     pub fn set_selection(&mut self, selection: Option<NodePath>, cx: &mut Context<Self>) {
         if self.selection != selection {
             self.selection = selection;
+            cx.notify();
+        }
+    }
+
+    /// Highlight the leaves of one extension rank; `None` shows every leaf in
+    /// full colour.
+    pub fn set_highlight(&mut self, highlight: Option<u16>, cx: &mut Context<Self>) {
+        if self.highlight != highlight {
+            self.highlight = highlight;
             cx.notify();
         }
     }
@@ -108,7 +121,7 @@ impl TreemapView {
                 .background_executor()
                 .spawn(async move {
                     let t = tree.read();
-                    treemap::render(&t, key.w, key.h, background)
+                    treemap::render(&t, key.w, key.h, background, key.highlight)
                 })
                 .await;
             let Some(img) = RgbaImage::from_raw(key.w, key.h, buf) else {
@@ -189,6 +202,7 @@ impl Render for TreemapView {
         let selection = self.selection.clone();
         let pending = self.pending;
         let image_key = self.image_key;
+        let highlight = self.highlight;
         let has_tree = self.tree.is_some();
         let _ = window;
 
@@ -200,7 +214,7 @@ impl Render for TreemapView {
                 let w = (f32::from(bounds.size.width) * scale).round() as u32;
                 let h = (f32::from(bounds.size.height) * scale).round() as u32;
                 if has_tree && w >= 4 && h >= 4 {
-                    let key = Key { generation, w, h, dark };
+                    let key = Key { generation, w, h, dark, highlight };
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
                             entity.update(cx, |this, cx| this.request(key, cx)).ok();
