@@ -60,12 +60,19 @@ culprit? Rename, move, recycle or delete it right there.
   the treemap, where every selected cell is outlined). The status bar shows
   the count and total size; move / recycle / delete run on the whole
   selection after one confirmation.
-- **Light, dark and system themes.** The *System* option follows the Windows
-  light / dark setting. The theme, window position and size, divider
-  positions, sort order and the last scanned path are all remembered between
-  launches (see **Settings**, `Ctrl+,`).
+- **Light, dark and system themes, plus deep settings** (`Ctrl+,`). The
+  *System* option follows the Windows light / dark setting. Everything is
+  remembered between launches: window geometry, panel sizes, sort order, the
+  last scanned path, size units (binary / decimal), relative or absolute
+  dates, visible columns, percent base, treemap palettes (including a
+  colour-blind-safe one), flat shading, cell borders, list-only mode, excluded
+    paths, hidden/system skipping, junction following (opt-in), thread count,
+  startup mode, single-instance mode, interface scale, update channel and
+  frequency, per-action delete confirmations
+  and the default delete action.
 - **Explorer integration** (optional, from the installer): right-click any
-  folder or drive → *Analyze with FastDir*.
+  folder or drive → *Analyze with FastDir*. It can also be toggled per-user
+  under Settings → Integration (all-users installs stay installer-managed).
 
 ## Install
 
@@ -79,11 +86,14 @@ Download the latest release from the
 
 ### Updates
 
-Every time FastDir starts it checks GitHub Releases in the background. When a
+FastDir checks GitHub Releases in the background on its configured schedule
+(per launch, daily or weekly; stable or pre-release channel). When a
 newer version exists, a notification and a toolbar button offer **Update now**
 (downloads, verifies the SHA-256 and relaunches), **Release notes** and **Skip
 this version**. Use the toolbar's `…` menu to check manually or to turn the
-automatic check off. Settings live in `%APPDATA%\FastDir\config.toml`.
+automatic check off. All settings live in `%APPDATA%\FastDir\config.toml`,
+grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
+`[appearance]` sections (older config files migrate automatically).
 
 ## Usage
 

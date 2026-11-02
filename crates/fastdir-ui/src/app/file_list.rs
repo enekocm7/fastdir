@@ -183,8 +183,10 @@ impl FastDir {
         } else {
             self.sort = (key, key != SortKey::Name);
         }
-        self.settings.sort.column = self.sort.0;
-        self.settings.sort.descending = self.sort.1;
+        self.settings.list.sort.column = self.sort.0;
+        self.settings.list.sort.descending = self.sort.1;
+        // Legacy top-level mirror for files that predate `[list]`.
+        self.settings.sort = self.settings.list.sort;
         self.settings.save();
         self.rebuild_rows();
         if let Some(ix) = self.selected {
@@ -204,7 +206,6 @@ impl FastDir {
         };
         let tree = tree.read();
         let theme = cx.theme();
-        let total = tree.root().size.max(1);
         let selected = self.selected;
         let filtering = self.filter.is_active();
         let fg = theme.foreground;
@@ -224,6 +225,20 @@ impl FastDir {
             let Some(node) = tree.get(&row.path) else {
                 continue;
             };
+            let show = &self.settings.list;
+            let (show_items, show_files, show_folders, show_modified, show_disk) = (
+                show.show_items,
+                show.show_files,
+                show.show_folders,
+                show.show_modified,
+                show.show_disk,
+            );
+            let size_s = self.bytes(node.size);
+            let disk_s = self.bytes(node.disk_size);
+            let pct_s = self.percent_of(&tree, &row.path, node);
+            let date_s = self.date(node.modified());
+            // The subtree bar is always parent-relative (it shows the share
+            // of the folder above, like WinDirStat).
             let parent_size = if row.path.is_empty() {
                 node.size
             } else {
@@ -253,13 +268,14 @@ impl FastDir {
                         .is_some_and(|next| next.depth > row.depth));
             let depth = row.depth as f32;
             let bar_color = rgb(DEPTH_COLORS[row.depth as usize % DEPTH_COLORS.len()]);
+            let palette = palette_of(self.settings.treemap.palette);
             let icon = if node.is_special() {
-                let (r, g, b) = treemap::node_color(node);
+                let (r, g, b) = treemap::node_color_with(palette, node);
                 Icon::new(IconName::HardDrive)
                     .xsmall()
                     .text_color(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32))
             } else if !is_dir {
-                let (r, g, b) = treemap::ext_color(node.ext);
+                let (r, g, b) = treemap::ext_color_with(palette, node.ext);
                 Icon::new(IconName::File)
                     .xsmall()
                     .text_color(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32))
@@ -388,44 +404,51 @@ impl FastDir {
                             .child(div().h_full().w(relative(frac)).bg(bar_color)),
                     ),
                 )
-                .child(num(COL_PCT, format::percent(node.size, parent_size)))
-                .child(num(COL_SIZE, format::bytes(node.size)).font_weight(FontWeight::MEDIUM))
-                .child(num(COL_DISK, format::bytes(node.disk_size)))
-                .child(
-                    num(
-                        COL_ITEMS,
-                        if is_dir {
-                            format::count(node.items())
-                        } else {
-                            String::new()
-                        },
+                .child(num(COL_PCT, pct_s))
+                .child(num(COL_SIZE, size_s).font_weight(FontWeight::MEDIUM))
+                .when(show_disk, |d| d.child(num(COL_DISK, disk_s)))
+                .when(show_items, |d| {
+                    d.child(
+                        num(
+                            COL_ITEMS,
+                            if is_dir {
+                                format::count(node.items())
+                            } else {
+                                String::new()
+                            },
+                        )
+                        .text_color(muted),
                     )
-                    .text_color(muted),
-                )
-                .child(
-                    num(
-                        COL_FILES,
-                        if is_dir {
-                            format::count(node.files as u64)
-                        } else {
-                            String::new()
-                        },
+                })
+                .when(show_files, |d| {
+                    d.child(
+                        num(
+                            COL_FILES,
+                            if is_dir {
+                                format::count(node.files as u64)
+                            } else {
+                                String::new()
+                            },
+                        )
+                        .text_color(muted),
                     )
-                    .text_color(muted),
-                )
-                .child(
-                    num(
-                        COL_DIRS,
-                        if is_dir {
-                            format::count(node.dirs as u64)
-                        } else {
-                            String::new()
-                        },
+                })
+                .when(show_folders, |d| {
+                    d.child(
+                        num(
+                            COL_DIRS,
+                            if is_dir {
+                                format::count(node.dirs as u64)
+                            } else {
+                                String::new()
+                            },
+                        )
+                        .text_color(muted),
                     )
-                    .text_color(muted),
-                )
-                .child(num(COL_DATE, format::date(node.modified())).text_color(muted));
-            let _ = total;
+                })
+                .when(show_modified, |d| {
+                    d.child(num(COL_DATE, date_s).text_color(muted))
+                });
             out.push(el.into_any_element());
         }
         out
@@ -476,6 +499,14 @@ impl FastDir {
     pub(super) fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let (key, desc) = self.sort;
+        let show = &self.settings.list;
+        let (show_items, show_files, show_folders, show_modified, show_disk) = (
+            show.show_items,
+            show.show_files,
+            show.show_folders,
+            show.show_modified,
+            show.show_disk,
+        );
         let head = |id: &'static str,
                     label: &'static str,
                     k: SortKey,
@@ -530,46 +561,56 @@ impl FastDir {
                 true,
                 cx,
             ))
-            .child(head(
-                "h-disk",
-                "Size on disk",
-                SortKey::Disk,
-                Some(COL_DISK),
-                true,
-                cx,
-            ))
-            .child(head(
-                "h-items",
-                "Items",
-                SortKey::Items,
-                Some(COL_ITEMS),
-                true,
-                cx,
-            ))
-            .child(head(
-                "h-files",
-                "Files",
-                SortKey::Files,
-                Some(COL_FILES),
-                true,
-                cx,
-            ))
-            .child(head(
-                "h-dirs",
-                "Folders",
-                SortKey::Dirs,
-                Some(COL_DIRS),
-                true,
-                cx,
-            ))
-            .child(head(
-                "h-date",
-                "Last Change",
-                SortKey::Modified,
-                Some(COL_DATE),
-                true,
-                cx,
-            ))
+            .when(show_disk, |d| {
+                d.child(head(
+                    "h-disk",
+                    "Size on disk",
+                    SortKey::Disk,
+                    Some(COL_DISK),
+                    true,
+                    cx,
+                ))
+            })
+            .when(show_items, |d| {
+                d.child(head(
+                    "h-items",
+                    "Items",
+                    SortKey::Items,
+                    Some(COL_ITEMS),
+                    true,
+                    cx,
+                ))
+            })
+            .when(show_files, |d| {
+                d.child(head(
+                    "h-files",
+                    "Files",
+                    SortKey::Files,
+                    Some(COL_FILES),
+                    true,
+                    cx,
+                ))
+            })
+            .when(show_folders, |d| {
+                d.child(head(
+                    "h-dirs",
+                    "Folders",
+                    SortKey::Dirs,
+                    Some(COL_DIRS),
+                    true,
+                    cx,
+                ))
+            })
+            .when(show_modified, |d| {
+                d.child(head(
+                    "h-date",
+                    "Last Change",
+                    SortKey::Modified,
+                    Some(COL_DATE),
+                    true,
+                    cx,
+                ))
+            })
     }
 
     pub(super) fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -705,7 +746,7 @@ impl FastDir {
 
     /// Recompute the bounded "largest files" list from the current tree.
     pub(super) fn refresh_top_files(&mut self) {
-        let limit = self.settings.top_files_limit.clamp(1, 100_000);
+        let limit = self.settings.list.top_files_limit.clamp(1, 100_000);
         let mut files = self
             .tree
             .as_ref()
@@ -722,7 +763,7 @@ impl FastDir {
     }
 
     fn set_top_limit(&mut self, limit: usize, cx: &mut Context<Self>) {
-        self.settings.top_files_limit = limit;
+        self.settings.list.top_files_limit = limit;
         self.settings.save();
         self.refresh_top_files();
         cx.notify();
@@ -810,7 +851,7 @@ impl FastDir {
                 .when(active, |d| d.child(Icon::new(arrow).xsmall()))
                 .on_click(cx.listener(move |this, _, _, cx| this.set_top_sort(k, cx)))
         };
-        let limit = self.settings.top_files_limit.clamp(1, 100_000);
+        let limit = self.settings.list.top_files_limit.clamp(1, 100_000);
         let entity = cx.entity().downgrade();
         h_flex()
             .h(px(28.))
@@ -1051,9 +1092,13 @@ impl FastDir {
             let Some(e) = tree.exts.get(ext as usize) else {
                 continue;
             };
-            let (r, g, b) = treemap::ext_color(ext);
+            let (r, g, b) = treemap::ext_color_with(
+                palette_of(self.settings.treemap.palette),
+                ext,
+            );
             let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
             let is_sel = selected == Some(ext);
+            let bytes_s = self.bytes(e.bytes);
             out.push(
                 h_flex()
                     .id(("ext", ix))
@@ -1093,7 +1138,7 @@ impl FastDir {
                             .w(px(70.))
                             .text_right()
                             .font_weight(FontWeight::MEDIUM)
-                            .child(format::bytes(e.bytes)),
+                            .child(bytes_s),
                     )
                     .child(
                         div()

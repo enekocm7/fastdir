@@ -7,7 +7,7 @@
 //! Prints the live heap after the scan (the tree only; scan scratch space has
 //! been freed by then), the peak heap during the scan, and bytes per item.
 
-use fastdir_core::scanner::{Progress, scan};
+use fastdir_core::scanner::{Progress, ScanOptions, scan};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -58,7 +58,7 @@ fn main() {
     let progress = Arc::new(Progress::default());
     let before = LIVE.load(Ordering::Relaxed);
     PEAK.store(before, Ordering::Relaxed);
-    let result = scan(root.clone(), progress.clone());
+    let result = scan(root.clone(), progress.clone(), &ScanOptions::default());
     let live = LIVE.load(Ordering::Relaxed) - before;
     let peak = PEAK.load(Ordering::Relaxed) - before;
     let items = progress.files.load(Ordering::Relaxed) + progress.dirs.load(Ordering::Relaxed) + 1;

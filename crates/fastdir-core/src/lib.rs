@@ -9,5 +9,6 @@ pub mod elevate;
 pub mod filter;
 pub mod format;
 pub mod fsops;
+pub mod integration;
 pub mod model;
 pub mod scanner;

@@ -61,7 +61,9 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.confirm_delete(false, window, cx);
+        // Delete performs the configured default action.
+        let permanent = self.settings.ops.default_delete == DeleteAction::Permanent;
+        self.confirm_delete(permanent, window, cx);
     }
 
     pub(super) fn delete_item(
@@ -70,7 +72,9 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.confirm_delete(true, window, cx);
+        // Shift+Delete always does the opposite of the Delete key.
+        let permanent = self.settings.ops.default_delete == DeleteAction::Recycle;
+        self.confirm_delete(permanent, window, cx);
     }
 
     pub(super) fn confirm_delete(
@@ -96,6 +100,17 @@ impl FastDir {
             );
             return;
         }
+        // Per-action confirmations; skip the dialog when this action is set
+        // to apply immediately.
+        let needs_confirm = if permanent {
+            self.settings.ops.confirm_permanent
+        } else {
+            self.settings.ops.confirm_recycle
+        };
+        if !needs_confirm {
+            self.run_delete(targets, permanent, window, cx);
+            return;
+        }
         let what = if let [t] = targets.as_slice() {
             if t.is_dir {
                 let items = self
@@ -106,14 +121,14 @@ impl FastDir {
                 format!(
                     "the folder \"{}\" ({}, {} items)",
                     t.fs.display(),
-                    format::bytes(t.size),
+                    self.bytes(t.size),
                     format::count(items)
                 )
             } else {
                 format!(
                     "the file \"{}\" ({})",
                     t.fs.display(),
-                    format::bytes(t.size)
+                    self.bytes(t.size)
                 )
             }
         } else {
@@ -123,7 +138,7 @@ impl FastDir {
                 targets.len(),
                 folders,
                 targets.len() - folders,
-                format::bytes(targets.iter().map(|t| t.size).sum())
+                self.bytes(targets.iter().map(|t| t.size).sum())
             )
         };
         let description: SharedString = if permanent {
@@ -187,6 +202,7 @@ impl FastDir {
             false,
             cx,
         );
+        let options = self.scan_options();
         let job = cx.background_executor().spawn(async move {
             let (mut items, mut bytes) = (0, 0);
             let mut out = Vec::with_capacity(targets.len());
@@ -198,7 +214,7 @@ impl FastDir {
                 let gone = std::fs::symlink_metadata(&t.fs).is_err();
                 // Part of the folder may be gone: re-measure what is left.
                 let rest = (!gone && permanent && t.is_dir && !report.complete())
-                    .then(|| scanner::scan_subtree(&t.fs));
+                    .then(|| scanner::scan_subtree(&t.fs, &options));
                 out.push(DeleteOutcome {
                     path: t.fs,
                     gone,
@@ -532,10 +548,14 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.settings.ops.confirm_move {
+            self.run_move(srcs, dest_dir, window, cx);
+            return;
+        }
         let description: SharedString = format!(
             "Move {} selected items ({}) to \"{}\"?",
             srcs.len(),
-            format::bytes(srcs.iter().map(|t| t.size).sum()),
+            self.bytes(srcs.iter().map(|t| t.size).sum()),
             dest_dir.display()
         )
         .into();
@@ -583,6 +603,7 @@ impl FastDir {
             cx,
         );
         let dest = dest_dir.clone();
+        let options = self.scan_options();
         let job = cx.background_executor().spawn(async move {
             let (mut items, mut bytes) = (0, 0);
             let mut out = Vec::with_capacity(srcs.len());
@@ -592,12 +613,12 @@ impl FastDir {
                 }
                 let res = fsops::move_into_tracked(&src.fs, &dest, &progress).map(|moved| {
                     // Measure what arrived so the destination's size is right.
-                    let node = measure(&moved.dest);
+                    let node = measure(&moved.dest, &options);
                     // Whatever could not be removed from the source stays there.
                     let rest = (!moved.leftover.is_empty()
                         && src.is_dir
                         && std::fs::symlink_metadata(&src.fs).is_ok())
-                    .then(|| scanner::scan_subtree(&src.fs));
+                    .then(|| scanner::scan_subtree(&src.fs, &options));
                     MoveOutcome {
                         dest: moved.dest,
                         node,
@@ -649,6 +670,10 @@ impl FastDir {
                 if moved.is_empty() {
                     cx.notify();
                 } else {
+                    // Remember where things go, for next time.
+                    this.settings.ops.last_move_dest =
+                        Some(dest_dir.to_string_lossy().into_owned());
+                    this.settings.save();
                     this.tree_changed(select, cx);
                 }
                 if cancelled {
@@ -720,9 +745,10 @@ impl FastDir {
         self.busy = Some(format!("Refreshing {}…", fs.display()).into());
         cx.notify();
         let target = fs.clone();
+        let options = self.scan_options();
         let job = cx
             .background_executor()
-            .spawn(async move { scanner::scan_subtree(&target) });
+            .spawn(async move { scanner::scan_subtree(&target, &options) });
         cx.spawn_in(window, async move |this, cx| {
             let mut node = job.await;
             this.update_in(cx, |this, _, cx| {
@@ -777,10 +803,10 @@ struct MoveOutcome {
 }
 
 /// A detached node for a freshly moved file or folder.
-fn measure(path: &std::path::Path) -> Subtree {
+fn measure(path: &std::path::Path, options: &scanner::ScanOptions) -> Subtree {
     let meta = std::fs::symlink_metadata(path).ok();
     if meta.as_ref().is_some_and(|m| m.is_dir()) {
-        return scanner::scan_subtree(path);
+        return scanner::scan_subtree(path, options);
     }
     let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let modified = meta
