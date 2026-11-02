@@ -59,6 +59,7 @@ impl FastDir {
             return;
         }
         self.checking = true;
+        cx.notify();
         let job = cx
             .background_executor()
             .spawn(async move { updater::fetch_latest() });
@@ -67,6 +68,7 @@ impl FastDir {
             this.update_in(cx, |this, window, cx| {
                 this.checking = false;
                 this.on_check_result(result, manual, window, cx);
+                cx.notify();
             })
             .ok();
         })
@@ -358,7 +360,10 @@ impl FastDir {
 
     fn apply_update(&mut self, path: std::path::PathBuf, kind: InstallKind, window: &mut Window, cx: &mut Context<Self>) {
         match updater::apply(&path, kind) {
-            Ok(()) => cx.quit(),
+            Ok(()) => {
+                self.remember_window(window);
+                cx.quit()
+            }
             Err(e) => {
                 updater::discard_downloads();
                 window.push_notification(

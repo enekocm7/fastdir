@@ -183,6 +183,9 @@ impl FastDir {
         } else {
             self.sort = (key, key != SortKey::Name);
         }
+        self.settings.sort.column = self.sort.0;
+        self.settings.sort.descending = self.sort.1;
+        self.settings.save();
         self.rebuild_rows();
         if let Some(ix) = self.selected {
             self.list_scroll.scroll_to_item(ix, ScrollStrategy::Center);

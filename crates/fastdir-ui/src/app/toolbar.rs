@@ -6,6 +6,7 @@ impl FastDir {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let op_view = self.op.as_ref().map(|op| self.render_op(op, cx));
         let search = self.render_search(cx);
+        let scan_view = self.render_scan_progress(cx);
         let theme = cx.theme();
         let ready = matches!(self.phase, Phase::Ready);
         let scanning = matches!(self.phase, Phase::Scanning { .. });
@@ -140,6 +141,7 @@ impl FastDir {
             .child(search)
             .child(div().flex_1())
             .children(op_view)
+            .children(scan_view)
             .when_some(self.busy.clone(), |d, label| {
                 d.child(
                     h_flex()
@@ -203,17 +205,35 @@ impl FastDir {
                         }),
                 )
             })
+            .child(
+                tool("settings", IconName::Settings, "Settings (Ctrl+,)").on_click(
+                    cx.listener(|this, _, w, cx| this.open_settings(&OpenSettings, w, cx)),
+                ),
+            )
             .child(tool("more", IconName::Ellipsis, "More").dropdown_menu({
                 let auto = self.settings.auto_check_updates;
                 let show_free = self.settings.show_free_space;
                 let show_unknown = self.settings.show_unknown;
                 let treemap_disk = self.settings.treemap_disk_size;
+                let show_partial = self.settings.show_partial_results;
                 let entity = update_entity.clone();
                 move |menu, _, _| {
-                    let (e1, e2) = (entity.clone(), entity.clone());
+                    let (e0, e1, e2) = (entity.clone(), entity.clone(), entity.clone());
                     let (e3, e4) = (entity.clone(), entity.clone());
                     let e5 = entity.clone();
+                    let e6 = entity.clone();
                     menu.item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Settings…")
+                            .icon(IconName::Settings)
+                            .on_click(move |_, window, cx| {
+                                e0.update(cx, |this, cx| {
+                                    this.open_settings(&OpenSettings, window, cx)
+                                })
+                                .ok();
+                            }),
+                    )
+                    .separator()
+                    .item(
                         gpui_kit::component::menu::PopupMenuItem::new("Check for updates")
                             .icon(IconName::RefreshCw)
                             .on_click(move |_, window, cx| {
@@ -260,6 +280,16 @@ impl FastDir {
                                     .ok();
                             }),
                     )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(
+                            "Show partial results while scanning",
+                        )
+                        .checked(show_partial)
+                        .on_click(move |_, _, cx| {
+                            e6.update(cx, |this, cx| this.toggle_partial_results(cx))
+                                .ok();
+                        }),
+                    )
                     .separator()
                     .item(
                         gpui_kit::component::menu::PopupMenuItem::new(format!(
@@ -282,6 +312,54 @@ impl FastDir {
                 )
                 .on_click(cx.listener(|this, _, w, cx| this.toggle_theme(&ToggleTheme, w, cx))),
             )
+    }
+
+    /// Compact live-scan progress in the toolbar while the results are shown.
+    fn render_scan_progress(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let Phase::Scanning {
+            progress,
+            started,
+            expected,
+            ..
+        } = &self.phase
+        else {
+            return None;
+        };
+        let files = progress.files.load(Ordering::Relaxed);
+        let bytes = progress.bytes.load(Ordering::Relaxed);
+        let elapsed = started.elapsed();
+        let rate = files as f64 / elapsed.as_secs_f64().max(0.001);
+        let pct = expected.map(|e| (bytes as f64 / e as f64 * 100.0).min(99.0) as f32);
+        let cancelling = progress.cancelled();
+        let theme = cx.theme();
+        Some(
+            h_flex()
+                .gap_2()
+                .px_2()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .max_w(px(520.))
+                .overflow_hidden()
+                .child(Spinner::new().small())
+                .child(div().flex_shrink_0().child(if cancelling {
+                    "Stopping…"
+                } else {
+                    "Scanning"
+                }))
+                .child(
+                    div().w(px(120.)).flex_shrink_0().child(
+                        ProgressBar::new("toolbar-scan-progress")
+                            .when_some(pct, |p, v| p.value(v))
+                            .when(pct.is_none(), |p| p.loading(true)),
+                    ),
+                )
+                .child(div().flex_shrink_0().whitespace_nowrap().child(format!(
+                    "{} files · {}/s",
+                    format::count(files),
+                    format::count(rate as u64)
+                )))
+                .into_any_element(),
+        )
     }
 
     /// Progress of a running delete / move: label, bar, counts and Cancel.

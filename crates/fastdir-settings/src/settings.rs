@@ -1,9 +1,89 @@
-//! Small persisted config (`%APPDATA%\FastDir\settings.json`).
+//! Small persisted config (`%APPDATA%\FastDir\config.toml`).
+//!
+//! Everything the app remembers between launches lives here: updater state,
+//! the theme, the window geometry, the panel split, the sort order and the
+//! last scanned path. Settings written by older versions to `settings.json`
+//! are migrated on first load.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Which theme the user picked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    /// Follow the Windows light / dark setting.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// The column the directory list is sorted by.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortColumn {
+    Name,
+    #[default]
+    Size,
+    Disk,
+    Items,
+    Files,
+    Dirs,
+    Modified,
+}
+
+/// Sort column and direction remembered across launches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SortSettings {
+    pub column: SortColumn,
+    pub descending: bool,
+}
+
+impl Default for SortSettings {
+    fn default() -> Self {
+        Self {
+            column: SortColumn::Size,
+            descending: true,
+        }
+    }
+}
+
+/// Window position, size and maximized state.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowState {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub maximized: bool,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            x: 0.,
+            y: 0.,
+            width: 1440.,
+            height: 920.,
+            maximized: false,
+        }
+    }
+}
+
+/// Sizes of the resizable panels, in logical pixels.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanelSizes {
+    /// Top section vs. treemap (vertical split).
+    pub main: Vec<f32>,
+    /// Directory list vs. extension list (horizontal split).
+    pub top: Vec<f32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Check GitHub for a new version every time FastDir starts.
@@ -21,6 +101,18 @@ pub struct Settings {
     /// How many files the "Top files" view lists.
     #[serde(default = "default_top_files_limit")]
     pub top_files_limit: usize,
+    /// Show finished top-level folders and a treemap preview while scanning.
+    pub show_partial_results: bool,
+    /// Light, dark, or follow Windows.
+    pub theme: ThemePreference,
+    /// Column and direction of the directory list.
+    pub sort: SortSettings,
+    /// Last window geometry, restored on the next launch.
+    pub window: Option<WindowState>,
+    /// Last divider positions.
+    pub panels: PanelSizes,
+    /// Root of the last scan, remembered for convenience.
+    pub last_scan_path: Option<String>,
 }
 
 fn default_top_files_limit() -> usize {
@@ -37,33 +129,57 @@ impl Default for Settings {
             show_unknown: false,
             treemap_disk_size: false,
             top_files_limit: default_top_files_limit(),
+            show_partial_results: true,
+            theme: ThemePreference::System,
+            sort: SortSettings::default(),
+            window: None,
+            panels: PanelSizes::default(),
+            last_scan_path: None,
         }
     }
 }
 
-fn path() -> Option<PathBuf> {
+/// The config file currently in use.
+pub fn config_path() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA")?;
+    Some(PathBuf::from(base).join("FastDir").join("config.toml"))
+}
+
+/// Where versions before the TOML config stored their updater settings.
+fn legacy_path() -> Option<PathBuf> {
     let base = std::env::var_os("APPDATA")?;
     Some(PathBuf::from(base).join("FastDir").join("settings.json"))
 }
 
 impl Settings {
-    /// Missing or unreadable files give the defaults.
+    /// Missing or unreadable files give the defaults. A JSON `settings.json`
+    /// from an older version is migrated to `config.toml` on first load.
     pub fn load() -> Self {
-        path()
+        if let Some(settings) = config_path()
             .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .and_then(|s| toml::from_str::<Self>(&s).ok())
+        {
+            return settings;
+        }
+        if let Some(settings) = legacy_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<Self>(&s).ok())
+        {
+            settings.save();
+            return settings;
+        }
+        Self::default()
     }
 
     /// Best effort: failing to persist a setting must never break the app.
     pub fn save(&self) {
-        let Some(path) = path() else { return };
+        let Some(path) = config_path() else { return };
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
+        if let Ok(text) = toml::to_string_pretty(self) {
+            let tmp = path.with_extension("toml.tmp");
+            if std::fs::write(&tmp, text).is_ok() {
                 let _ = std::fs::rename(&tmp, &path);
             }
         }
@@ -76,13 +192,35 @@ mod tests {
 
     #[test]
     fn defaults_when_fields_missing() {
-        let s: Settings = serde_json::from_str("{}").unwrap();
+        let s: Settings = toml::from_str("").unwrap();
         assert!(s.auto_check_updates);
         assert!(s.skipped_version.is_none());
         assert!(!s.show_free_space);
         assert!(!s.show_unknown);
         assert!(!s.treemap_disk_size);
         assert_eq!(s.top_files_limit, 1000);
+        assert!(s.show_partial_results);
+        assert_eq!(s.theme, ThemePreference::System);
+        assert_eq!(s.sort, SortSettings::default());
+        assert!(s.window.is_none());
+        assert!(s.panels.main.is_empty());
+        assert!(s.last_scan_path.is_none());
+    }
+
+    #[test]
+    fn nested_defaults_when_only_some_fields_are_given() {
+        let s: Settings = toml::from_str(
+            r#"
+            theme = "dark"
+
+            [sort]
+            column = "name"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(s.theme, ThemePreference::Dark);
+        assert_eq!(s.sort.column, SortColumn::Name);
+        assert!(s.sort.descending, "the missing direction keeps its default");
     }
 
     #[test]
@@ -95,13 +233,46 @@ mod tests {
             show_unknown: true,
             treemap_disk_size: true,
             top_files_limit: 250,
+            show_partial_results: false,
+            theme: ThemePreference::Light,
+            sort: SortSettings {
+                column: SortColumn::Modified,
+                descending: false,
+            },
+            window: Some(WindowState {
+                x: 10.5,
+                y: 20.5,
+                width: 1280.,
+                height: 720.,
+                maximized: true,
+            }),
+            panels: PanelSizes {
+                main: vec![420., 500.],
+                top: vec![700., 330.],
+            },
+            last_scan_path: Some(r"C:\Users".into()),
         };
-        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
-        assert!(!back.auto_check_updates);
-        assert_eq!(back.skipped_version.as_deref(), Some("0.2.0"));
-        assert!(back.show_free_space);
-        assert!(back.show_unknown);
-        assert!(back.treemap_disk_size);
-        assert_eq!(back.top_files_limit, 250);
+        let text = toml::to_string_pretty(&s).unwrap();
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn legacy_json_still_deserializes() {
+        let json = r#"{
+            "auto_check_updates": false,
+            "skipped_version": "0.2.0",
+            "last_run_version": "0.1.0",
+            "show_free_space": true,
+            "show_unknown": true,
+            "treemap_disk_size": true
+        }"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(!s.auto_check_updates);
+        assert_eq!(s.skipped_version.as_deref(), Some("0.2.0"));
+        assert!(s.show_free_space);
+        assert_eq!(s.theme, ThemePreference::System);
+        assert_eq!(s.sort, SortSettings::default());
+        assert_eq!(s.top_files_limit, 1000);
     }
 }

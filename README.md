@@ -34,6 +34,10 @@ culprit? Rename, move, recycle or delete it right there.
   how full it is. Click one to scan it, or pick any folder.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a
   real percentage when you scan a whole drive.
+- **Partial results while scanning** – each top-level folder appears in the
+  tree as soon as it finishes, and the treemap preview refreshes about once a
+  second, so you can start browsing before the scan ends. Turn it off under
+  `…` → *Show partial results while scanning*.
 - **WinDirStat-style layout**
   - **Directory tree** with subtree-percentage bars, %, size, items, files,
     folders and last change. Sort by any column.
@@ -56,7 +60,10 @@ culprit? Rename, move, recycle or delete it right there.
   the treemap, where every selected cell is outlined). The status bar shows
   the count and total size; move / recycle / delete run on the whole
   selection after one confirmation.
-- **Light and dark themes.**
+- **Light, dark and system themes.** The *System* option follows the Windows
+  light / dark setting. The theme, window position and size, divider
+  positions, sort order and the last scanned path are all remembered between
+  launches (see **Settings**, `Ctrl+,`).
 - **Explorer integration** (optional, from the installer): right-click any
   folder or drive → *Analyze with FastDir*.
 
@@ -76,7 +83,7 @@ Every time FastDir starts it checks GitHub Releases in the background. When a
 newer version exists, a notification and a toolbar button offer **Update now**
 (downloads, verifies the SHA-256 and relaunches), **Release notes** and **Skip
 this version**. Use the toolbar's `…` menu to check manually or to turn the
-automatic check off. Settings live in `%APPDATA%\FastDir\settings.json`.
+automatic check off. Settings live in `%APPDATA%\FastDir\config.toml`.
 
 ## Usage
 
@@ -111,6 +118,7 @@ fastdir.exe "C:\Users"   scan a folder right away
 | Ctrl+Shift+F | Minimum size / extension / date filters |
 | Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |
+| Ctrl+, | Open settings |
 
 ## Building from source
 
@@ -136,7 +144,7 @@ logic lives in focused sub-crates so it can be built and tested without GPUI:
 | `crates/fastdir-core` | Tree model, parallel scanner, drives, file-system ops, formatting |
 | `crates/fastdir-treemap` | Squarified cushion layout, hit-testing and CPU rendering |
 | `crates/fastdir-updater` | Release check, verified download and self-update |
-| `crates/fastdir-settings` | Persisted settings |
+| `crates/fastdir-settings` | Persisted settings (`config.toml`) |
 | `crates/fastdir-ui` | GPUI window, list/treemap panels, dialogs and menus |
 
 Dependency direction is `ui -> treemap -> core`, `ui -> updater` and

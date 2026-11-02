@@ -8,7 +8,7 @@
 //! batch of entries in one kernel call — no per-file `stat`.
 
 use crate::model::{Arena, DirBuilder, Node, Subtree, Tree};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -36,6 +36,12 @@ impl Progress {
 
 pub struct ScanResult {
     pub tree: Tree,
+    pub elapsed: std::time::Duration,
+    pub cancelled: bool,
+}
+
+/// Result of a scan that wrote into a caller-owned live tree.
+pub struct LiveScanResult {
     pub elapsed: std::time::Duration,
     pub cancelled: bool,
 }
@@ -101,6 +107,58 @@ pub fn scan(root: PathBuf, progress: Arc<Progress>) -> ScanResult {
     }
 }
 
+/// Scan `root` into `live`, which the caller can read while the scan runs.
+///
+/// Each finished top-level directory is moved into `live` as soon as its
+/// subtree is complete, so the UI can show and browse it before the scan
+/// ends. The root's own files are inserted up front. The final tree is the
+/// same object `live` holds: nothing is built twice.
+pub fn scan_live(
+    root: PathBuf,
+    progress: Arc<Progress>,
+    live: Arc<RwLock<Tree>>,
+) -> LiveScanResult {
+    let start = Instant::now();
+    let name = root.to_string_lossy();
+    pool().install(|| {
+        // One tracker across all top-level folders, so hard links are still
+        // counted only once when their two names live in different folders.
+        let links = LinkTracker::default();
+        let Listing { node, subdirs } = if progress.cancelled() {
+            Listing {
+                node: DirBuilder::new(0),
+                subdirs: Vec::new(),
+            }
+        } else {
+            list_one(&root, 0, &progress, &links)
+        };
+        let mut arena = Arena::default();
+        let root_node = node.commit(&mut arena);
+        let mut sub = Subtree::new(arena, &name, root_node);
+        sub.root_mut().set_expanded(true);
+        *live.write() = Tree::new(sub, root.clone());
+
+        subdirs.into_par_iter().for_each(|(child_name, modified)| {
+            let child_path = root.join(&*child_name);
+            let arena = Mutex::new(Arena::default());
+            let child = scan_dir(&child_path, modified, &progress, &links, &arena);
+            let sub = Subtree::new(arena.into_inner(), &child_name, child);
+            live.write().adopt(&[], sub);
+        });
+
+        // Extension ranks were assigned as files arrived; rank them properly
+        // now that the totals are final. This also bumps the generation so the
+        // UI redraws the last partial image with the final colours.
+        let mut tree = live.write();
+        tree.rebuild_extensions();
+        tree.generation = tree.generation.wrapping_add(1);
+    });
+    LiveScanResult {
+        elapsed: start.elapsed(),
+        cancelled: progress.cancelled(),
+    }
+}
+
 /// Scan a single directory into a detached subtree (used after a move so the
 /// destination reflects reality).
 pub fn scan_subtree(path: &Path) -> Subtree {
@@ -156,20 +214,16 @@ pub fn allocated_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Scan one directory (and, in parallel, everything below it). Each
-/// directory's children are stored in `arena` as soon as they are final.
-/// Returns the directory's node; its parent supplies the name.
-fn scan_dir(
-    path: &Path,
-    modified: i64,
-    progress: &Progress,
-    links: &LinkTracker,
-    arena: &Mutex<Arena>,
-) -> Node {
+/// Entries listed for one directory, before its sub-directories are scanned.
+struct Listing {
+    node: DirBuilder,
+    subdirs: Vec<(Box<str>, i64)>,
+}
+
+/// List one directory's entries into a [`DirBuilder`] and collect its
+/// sub-directories for the caller to fan out.
+fn list_one(path: &Path, modified: i64, progress: &Progress, links: &LinkTracker) -> Listing {
     let mut node = DirBuilder::new(modified);
-    if progress.cancelled() {
-        return node.commit(&mut arena.lock());
-    }
     if let Some(mut cur) = progress.current.try_lock() {
         cur.clear();
         cur.push_str(&path.to_string_lossy());
@@ -212,6 +266,23 @@ fn scan_dir(
     progress
         .dirs
         .fetch_add(subdirs.len() as u64, Ordering::Relaxed);
+    Listing { node, subdirs }
+}
+
+/// Scan one directory (and, in parallel, everything below it). Each
+/// directory's children are stored in `arena` as soon as they are final.
+/// Returns the directory's node; its parent supplies the name.
+fn scan_dir(
+    path: &Path,
+    modified: i64,
+    progress: &Progress,
+    links: &LinkTracker,
+    arena: &Mutex<Arena>,
+) -> Node {
+    if progress.cancelled() {
+        return DirBuilder::new(modified).commit(&mut arena.lock());
+    }
+    let Listing { mut node, subdirs } = list_one(path, modified, progress, links);
 
     if !subdirs.is_empty() {
         let children: Vec<(Box<str>, Node)> = subdirs
@@ -718,6 +789,64 @@ mod tests {
         assert_eq!(node.files, 1);
         assert_eq!(node.size, 4);
         assert_eq!(sub.name(&sub.children(node)[0]), "one.txt");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_live_publishes_the_whole_tree() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("root.txt"), b"12345").unwrap();
+        std::fs::create_dir(dir.join("one")).unwrap();
+        std::fs::write(dir.join("one/a.bin"), vec![0u8; 7]).unwrap();
+        std::fs::create_dir(dir.join("two")).unwrap();
+        std::fs::write(dir.join("two/b.bin"), vec![0u8; 11]).unwrap();
+
+        let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
+        let result = scan_live(dir.clone(), Arc::new(Progress::default()), live.clone());
+        assert!(!result.cancelled);
+        let tree = live.read();
+        assert_eq!(tree.root().files, 3);
+        assert_eq!(tree.root().dirs, 2);
+        assert_eq!(tree.root().size, 23);
+        assert!(tree.root().expanded());
+        assert!(tree.find(&dir.join("one/a.bin")).is_some());
+        assert!(tree.find(&dir.join("two/b.bin")).is_some());
+        assert!(tree.find(&dir.join("root.txt")).is_some());
+        assert_eq!(&*tree.exts[0].name, ".bin");
+        assert_eq!((tree.exts[0].bytes, tree.exts[0].files), (18, 2));
+        assert_eq!(&*tree.exts[1].name, ".txt");
+        assert!(tree.generation >= 2);
+        drop(tree);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_live_counts_cross_folder_hard_links_once() {
+        let dir = temp_dir();
+        std::fs::create_dir(dir.join("one")).unwrap();
+        std::fs::create_dir(dir.join("two")).unwrap();
+        let original = dir.join("one/original.bin");
+        std::fs::write(&original, vec![0u8; 4096]).unwrap();
+        if std::fs::hard_link(&original, dir.join("two/link.bin")).is_err() {
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+
+        let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
+        scan_live(dir.clone(), Arc::new(Progress::default()), live.clone());
+        let tree = live.read();
+        assert_eq!(tree.root().files, 2);
+        assert_eq!(tree.root().size, 4096);
+        let links = tree
+            .children(tree.root())
+            .iter()
+            .flat_map(|dir| tree.children(dir))
+            .filter(|n| n.hard_link())
+            .count();
+        assert_eq!(links, 1);
+        drop(tree);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

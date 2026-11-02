@@ -7,12 +7,32 @@ impl FastDir {
         let theme = cx.theme();
         let left: SharedString = match &self.phase {
             Phase::Home => format!("{} drives detected", self.drives.len()).into(),
-            Phase::Scanning { progress, .. } => format!(
-                "Scanning… {} files, {}",
-                format::count(progress.files.load(Ordering::Relaxed)),
-                format::bytes(progress.bytes.load(Ordering::Relaxed))
-            )
-            .into(),
+            Phase::Scanning {
+                progress,
+                started,
+                expected,
+                ..
+            } => {
+                let elapsed = started.elapsed();
+                let files = progress.files.load(Ordering::Relaxed);
+                let rate = files as f64 / elapsed.as_secs_f64().max(0.001);
+                let bytes = progress.bytes.load(Ordering::Relaxed);
+                let pct = expected.map(|e| (bytes as f64 / e as f64 * 100.0).min(99.0));
+                match pct {
+                    Some(pct) => format!(
+                        "Scanning… {:.0}% · {}/s · {}",
+                        pct,
+                        format::count(rate as u64),
+                        format::duration(elapsed)
+                    ),
+                    None => format!(
+                        "Scanning… {}/s · {}",
+                        format::count(rate as u64),
+                        format::duration(elapsed)
+                    ),
+                }
+                .into()
+            }
             Phase::Ready if self.is_multi() => {
                 // Folders inside a selected folder are not counted twice.
                 let size: u64 = self.targets().iter().map(|t| t.size).sum();
@@ -37,6 +57,7 @@ impl FastDir {
                 .into(),
         };
         let right: SharedString = match (&self.phase, &self.tree) {
+            (Phase::Scanning { progress, .. }, _) => progress.current.lock().clone().into(),
             (Phase::Ready, Some(t)) => {
                 let t = t.read();
                 let (elapsed, cancelled) = self.last_scan.unwrap_or_default();
@@ -115,6 +136,14 @@ impl FastDir {
                     .text_ellipsis()
                     .child(left),
             )
-            .child(div().flex_shrink_0().child(right))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .max_w(relative(0.6))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(right),
+            )
     }
 }
