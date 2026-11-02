@@ -18,10 +18,18 @@ culprit? Rename, move, recycle or delete it right there.
 
 ## Features
 
-- **Fast, multi-threaded scanning** – a work-stealing thread pool lists
+- **Fast, multi-threaded scanning** - a work-stealing thread pool lists
   directories in parallel. On Windows each listing is a batched
-  `FindFirstFileExW` call (`FIND_FIRST_EX_LARGE_FETCH`), so there's no
-  per-file `stat`. ~2.7 million files / 500 GB in about 17 s on a warm cache.
+  `GetFileInformationByHandleEx` call (`FileIdBothDirectoryInfo`) that returns
+  names, sizes, timestamps and file IDs together, so there's no per-file
+  `stat`. ~2.7 million files / 500 GB in about 17 s on a warm cache.
+- **Size on disk** - every row shows the allocated size next to the logical
+  size, so compressed, sparse and tiny cluster-slack files are counted the way
+  the volume sees them. The treemap can use either metric (`. menu` →
+  *Treemap: size on disk*).
+- **Hard links counted once** - files sharing a file ID (for example under
+  `C:\Windows\WinSxS`) are counted the first time and marked as `hard link`
+  afterwards, so totals are not inflated.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a

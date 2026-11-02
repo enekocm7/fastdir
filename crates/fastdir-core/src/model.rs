@@ -27,8 +27,15 @@ pub const UNKNOWN_NAME: &str = "<Unknown>";
 #[derive(Debug)]
 pub struct Node {
     pub name: Box<str>,
-    /// Logical size in bytes (sum of descendants for directories).
+    /// Logical size in bytes (sum of counted descendants for directories).
+    ///
+    /// Hard-link duplicates are counted once: later links have `size == 0`
+    /// and [`Node::hard_link`] set.
     pub size: u64,
+    /// Allocated size in bytes, i.e. what the file actually occupies on disk
+    /// (sum of counted descendants for directories). This accounts for
+    /// compression, sparse files and cluster slack.
+    pub disk_size: u64,
     /// Last write time, seconds since the Unix epoch (max of descendants for dirs).
     pub modified: i64,
     /// Number of files below (1 for a file).
@@ -42,14 +49,24 @@ pub struct Node {
     pub expanded: bool,
     /// The directory could not be read (access denied, etc.).
     pub error: bool,
+    /// This file is another hard link to a file already counted elsewhere in
+    /// the scan. Its bytes are deliberately left out of aggregates.
+    pub hard_link: bool,
     pub children: Vec<Node>,
 }
 
 impl Node {
+    /// A file whose on-disk size is unknown; assume it matches the logical size.
     pub fn file(name: Box<str>, size: u64, modified: i64) -> Self {
+        Self::file_on_disk(name, size, size, modified)
+    }
+
+    /// A file with a known logical and allocated (on-disk) size.
+    pub fn file_on_disk(name: Box<str>, size: u64, disk_size: u64, modified: i64) -> Self {
         Self {
             name,
             size,
+            disk_size,
             modified,
             files: 1,
             dirs: 0,
@@ -57,6 +74,26 @@ impl Node {
             kind: NodeKind::File,
             expanded: false,
             error: false,
+            hard_link: false,
+            children: Vec::new(),
+        }
+    }
+
+    /// A later hard link to a file that was already counted. It still counts
+    /// as a file, but adds no bytes to any total.
+    pub fn hard_link(name: Box<str>, modified: i64) -> Self {
+        Self {
+            name,
+            size: 0,
+            disk_size: 0,
+            modified,
+            files: 1,
+            dirs: 0,
+            ext: NO_EXT,
+            kind: NodeKind::File,
+            expanded: false,
+            error: false,
+            hard_link: true,
             children: Vec::new(),
         }
     }
@@ -65,6 +102,7 @@ impl Node {
         Self {
             name,
             size: 0,
+            disk_size: 0,
             modified,
             files: 0,
             dirs: 0,
@@ -72,6 +110,7 @@ impl Node {
             kind: NodeKind::Dir,
             expanded: false,
             error: false,
+            hard_link: false,
             children: Vec::new(),
         }
     }
@@ -82,6 +121,7 @@ impl Node {
         Self {
             name: FREE_SPACE_NAME.into(),
             size,
+            disk_size: size,
             modified: 0,
             files: 0,
             dirs: 0,
@@ -89,6 +129,7 @@ impl Node {
             kind: NodeKind::FreeSpace,
             expanded: false,
             error: false,
+            hard_link: false,
             children: Vec::new(),
         }
     }
@@ -98,6 +139,7 @@ impl Node {
         Self {
             name: UNKNOWN_NAME.into(),
             size,
+            disk_size: size,
             modified: 0,
             files: 0,
             dirs: 0,
@@ -105,6 +147,7 @@ impl Node {
             kind: NodeKind::Unknown,
             expanded: false,
             error: false,
+            hard_link: false,
             children: Vec::new(),
         }
     }
@@ -135,16 +178,19 @@ impl Node {
         self.children
             .sort_unstable_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
         let mut size = 0u64;
+        let mut disk_size = 0u64;
         let mut files = 0u32;
         let mut dirs = 0u32;
         let mut modified = self.modified;
         for c in &self.children {
             size += c.size;
+            disk_size += c.disk_size;
             files = files.saturating_add(c.files);
             dirs = dirs.saturating_add(c.dirs + c.is_dir() as u32);
             modified = modified.max(c.modified);
         }
         self.size = size;
+        self.disk_size = disk_size;
         self.files = files;
         self.dirs = dirs;
         self.modified = modified;
@@ -236,7 +282,10 @@ impl Tree {
                     a
                 })
         }
-        fn merge(mut a: HashMap<String, (u64, u64)>, b: HashMap<String, (u64, u64)>) -> HashMap<String, (u64, u64)> {
+        fn merge(
+            mut a: HashMap<String, (u64, u64)>,
+            b: HashMap<String, (u64, u64)>,
+        ) -> HashMap<String, (u64, u64)> {
             merge_into(&mut a, b);
             a
         }
@@ -549,6 +598,18 @@ impl Tree {
         self.root.size.saturating_sub(pseudo)
     }
 
+    /// Real scanned bytes as allocated on disk (excluding pseudo-items).
+    pub fn scanned_disk_bytes(&self) -> u64 {
+        let pseudo: u64 = self
+            .root
+            .children
+            .iter()
+            .filter(|c| c.is_special())
+            .map(|c| c.disk_size)
+            .sum();
+        self.root.disk_size.saturating_sub(pseudo)
+    }
+
     /// Used bytes on the volume (scanned + unknown), or `root.size` when this
     /// is not a drive scan.
     pub fn used_bytes(&self) -> u64 {
@@ -681,6 +742,37 @@ mod tests {
         let tree = sample_tree();
         let sub = tree.find(Path::new("/root/sub")).unwrap();
         assert_eq!(tree.get(&sub).unwrap().dominant_ext(), 1); // .bin
+    }
+
+    #[test]
+    fn disk_size_aggregates_separately_from_logical_size() {
+        let mut root = Node::dir("root".into(), 0);
+        let mut sub = Node::dir("sub".into(), 0);
+        sub.children
+            .push(Node::file_on_disk("small.txt".into(), 10, 4096, 1));
+        sub.children
+            .push(Node::file_on_disk("sparse.bin".into(), 100_000, 8192, 2));
+        sub.finalize();
+        root.children.push(sub);
+        root.finalize();
+        let tree = Tree::new(root, PathBuf::from("/root"));
+        assert_eq!(tree.root.size, 100_010);
+        assert_eq!(tree.root.disk_size, 12_288);
+        assert_eq!(tree.scanned_disk_bytes(), 12_288);
+    }
+
+    #[test]
+    fn hard_link_duplicates_count_as_files_but_not_bytes() {
+        let mut root = Node::dir("root".into(), 0);
+        root.children
+            .push(Node::file_on_disk("first.bin".into(), 100, 4096, 1));
+        root.children.push(Node::hard_link("second.bin".into(), 1));
+        root.finalize();
+        assert_eq!(root.size, 100);
+        assert_eq!(root.disk_size, 4096);
+        assert_eq!(root.files, 2);
+        assert_eq!(root.children[1].size, 0);
+        assert!(root.children[1].hard_link);
     }
 
     #[test]

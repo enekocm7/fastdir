@@ -19,6 +19,7 @@ impl FastDir {
                     .reverse()
                     .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
                 SortKey::Size => a.size.cmp(&b.size),
+                SortKey::Disk => a.disk_size.cmp(&b.disk_size),
                 SortKey::Items => a.items().cmp(&b.items()),
                 SortKey::Files => a.files.cmp(&b.files),
                 SortKey::Dirs => a.dirs.cmp(&b.dirs),
@@ -267,7 +268,10 @@ impl FastDir {
                                 .text_color(name_color)
                                 .when(is_dir, |d| d.font_weight(FontWeight::MEDIUM))
                                 .child(SharedString::from(node.name.to_string())),
-                        ),
+                        )
+                        .when(node.hard_link, |d| {
+                            d.child(div().flex_shrink_0().text_color(muted).child("hard link"))
+                        }),
                 )
                 .child(
                     div().w(px(COL_BAR)).flex_shrink_0().px_2().child(
@@ -282,6 +286,7 @@ impl FastDir {
                 )
                 .child(num(COL_PCT, format::percent(node.size, parent_size)))
                 .child(num(COL_SIZE, format::bytes(node.size)).font_weight(FontWeight::MEDIUM))
+                .child(num(COL_DISK, format::bytes(node.disk_size)))
                 .child(
                     num(
                         COL_ITEMS,
@@ -418,6 +423,14 @@ impl FastDir {
                 "Size",
                 SortKey::Size,
                 Some(COL_SIZE),
+                true,
+                cx,
+            ))
+            .child(head(
+                "h-disk",
+                "Size on disk",
+                SortKey::Disk,
+                Some(COL_DISK),
                 true,
                 cx,
             ))

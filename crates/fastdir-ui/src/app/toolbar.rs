@@ -204,10 +204,12 @@ impl FastDir {
                 let auto = self.settings.auto_check_updates;
                 let show_free = self.settings.show_free_space;
                 let show_unknown = self.settings.show_unknown;
+                let treemap_disk = self.settings.treemap_disk_size;
                 let entity = update_entity.clone();
                 move |menu, _, _| {
                     let (e1, e2) = (entity.clone(), entity.clone());
                     let (e3, e4) = (entity.clone(), entity.clone());
+                    let e5 = entity.clone();
                     menu.item(
                         gpui_kit::component::menu::PopupMenuItem::new("Check for updates")
                             .icon(IconName::RefreshCw)
@@ -245,6 +247,14 @@ impl FastDir {
                                     this.toggle_unknown(&ToggleUnknown, window, cx)
                                 })
                                 .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Treemap: size on disk")
+                            .checked(treemap_disk)
+                            .on_click(move |_, window, cx| {
+                                e5.update(cx, |this, cx| this.toggle_treemap_disk_size(window, cx))
+                                    .ok();
                             }),
                     )
                     .separator()
