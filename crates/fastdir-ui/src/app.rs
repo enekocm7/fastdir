@@ -3,9 +3,10 @@
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::drives::{self, Drive};
+use fastdir_core::filter::Filter;
 use fastdir_core::format;
 use fastdir_core::fsops;
-use fastdir_core::model::{NO_EXT, Node, NodePath, Subtree, Tree};
+use fastdir_core::model::{FileEntry, NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, Progress, ScanResult};
 use fastdir_settings::Settings;
 use fastdir_treemap as treemap;
@@ -68,17 +69,22 @@ actions!(
         ZoomOut,
         ToggleFreeSpace,
         ToggleUnknown,
+        FocusSearch,
+        OpenFilters,
     ]
 );
 
 mod context_menu;
 mod dialogs;
 mod file_list;
+mod filter;
 mod scan_state;
 mod selection;
 mod status;
 mod toolbar;
 mod update_ui;
+
+use self::filter::FilterForm;
 
 const CONTEXT: &str = "FastDir";
 
@@ -113,6 +119,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
         KeyBinding::new("f6", ToggleFreeSpace, Some(CONTEXT)),
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
+        KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
     ]);
 }
 
@@ -140,6 +148,13 @@ enum SortKey {
     Files,
     Dirs,
     Modified,
+}
+
+/// The two lists in the top-left panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ListTab {
+    Tree,
+    TopFiles,
 }
 
 /// What a click does to the selection.
@@ -193,6 +208,9 @@ struct FileOp {
 struct Row {
     path: NodePath,
     depth: u16,
+    /// The row itself passes the active filter (ancestors are shown for
+    /// context and have this cleared).
+    matched: bool,
 }
 
 enum Phase {
@@ -215,6 +233,20 @@ pub struct FastDir {
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
     rows: Vec<Row>,
+    /// The tree view or the flat "largest files" list.
+    tab: ListTab,
+    /// Search box contents drive `filter` live.
+    search: Entity<InputState>,
+    filter: Filter,
+    filter_form: FilterForm,
+    /// The N largest files in the whole scan, sorted by `top_sort`.
+    top_files: Vec<FileEntry>,
+    /// The last top-files computation is stale and should run again when the
+    /// tab is shown.
+    top_stale: bool,
+    top_selected: Option<usize>,
+    top_sort: (SortKey, bool),
+    top_scroll: UniformListScrollHandle,
     /// Extension ids with files left, in rank order.
     ext_rows: Vec<u16>,
     /// The cursor row. With a multi-selection it is the item clicked last.
@@ -268,13 +300,31 @@ impl FastDir {
                     } else {
                         ClickMode::Plain
                     };
+                    this.tab = ListTab::Tree;
                     this.reveal_in_list(path.clone(), mode, cx);
                     this.focus.focus(window, cx);
                 }
                 TreemapEvent::Activate(path) => {
+                    this.tab = ListTab::Tree;
                     this.reveal_in_list(path.clone(), ClickMode::Plain, cx);
                     this.open_selected(&OpenItem, window, cx);
                 }
+            },
+        );
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search name or *.glob (Ctrl+F)"));
+        let search_sub = cx.subscribe_in(
+            &search,
+            window,
+            |this, state, ev: &InputEvent, window, cx| match ev {
+                InputEvent::Change => {
+                    let query = state.read(cx).value().to_string();
+                    this.set_filter_query(query, cx);
+                }
+                InputEvent::PressEnter { .. } => {
+                    this.focus.focus(window, cx);
+                }
+                _ => {}
             },
         );
         let focus = cx.focus_handle();
@@ -304,6 +354,15 @@ impl FastDir {
             scan_root: None,
             last_scan: None,
             rows: Vec::new(),
+            tab: ListTab::Tree,
+            search,
+            filter: Filter::default(),
+            filter_form: FilterForm::default(),
+            top_files: Vec::new(),
+            top_stale: true,
+            top_selected: None,
+            top_sort: (SortKey::Size, true),
+            top_scroll: UniformListScrollHandle::new(),
             ext_rows: Vec::new(),
             selected: None,
             marked: BTreeSet::new(),
@@ -319,7 +378,7 @@ impl FastDir {
             available: None,
             checking: false,
             updating: false,
-            _subscriptions: vec![sub],
+            _subscriptions: vec![sub, search_sub],
             _rename_sub: None,
             _scan_task: None,
             _ticker: None,
@@ -450,6 +509,8 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::zoom_out))
             .on_action(cx.listener(Self::toggle_free_space))
             .on_action(cx.listener(Self::toggle_unknown))
+            .on_action(cx.listener(Self::focus_search))
+            .on_action(cx.listener(Self::open_filters))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))

@@ -37,6 +37,14 @@ impl FastDir {
         self.marked.clear();
         self.anchor = None;
         self.selected_ext = None;
+        self.tab = ListTab::Tree;
+        self.filter = Filter::default();
+        self.filter_form = FilterForm::default();
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.top_files.clear();
+        self.top_selected = None;
+        self.top_stale = true;
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
         window.set_window_title(&format!("FastDir — scanning {}", root.display()));
 
@@ -101,7 +109,10 @@ impl FastDir {
         self.marked.clear();
         self.anchor = Some(Vec::new());
         self.selected_ext = None;
+        self.tab = ListTab::Tree;
         self.rebuild_rows();
+        self.top_stale = true;
+        self.refresh_top_files();
         self.treemap.update(cx, |t, cx| {
             t.set_tree(Some(tree), cx);
             t.set_selection(vec![Vec::new()], cx);
@@ -131,7 +142,7 @@ impl FastDir {
         cx.notify();
     }
 
-    pub(super) fn stop_scan(&mut self, _: &StopScan, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn stop_scan(&mut self, _: &StopScan, window: &mut Window, cx: &mut Context<Self>) {
         let scanning = if let Phase::Scanning { progress, .. } = &self.phase {
             progress.cancel.store(true, Ordering::Relaxed);
             true
@@ -140,6 +151,10 @@ impl FastDir {
         };
         // Esc also cancels a running delete / move...
         self.cancel_op(cx);
+        // ...clears an active search/filter...
+        if self.filter.is_active() {
+            self.clear_filters(window, cx);
+        }
         // ...and drops the treemap highlight.
         self.set_selected_ext(None, cx);
         if scanning {
@@ -186,6 +201,14 @@ impl FastDir {
         self.selected = None;
         self.marked.clear();
         self.anchor = None;
+        self.tab = ListTab::Tree;
+        self.filter = Filter::default();
+        self.filter_form = FilterForm::default();
+        self.search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.top_files.clear();
+        self.top_selected = None;
+        self.top_stale = true;
         self.drives = drives::list();
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
         window.set_window_title("FastDir");

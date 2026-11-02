@@ -17,7 +17,8 @@
 //! directory is done, so there is no second copy of the tree at any point.
 
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// No extension (directories, or files without a dot).
@@ -517,6 +518,18 @@ pub struct ExtStat {
     pub files: u64,
 }
 
+/// One file in a flat "largest files" list.
+#[derive(Clone, Debug)]
+pub struct FileEntry {
+    pub path: NodePath,
+    pub name: Box<str>,
+    pub size: u64,
+    pub disk_size: u64,
+    pub modified: i64,
+    /// Rank in [`Tree::exts`], or [`NO_EXT`].
+    pub ext: u16,
+}
+
 /// Where a node is stored.
 #[derive(Clone, Copy)]
 enum Slot {
@@ -634,6 +647,76 @@ impl Tree {
     #[inline]
     pub fn children(&self, node: &Node) -> &[Node] {
         self.sub.children(node)
+    }
+
+    /// The display name of a file's extension (including the dot), if any.
+    #[inline]
+    pub fn ext_name(&self, node: &Node) -> Option<&str> {
+        self.exts.get(node.ext as usize).map(|e| &*e.name)
+    }
+
+    /// The `limit` largest files in the whole tree, largest first.
+    ///
+    /// Uses a bounded heap, so a drive scan with millions of files only keeps
+    /// `limit` candidates in memory. Hard-link duplicates are left out: they
+    /// add no bytes and would just repeat a file already in the list.
+    pub fn top_files(&self, limit: usize) -> Vec<FileEntry> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        // The smallest retained file is at the top of this min-heap.
+        let mut heap: BinaryHeap<Reverse<(u64, Box<str>, NodePath)>> =
+            BinaryHeap::with_capacity(limit);
+        let mut stack: Vec<(NodePath, &Node)> = vec![(Vec::new(), self.root())];
+        while let Some((path, dir)) = stack.pop() {
+            for (i, child) in self.children(dir).iter().enumerate() {
+                match child.kind() {
+                    NodeKind::Dir => {
+                        let mut child_path = path.clone();
+                        child_path.push(i as u32);
+                        stack.push((child_path, child));
+                    }
+                    NodeKind::File if !child.hard_link() => {
+                        // Skip the (many) files that cannot beat the current
+                        // cutoff before cloning their name and path.
+                        let worth = heap.len() < limit
+                            || heap
+                                .peek()
+                                .is_some_and(|Reverse((smallest, ..))| child.size >= *smallest);
+                        if worth {
+                            let mut child_path = path.clone();
+                            child_path.push(i as u32);
+                            let key = (child.size, self.name(child).into(), child_path);
+                            if heap.len() < limit {
+                                heap.push(Reverse(key));
+                            } else if heap.peek().is_some_and(|Reverse(smallest)| key > *smallest) {
+                                heap.pop();
+                                heap.push(Reverse(key));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut out: Vec<FileEntry> = heap
+            .into_iter()
+            .map(|Reverse((_, name, path))| {
+                let node = self
+                    .get(&path)
+                    .expect("top-file path still points into the tree");
+                FileEntry {
+                    path,
+                    name,
+                    size: node.size,
+                    disk_size: node.disk_size,
+                    modified: node.modified(),
+                    ext: node.ext,
+                }
+            })
+            .collect();
+        out.sort_unstable_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+        out
     }
 
     /// The extension of the largest file under `node`, used to colour
@@ -1385,6 +1468,39 @@ mod tests {
         assert_eq!(tree.root().size, 100_010);
         assert_eq!(tree.root().disk_size, 12_288);
         assert_eq!(tree.scanned_disk_bytes(), 12_288);
+    }
+
+    #[test]
+    fn top_files_keeps_the_largest_in_order() {
+        let tree = sample_tree(); // c.txt 30, sub/b.bin 15, sub/a.txt 5
+        let top = tree.top_files(2);
+        assert_eq!(top.len(), 2);
+        assert_eq!(&*top[0].name, "c.txt");
+        assert_eq!(&*top[1].name, "b.bin");
+        assert_eq!(top[0].size, 30);
+        assert_eq!(top[1].path, vec![1, 0]);
+
+        let all = tree.top_files(10);
+        assert_eq!(all.len(), 3);
+        assert_eq!(
+            all.iter().map(|f| &*f.name).collect::<Vec<_>>(),
+            ["c.txt", "b.bin", "a.txt"]
+        );
+        assert!(tree.top_files(0).is_empty());
+    }
+
+    #[test]
+    fn top_files_skip_hard_links_and_pseudo_items() {
+        let mut tree = flat_tree(|r| {
+            r.add_file("real.bin", 100, 4096, 1);
+            r.add_hard_link("duplicate.bin", 1);
+        });
+        tree.attach_volume_info(500, 100);
+        let top = tree.top_files(10);
+        assert_eq!(top.len(), 1);
+        assert_eq!(&*top[0].name, "real.bin");
+        assert_eq!(top[0].disk_size, 4096);
+        assert_eq!(top[0].modified, 1);
     }
 
     #[test]

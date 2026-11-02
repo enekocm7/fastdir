@@ -5,6 +5,7 @@
 //! benchmarked on its own.
 
 pub mod drives;
+pub mod filter;
 pub mod format;
 pub mod fsops;
 pub mod model;

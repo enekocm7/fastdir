@@ -18,6 +18,13 @@ pub struct Settings {
     pub show_unknown: bool,
     /// Size treemap cells by allocated (on-disk) bytes instead of logical bytes.
     pub treemap_disk_size: bool,
+    /// How many files the "Top files" view lists.
+    #[serde(default = "default_top_files_limit")]
+    pub top_files_limit: usize,
+}
+
+fn default_top_files_limit() -> usize {
+    1000
 }
 
 impl Default for Settings {
@@ -29,6 +36,7 @@ impl Default for Settings {
             show_free_space: false,
             show_unknown: false,
             treemap_disk_size: false,
+            top_files_limit: default_top_files_limit(),
         }
     }
 }
@@ -74,6 +82,7 @@ mod tests {
         assert!(!s.show_free_space);
         assert!(!s.show_unknown);
         assert!(!s.treemap_disk_size);
+        assert_eq!(s.top_files_limit, 1000);
     }
 
     #[test]
@@ -85,6 +94,7 @@ mod tests {
             show_free_space: true,
             show_unknown: true,
             treemap_disk_size: true,
+            top_files_limit: 250,
         };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert!(!back.auto_check_updates);
@@ -92,5 +102,6 @@ mod tests {
         assert!(back.show_free_space);
         assert!(back.show_unknown);
         assert!(back.treemap_disk_size);
+        assert_eq!(back.top_files_limit, 250);
     }
 }
