@@ -119,33 +119,3 @@ cargo build --release
 ```
 
 The installer is written to `dist\`.
-
-## Releasing
-
-Push a tag that starts with `v`:
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The [Release workflow](.github/workflows/release.yml) builds the release
-binary, the installer and a portable zip with SHA-256 checksums, and publishes
-them as a GitHub release. Running the workflow by hand (*Actions → Release →
-Run workflow*) builds the same files as a workflow artifact without publishing
-a release.
-
-## Project layout
-
-| Path | |
-|---|---|
-| `src/scanner.rs` | Parallel directory scanner |
-| `src/model.rs` | The scanned tree, extension stats, and how they update after each operation |
-| `src/treemap.rs` | Squarified layout, cushion shading, hit testing |
-| `src/treemap_view.rs` | Treemap panel (off-thread rendering, selection, hover, zoom, breadcrumb) |
-| `src/app.rs` | Main window: drive overview, progress, tree, extension list, toolbar, dialogs |
-| `src/drives.rs` | Volume detection |
-| `src/fsops.rs` | Delete / rename / move / reveal |
-| `src/updater.rs` | GitHub release check, verified download, installer / portable self-update |
-| `src/settings.rs` | Small persisted config |
-| `installer/fastdir.iss` | Inno Setup installer script |
