@@ -31,6 +31,8 @@ impl FastDir {
             expected,
         };
         self.scan_root = Some(root.clone());
+        self.settings.last_scan_path = Some(root.to_string_lossy().into_owned());
+        self.settings.save();
         // The scanner fills this tree in place, so the list and the treemap
         // can show finished top-level folders before the scan ends.
         let tree = Arc::new(RwLock::new(Tree::empty(root.clone())));

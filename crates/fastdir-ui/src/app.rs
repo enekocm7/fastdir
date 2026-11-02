@@ -7,7 +7,7 @@ use fastdir_core::format;
 use fastdir_core::fsops;
 use fastdir_core::model::{NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
-use fastdir_settings::Settings;
+use fastdir_settings::{Settings, SortColumn as SortKey, ThemePreference, WindowState};
 use fastdir_treemap as treemap;
 use fastdir_updater::{self as updater, Release};
 use gpui_kit::assets::IconName;
@@ -18,7 +18,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu};
 use gpui_kit::component::notification::{Notification, NotificationType};
 use gpui_kit::component::progress::Progress as ProgressBar;
-use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::spinner::Spinner;
@@ -68,6 +68,7 @@ actions!(
         ZoomOut,
         ToggleFreeSpace,
         ToggleUnknown,
+        OpenSettings,
     ]
 );
 
@@ -76,6 +77,7 @@ mod dialogs;
 mod file_list;
 mod scan_state;
 mod selection;
+mod settings_ui;
 mod status;
 mod toolbar;
 mod update_ui;
@@ -113,6 +115,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
         KeyBinding::new("f6", ToggleFreeSpace, Some(CONTEXT)),
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
+        KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
     ]);
 }
 
@@ -130,17 +133,6 @@ const COL_DATE: f32 = 128.;
 const DEPTH_COLORS: [u32; 8] = [
     0x3b82f6, 0xef4444, 0x22c55e, 0xeab308, 0xa855f7, 0x06b6d4, 0xf97316, 0xec4899,
 ];
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SortKey {
-    Name,
-    Size,
-    Disk,
-    Items,
-    Files,
-    Dirs,
-    Modified,
-}
 
 /// What a click does to the selection.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -233,6 +225,9 @@ pub struct FastDir {
     list_scroll: UniformListScrollHandle,
     ext_scroll: UniformListScrollHandle,
     treemap: Entity<TreemapView>,
+    /// Divider state for the top/treemap split and the list/extensions split.
+    main_split: Entity<ResizableState>,
+    top_split: Entity<ResizableState>,
     busy: Option<SharedString>,
     op: Option<FileOp>,
     settings: Settings,
@@ -241,6 +236,8 @@ pub struct FastDir {
     checking: bool,
     updating: bool,
     _subscriptions: Vec<Subscription>,
+    /// Follows Windows light / dark changes for the "System" theme.
+    _appearance_sub: Option<Subscription>,
     _rename_sub: Option<Subscription>,
     _scan_task: Option<Task<()>>,
     _ticker: Option<Task<()>>,
@@ -249,11 +246,13 @@ pub struct FastDir {
 }
 
 impl FastDir {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let settings = Settings::load();
+    pub fn new(settings: Settings, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (show_free, show_unknown) = (settings.show_free_space, settings.show_unknown);
         let use_disk_size = settings.treemap_disk_size;
+        let sort = (settings.sort.column, settings.sort.descending);
         let treemap = cx.new(|_| TreemapView::with_options(show_free, show_unknown, use_disk_size));
+        let main_split = cx.new(|_| ResizableState::default());
+        let top_split = cx.new(|_| ResizableState::default());
         let sub = cx.subscribe_in(
             &treemap,
             window,
@@ -298,6 +297,9 @@ impl FastDir {
         cx.defer_in(window, |this: &mut Self, window, cx| {
             this.startup_update_tasks(window, cx)
         });
+        cx.defer_in(window, |this: &mut Self, window, cx| {
+            this.install_window_handlers(window, cx)
+        });
         Self {
             focus,
             drives: drives::list(),
@@ -312,10 +314,12 @@ impl FastDir {
             marked: BTreeSet::new(),
             anchor: None,
             selected_ext: None,
-            sort: (SortKey::Size, true),
+            sort,
             list_scroll: UniformListScrollHandle::new(),
             ext_scroll: UniformListScrollHandle::new(),
             treemap,
+            main_split,
+            top_split,
             busy: None,
             op: None,
             settings,
@@ -323,6 +327,7 @@ impl FastDir {
             checking: false,
             updating: false,
             _subscriptions: vec![sub],
+            _appearance_sub: None,
             _rename_sub: None,
             _scan_task: None,
             _ticker: None,
@@ -398,13 +403,40 @@ impl FastDir {
     }
 
     pub(super) fn render_ready(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let entity = cx.entity().downgrade();
+        let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
+        let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
+
         v_resizable("main-split")
+            .with_state(&self.main_split)
+            .on_resize({
+                let entity = entity.clone();
+                move |state, _, cx| {
+                    let sizes = state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
+                    entity
+                        .update(cx, |this, _| this.remember_split(Split::Main, sizes))
+                        .ok();
+                }
+            })
             .child(
                 resizable_panel()
-                    .size(px(420.))
+                    .size(main_height)
                     .size_range(px(120.)..Pixels::MAX)
                     .child(
                         h_resizable("top-split")
+                            .with_state(&self.top_split)
+                            .on_resize({
+                                let entity = entity.clone();
+                                move |state, _, cx| {
+                                    let sizes =
+                                        state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
+                                    entity
+                                        .update(cx, |this, _| {
+                                            this.remember_split(Split::Top, sizes)
+                                        })
+                                        .ok();
+                                }
+                            })
                             .child(
                                 resizable_panel()
                                     .size_range(px(400.)..Pixels::MAX)
@@ -412,7 +444,7 @@ impl FastDir {
                             )
                             .child(
                                 resizable_panel()
-                                    .size(px(330.))
+                                    .size(ext_width)
                                     .size_range(px(200.)..px(700.))
                                     .child(self.render_ext_list(cx)),
                             ),
@@ -426,6 +458,133 @@ impl FastDir {
                     .child(self.treemap.clone())
                     .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
             }))
+    }
+
+    /// Remember where the user dragged a divider.
+    fn remember_split(&mut self, split: Split, sizes: Vec<f32>) {
+        let sizes: Vec<f32> = sizes
+            .into_iter()
+            .filter(|s| s.is_finite() && *s > 0.)
+            .collect();
+        match split {
+            Split::Main => self.settings.panels.main = sizes,
+            Split::Top => self.settings.panels.top = sizes,
+        }
+        self.settings.save();
+    }
+
+    /// Persist window position, size and maximized state.
+    fn remember_window(&mut self, window: &Window) {
+        let bounds = window.window_bounds();
+        let inner = bounds.get_bounds();
+        self.settings.window = Some(WindowState {
+            x: f32::from(inner.origin.x),
+            y: f32::from(inner.origin.y),
+            width: f32::from(inner.size.width),
+            height: f32::from(inner.size.height),
+            maximized: matches!(bounds, WindowBounds::Maximized(_)),
+        });
+        self.settings.save();
+    }
+
+    /// Install the callbacks that have to run after the window exists: save
+    /// the geometry on close and follow Windows light / dark changes.
+    pub(crate) fn install_window_handlers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let entity = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            entity
+                .update(cx, |this, _| this.remember_window(window))
+                .ok();
+            true
+        });
+
+        let entity = cx.entity().downgrade();
+        self._appearance_sub = Some(window.observe_window_appearance(move |window, cx| {
+            let entity = entity.clone();
+            // The observer fires once on activation, while this entity may
+            // still be mid-update; defer so the update is never re-entrant.
+            window.defer(cx, move |window, cx| {
+                entity
+                    .update(cx, |this, cx| {
+                        if this.settings.theme == ThemePreference::System {
+                            this.apply_theme(window, cx);
+                        }
+                    })
+                    .ok();
+            });
+        }));
+    }
+
+    pub(super) fn set_theme_preference(
+        &mut self,
+        theme: ThemePreference,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.theme = theme;
+        self.settings.save();
+        self.apply_theme(window, cx);
+        cx.notify();
+    }
+
+    /// Apply the saved preference; `System` reads the current Windows mode.
+    pub(super) fn apply_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = match self.settings.theme {
+            ThemePreference::Light => ThemeMode::Light,
+            ThemePreference::Dark => ThemeMode::Dark,
+            ThemePreference::System => ThemeMode::from(window.appearance()),
+        };
+        Theme::change(mode, Some(window), cx);
+        apply_accent(cx);
+        window.refresh();
+    }
+}
+
+/// The two resizable splits whose sizes are persisted.
+#[derive(Clone, Copy)]
+enum Split {
+    Main,
+    Top,
+}
+
+/// A saved panel size, ignoring nonsense left by a broken config.
+fn panel_px(saved: Option<f32>, fallback: f32) -> Pixels {
+    saved
+        .filter(|v| v.is_finite() && *v > 0.)
+        .map(px)
+        .unwrap_or_else(|| px(fallback))
+}
+
+/// The window bounds to open with, falling back to a centered default when
+/// nothing was saved or the saved position is no longer on a display.
+pub(crate) fn restored_window_bounds(settings: &Settings, cx: &App) -> WindowBounds {
+    let centered = || WindowBounds::Windowed(Bounds::centered(None, size(px(1440.), px(920.)), cx));
+    let Some(saved) = settings.window else {
+        return centered();
+    };
+    let valid = [saved.x, saved.y, saved.width, saved.height]
+        .into_iter()
+        .all(f32::is_finite)
+        && saved.width >= 900.
+        && saved.height >= 600.;
+    if !valid {
+        return centered();
+    }
+    let bounds = Bounds::new(
+        point(px(saved.x), px(saved.y)),
+        size(px(saved.width), px(saved.height)),
+    );
+    let on_screen = cx
+        .displays()
+        .iter()
+        .any(|display| display.visible_bounds().intersects(&bounds));
+    if !on_screen {
+        return centered();
+    }
+    if saved.maximized {
+        WindowBounds::Maximized(bounds)
+    } else {
+        WindowBounds::Windowed(bounds)
     }
 }
 
@@ -478,6 +637,7 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::zoom_out))
             .on_action(cx.listener(Self::toggle_free_space))
             .on_action(cx.listener(Self::toggle_unknown))
+            .on_action(cx.listener(Self::open_settings))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))
