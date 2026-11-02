@@ -349,6 +349,39 @@ impl Arena {
         }
         n
     }
+
+    /// Move `src` into this arena, renumbering its block and name references
+    /// in place. Returns `root` as it is stored here. Unlike [`Self::import`]
+    /// this never copies a node or a name, which is what live scanning uses to
+    /// adopt a finished top-level subtree without a second copy of it.
+    fn adopt_from(&mut self, src: &mut Arena, mut root: Node) -> Node {
+        let chunk_base = u32::try_from(self.chunks.len()).expect("too many name chunks");
+        let block_base = u32::try_from(self.blocks.len()).expect("too many directories");
+        assert!(
+            chunk_base as usize + src.chunks.len() <= 1 << (32 - CHUNK_BITS),
+            "name storage exceeds 4 GiB"
+        );
+        assert!(
+            block_base as usize + src.blocks.len() < NO_BLOCK as usize,
+            "too many directories"
+        );
+        let name_add = chunk_base << CHUNK_BITS;
+        fn remap(n: &mut Node, name_add: u32, block_base: u32) {
+            n.name_off += name_add;
+            if n.block != NO_BLOCK {
+                n.block += block_base;
+            }
+        }
+        remap(&mut root, name_add, block_base);
+        for block in &mut src.blocks {
+            for n in block.iter_mut() {
+                remap(n, name_add, block_base);
+            }
+        }
+        self.blocks.append(&mut src.blocks);
+        self.chunks.append(&mut src.chunks);
+        root
+    }
 }
 
 /// A tree of nodes with its storage: either a whole scan (inside [`Tree`])
@@ -564,6 +597,18 @@ impl Tree {
         tree
     }
 
+    /// An empty tree rooted at `root_path`, ready to receive finished
+    /// top-level subtrees with [`Self::adopt`] while a scan is running.
+    pub fn empty(root_path: PathBuf) -> Self {
+        let name = root_path.to_string_lossy();
+        let mut sub = Subtree::new(Arena::default(), &name, Node::new(NodeKind::Dir, 0, 0, 0));
+        sub.root_mut().set_expanded(true);
+        let mut tree = Self::new(sub, root_path);
+        // Generation 0 tells the UI that nothing has been inserted yet.
+        tree.generation = 0;
+        tree
+    }
+
     /// Collect extension statistics in parallel, rank them by bytes and stamp
     /// every file with its rank.
     fn build_extensions(&mut self) {
@@ -617,6 +662,13 @@ impl Tree {
         });
         self.exts = exts;
         self.ext_index = index;
+    }
+
+    /// Recompute the extension ranking from scratch. Live scanning adds
+    /// files incrementally, so extension ranks are only provisional until
+    /// this runs once the scan is complete.
+    pub fn rebuild_extensions(&mut self) {
+        self.build_extensions();
     }
 
     #[inline]
@@ -875,6 +927,17 @@ impl Tree {
     /// into a drive scan shrinks free space so the volume total stays
     /// constant.
     pub fn insert(&mut self, dir_path: &[u32], sub: Subtree) -> Option<NodePath> {
+        self.attach(dir_path, sub, false)
+    }
+
+    /// Like [`Self::insert`], but move the subtree's arena into this tree
+    /// instead of copying it. Used by live scanning as each finished top-level
+    /// folder arrives.
+    pub fn adopt(&mut self, dir_path: &[u32], sub: Subtree) -> Option<NodePath> {
+        self.attach(dir_path, sub, true)
+    }
+
+    fn attach(&mut self, dir_path: &[u32], sub: Subtree, move_arena: bool) -> Option<NodePath> {
         let dir = self.slot(dir_path)?;
         if !self.at(dir).is_dir() {
             return None;
@@ -896,7 +959,11 @@ impl Tree {
                 self.grow_free(old.size);
             }
         }
-        let node = self.sub.arena.import(&mut src, &root);
+        let node = if move_arena {
+            self.sub.arena.adopt_from(&mut src, root)
+        } else {
+            self.sub.arena.import(&mut src, &root)
+        };
         drop(src);
         // Stamp extensions in this tree's ranking and count them.
         let node = self.stamp_new(node);
@@ -1290,6 +1357,55 @@ mod tests {
         assert_eq!(tree.root().size, 51);
         assert_eq!(tree.root().files, 4);
         assert!(tree.find(Path::new("/root/c.txt")).is_some());
+    }
+
+    #[test]
+    fn adopt_moves_the_subtree_into_the_arena() {
+        let mut tree = sample_tree();
+        let mut arena = Arena::default();
+        // Force a second name chunk so the adopted root's name offset has to
+        // be renumbered.
+        arena.chunks.push("x".repeat(CHUNK_SIZE));
+        let mut moved = DirBuilder::new(0);
+        moved.add_dir("deep", {
+            let mut inner = DirBuilder::new(0);
+            inner.add_file("y.bin", 7, 7, 0);
+            inner.commit(&mut arena)
+        });
+        let node = moved.commit(&mut arena);
+        let sub = Subtree::new(arena, "moved", node);
+
+        let path = tree.adopt(&[], sub).unwrap();
+        assert_eq!(tree.name(tree.get(&path).unwrap()), "moved");
+        assert_eq!(
+            tree.find(Path::new("/root/moved/deep/y.bin")),
+            Some(vec![path[0], 0, 0])
+        );
+        assert_eq!(tree.root().size, 57);
+        assert_eq!(tree.root().dirs, 3);
+        let bin = tree.exts.iter().find(|e| &*e.name == ".bin").unwrap();
+        assert_eq!((bin.bytes, bin.files), (22, 2));
+    }
+
+    #[test]
+    fn adopt_replaces_an_item_with_the_same_name() {
+        let mut tree = sample_tree();
+        let mut arena = Arena::default();
+        let mut fresh = DirBuilder::new(0);
+        fresh.add_file("new.bin", 9, 9, 0);
+        let fresh = fresh.commit(&mut arena);
+        tree.adopt(&[], Subtree::new(arena, "sub", fresh)).unwrap();
+        assert_eq!(tree.root().size, 39);
+        assert!(tree.find(Path::new("/root/sub/a.txt")).is_none());
+        assert!(tree.find(Path::new("/root/sub/new.bin")).is_some());
+    }
+
+    #[test]
+    fn empty_tree_starts_at_generation_zero() {
+        let tree = Tree::empty(PathBuf::from("/root"));
+        assert_eq!(tree.generation, 0);
+        assert!(tree.root().is_dir());
+        assert!(tree.children(tree.root()).is_empty());
     }
 
     #[test]

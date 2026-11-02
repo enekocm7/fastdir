@@ -18,6 +18,8 @@ pub struct Settings {
     pub show_unknown: bool,
     /// Size treemap cells by allocated (on-disk) bytes instead of logical bytes.
     pub treemap_disk_size: bool,
+    /// Show finished top-level folders and a treemap preview while scanning.
+    pub show_partial_results: bool,
 }
 
 impl Default for Settings {
@@ -29,6 +31,7 @@ impl Default for Settings {
             show_free_space: false,
             show_unknown: false,
             treemap_disk_size: false,
+            show_partial_results: true,
         }
     }
 }
@@ -74,6 +77,7 @@ mod tests {
         assert!(!s.show_free_space);
         assert!(!s.show_unknown);
         assert!(!s.treemap_disk_size);
+        assert!(s.show_partial_results);
     }
 
     #[test]
@@ -85,6 +89,7 @@ mod tests {
             show_free_space: true,
             show_unknown: true,
             treemap_disk_size: true,
+            show_partial_results: false,
         };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert!(!back.auto_check_updates);
@@ -92,5 +97,6 @@ mod tests {
         assert!(back.show_free_space);
         assert!(back.show_unknown);
         assert!(back.treemap_disk_size);
+        assert!(!back.show_partial_results);
     }
 }

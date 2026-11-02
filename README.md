@@ -34,6 +34,10 @@ culprit? Rename, move, recycle or delete it right there.
   how full it is. Click one to scan it, or pick any folder.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a
   real percentage when you scan a whole drive.
+- **Partial results while scanning** – each top-level folder appears in the
+  tree as soon as it finishes, and the treemap preview refreshes about once a
+  second, so you can start browsing before the scan ends. Turn it off under
+  `…` → *Show partial results while scanning*.
 - **WinDirStat-style layout**
   - **Directory tree** with subtree-percentage bars, %, size, items, files,
     folders and last change. Sort by any column.

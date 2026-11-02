@@ -31,23 +31,37 @@ impl FastDir {
             expected,
         };
         self.scan_root = Some(root.clone());
-        self.tree = None;
+        // The scanner fills this tree in place, so the list and the treemap
+        // can show finished top-level folders before the scan ends.
+        let tree = Arc::new(RwLock::new(Tree::empty(root.clone())));
+        self.tree = Some(tree.clone());
+        self.partial_generation = 0;
         self.rows.clear();
         self.selected = None;
         self.marked.clear();
         self.anchor = None;
         self.selected_ext = None;
-        self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
+        self.rebuild_rows();
+        self.selected = Some(0);
+        self.anchor = self.selected_path();
+        self.treemap.update(cx, |t, cx| {
+            t.set_tree(Some(tree.clone()), cx);
+            t.set_selection(vec![Vec::new()], cx);
+            t.set_partial(true, cx);
+        });
         window.set_window_title(&format!("FastDir — scanning {}", root.display()));
 
         let p = progress.clone();
+        let scan_tree = tree.clone();
         let job = cx
             .background_executor()
-            .spawn(async move { scanner::scan(root, p) });
+            .spawn(async move { scanner::scan_live(root, p, scan_tree) });
         self._scan_task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
-            this.update_in(cx, |this, window, cx| this.finish_scan(result, window, cx))
-                .ok();
+            this.update_in(cx, |this, window, cx| {
+                this.finish_scan(result, tree, window, cx)
+            })
+            .ok();
         }));
         self._ticker = Some(cx.spawn(async move |this, cx| {
             loop {
@@ -56,6 +70,7 @@ impl FastDir {
                     .await;
                 let still = this
                     .update(cx, |this, cx| {
+                        this.live_tick(cx);
                         cx.notify();
                         matches!(this.phase, Phase::Scanning { .. })
                     })
@@ -68,43 +83,98 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Pull newly inserted top-level folders into the visible rows. Called by
+    /// the scan ticker, so the list keeps up with the scanner without a full
+    /// rebuild on every render.
+    fn live_tick(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.phase, Phase::Scanning { .. }) {
+            return;
+        }
+        let Some(tree) = self.tree.clone() else {
+            return;
+        };
+        let generation = tree.read().generation;
+        if generation == self.partial_generation {
+            return;
+        }
+        self.partial_generation = generation;
+        // Node paths may have shifted; keep the cursor on the same folder but
+        // drop multi-selections and the range anchor.
+        let selected_fs = self.selected_fs_path().map(|(_, fs, _)| fs);
+        self.marked.clear();
+        self.rebuild_rows();
+        self.restore_selected_fs(selected_fs);
+        let selection = self.selection();
+        self.treemap.update(cx, |t, cx| {
+            t.invalidate(cx);
+            t.set_selection(selection, cx);
+        });
+    }
+
+    /// Re-select the node at `fs` after a rebuild, when it is still there.
+    /// First-level indices move as finished top-level folders arrive, so a
+    /// node path from before the rebuild cannot be trusted.
+    fn restore_selected_fs(&mut self, fs: Option<PathBuf>) {
+        if let Some(fs) = fs {
+            let path = self.tree.as_ref().and_then(|t| t.read().find(&fs));
+            if let Some(path) = path
+                && let Some(ix) = self.rows.iter().position(|r| r.path == path)
+            {
+                self.selected = Some(ix);
+            }
+        }
+        self.anchor = self.selected_path();
+    }
+
     pub(super) fn finish_scan(
         &mut self,
-        result: ScanResult,
+        result: LiveScanResult,
+        tree: Arc<RwLock<Tree>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ScanResult {
-            mut tree,
-            elapsed,
-            cancelled,
-        } = result;
-        let title = format!(
-            "FastDir — {}{}",
-            tree.root_path.display(),
-            if cancelled { " (incomplete)" } else { "" }
-        );
-        window.set_window_title(&title);
+        // A newer scan (or "home") may have replaced this one while it ran.
+        if !self.tree.as_ref().is_some_and(|t| Arc::ptr_eq(t, &tree)) {
+            return;
+        }
+        let LiveScanResult { elapsed, cancelled } = result;
         // Drive scans get `<Free space>` and `<Unknown>` pseudo-items so the
         // picture is complete (scanned vs used). Volume figures are from the
         // drive list taken when the scan started.
-        if let Some(drive) = self.drives.iter().find(|d| d.path == tree.root_path) {
-            tree.attach_volume_info(drive.total, drive.free);
-        }
-        let files = tree.root().files;
-        let size = tree.scanned_bytes();
-        let tree = Arc::new(RwLock::new(tree));
-        self.tree = Some(tree.clone());
+        let (root_path, files, size) = {
+            let mut tree = tree.write();
+            if let Some(drive) = self.drives.iter().find(|d| d.path == tree.root_path) {
+                tree.attach_volume_info(drive.total, drive.free);
+            }
+            (
+                tree.root_path.clone(),
+                tree.root().files,
+                tree.scanned_bytes(),
+            )
+        };
+        let title = format!(
+            "FastDir — {}{}",
+            root_path.display(),
+            if cancelled { " (incomplete)" } else { "" }
+        );
+        window.set_window_title(&title);
         self.last_scan = Some((elapsed, cancelled));
         self.phase = Phase::Ready;
-        self.selected = Some(0);
+        // Keep the folder the user was browsing selected across the finish.
+        let selected_fs = self.selected_fs_path().map(|(_, fs, _)| fs);
         self.marked.clear();
-        self.anchor = Some(Vec::new());
-        self.selected_ext = None;
         self.rebuild_rows();
+        self.restore_selected_fs(selected_fs);
+        if self.selected.is_none() {
+            self.selected = Some(0);
+            self.anchor = self.selected_path();
+        }
+        let selection = self.selection();
+        self.partial_generation = tree.read().generation;
         self.treemap.update(cx, |t, cx| {
-            t.set_tree(Some(tree), cx);
-            t.set_selection(vec![Vec::new()], cx);
+            t.set_partial(false, cx);
+            t.invalidate(cx);
+            t.set_selection(selection, cx);
         });
         let msg = format!(
             "Scanned {} files ({}) in {}",

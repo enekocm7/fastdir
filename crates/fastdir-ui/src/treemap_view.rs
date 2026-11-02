@@ -16,7 +16,11 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// While a scan is running, redraw the preview at most this often, so a tree
+/// that keeps growing does not keep the renderer busy.
+const PARTIAL_REFRESH: Duration = Duration::from_millis(1000);
 
 /// Ctrl+click (Cmd+click on macOS) adds to or removes from the selection.
 pub fn is_toggle_click(m: &Modifiers) -> bool {
@@ -75,6 +79,9 @@ pub struct TreemapView {
     show_free: bool,
     show_unknown: bool,
     use_disk_size: bool,
+    /// The tree is still being scanned, so previews are throttled.
+    partial: bool,
+    last_render: Option<Instant>,
     _task: Option<Task<()>>,
 }
 
@@ -100,6 +107,8 @@ impl TreemapView {
             show_free: false,
             show_unknown: false,
             use_disk_size: false,
+            partial: false,
+            last_render: None,
             _task: None,
         }
     }
@@ -130,6 +139,18 @@ impl TreemapView {
     pub fn set_use_disk_size(&mut self, use_disk: bool, cx: &mut Context<Self>) {
         if self.use_disk_size != use_disk {
             self.use_disk_size = use_disk;
+            cx.notify();
+        }
+    }
+
+    /// The tree is still growing (live scan), so render at most about once a
+    /// second. Turning it off lets the next render through immediately.
+    pub fn set_partial(&mut self, partial: bool, cx: &mut Context<Self>) {
+        if self.partial != partial {
+            self.partial = partial;
+            if !partial {
+                self.last_render = None;
+            }
             cx.notify();
         }
     }
@@ -252,11 +273,20 @@ impl TreemapView {
         if self.pending == Some(key) || self.image_key == Some(key) {
             return;
         }
+        if self.partial
+            && self
+                .last_render
+                .is_some_and(|last| last.elapsed() < PARTIAL_REFRESH)
+        {
+            // A scan is running: the UI ticker notifies again in a moment.
+            return;
+        }
         let Some(tree) = self.tree.clone() else {
             return;
         };
         self.pending = Some(key);
         self.rendering = true;
+        self.last_render = Some(Instant::now());
         let background = if key.dark {
             [24, 24, 27]
         } else {
