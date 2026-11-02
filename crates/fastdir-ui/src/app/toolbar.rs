@@ -8,6 +8,8 @@ impl FastDir {
         let ready = matches!(self.phase, Phase::Ready);
         let scanning = matches!(self.phase, Phase::Scanning { .. });
         let has_sel = ready && !self.selection().is_empty();
+        // Pseudo-items can be selected but have no file operations.
+        let special = self.selected_is_special();
         let multi = self.is_multi();
         let is_root = self.only_root();
         let drives = self.drives.clone();
@@ -93,7 +95,7 @@ impl FastDir {
             )
             .child(
                 tool("reveal", IconName::FolderOpen, "Show in Explorer (Ctrl+E)")
-                    .disabled(!has_sel || multi)
+                    .disabled(!has_sel || multi || special)
                     .on_click(
                         cx.listener(|this, _, w, cx| this.reveal_selected(&RevealItem, w, cx)),
                     ),
@@ -104,23 +106,23 @@ impl FastDir {
                     IconName::RotateCw,
                     "Refresh selected folder (F5)",
                 )
-                .disabled(!has_sel || busy || multi)
+                .disabled(!has_sel || busy || multi || special)
                 .on_click(cx.listener(|this, _, w, cx| this.refresh_item(&RefreshItem, w, cx))),
             )
             .child(Separator::vertical().h(px(20.)).mx_1())
             .child(
                 tool("rename", IconName::Pencil, "Rename (F2)")
-                    .disabled(!has_sel || is_root || busy || multi)
+                    .disabled(!has_sel || is_root || busy || multi || special)
                     .on_click(cx.listener(|this, _, w, cx| this.rename_item(&RenameItem, w, cx))),
             )
             .child(
                 tool("move", IconName::FolderInput, "Move to… (Ctrl+M)")
-                    .disabled(!has_sel || is_root || busy)
+                    .disabled(!has_sel || is_root || busy || special)
                     .on_click(cx.listener(|this, _, w, cx| this.move_item(&MoveItem, w, cx))),
             )
             .child(
                 tool("trash", IconName::Recycle, "Move to Recycle Bin (Del)")
-                    .disabled(!has_sel || is_root || busy)
+                    .disabled(!has_sel || is_root || busy || special)
                     .on_click(cx.listener(|this, _, w, cx| this.trash_item(&TrashItem, w, cx))),
             )
             .child(
@@ -129,7 +131,7 @@ impl FastDir {
                     .ghost()
                     .icon(Icon::new(IconName::Trash).text_color(theme.danger))
                     .tooltip("Delete permanently (Shift+Del)")
-                    .disabled(!has_sel || is_root || busy)
+                    .disabled(!has_sel || is_root || busy || special)
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
             .child(div().flex_1())
@@ -198,9 +200,12 @@ impl FastDir {
             })
             .child(tool("more", IconName::Ellipsis, "More").dropdown_menu({
                 let auto = self.settings.auto_check_updates;
+                let show_free = self.settings.show_free_space;
+                let show_unknown = self.settings.show_unknown;
                 let entity = update_entity.clone();
                 move |menu, _, _| {
                     let (e1, e2) = (entity.clone(), entity.clone());
+                    let (e3, e4) = (entity.clone(), entity.clone());
                     menu.item(
                         gpui_kit::component::menu::PopupMenuItem::new("Check for updates")
                             .icon(IconName::RefreshCw)
@@ -218,6 +223,27 @@ impl FastDir {
                             e2.update(cx, |this, cx| this.toggle_auto_update_check(cx))
                                 .ok();
                         }),
+                    )
+                    .separator()
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Show free space in treemap")
+                            .checked(show_free)
+                            .on_click(move |_, window, cx| {
+                                e3.update(cx, |this, cx| {
+                                    this.toggle_free_space(&ToggleFreeSpace, window, cx)
+                                })
+                                .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Show unknown in treemap")
+                            .checked(show_unknown)
+                            .on_click(move |_, window, cx| {
+                                e4.update(cx, |this, cx| {
+                                    this.toggle_unknown(&ToggleUnknown, window, cx)
+                                })
+                                .ok();
+                            }),
                     )
                     .separator()
                     .item(

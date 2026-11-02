@@ -46,14 +46,28 @@ impl FastDir {
         mode: ClickMode,
         cx: &mut Context<Self>,
     ) {
+        // Drive pseudo-items are never part of a multi-selection.
+        let is_special = self
+            .tree
+            .as_ref()
+            .and_then(|t| t.read().get(&path).map(|n| n.is_special()))
+            .unwrap_or(false);
         match mode {
             ClickMode::Context if self.marked.len() > 1 && self.marked.contains(&path) => {
                 self.selected = Some(ix);
             }
-            ClickMode::Toggle if !path.is_empty() => {
+            ClickMode::Toggle if !path.is_empty() && !is_special => {
                 if self.marked.is_empty() {
                     if let Some(cur) = self.selected_path().filter(|p| !p.is_empty()) {
-                        self.marked.insert(cur);
+                        // Never seed a multi-selection with a pseudo-item.
+                        let cur_special = self
+                            .tree
+                            .as_ref()
+                            .and_then(|t| t.read().get(&cur).map(|n| n.is_special()))
+                            .unwrap_or(false);
+                        if !cur_special {
+                            self.marked.insert(cur);
+                        }
                     }
                 }
                 if !self.marked.remove(&path) {
@@ -63,7 +77,7 @@ impl FastDir {
                 self.selected = (!self.marked.is_empty()).then_some(ix);
                 self.anchor = Some(path);
             }
-            ClickMode::Range if !path.is_empty() => {
+            ClickMode::Range if !path.is_empty() && !is_special => {
                 let from = self
                     .anchor
                     .as_ref()
@@ -74,6 +88,17 @@ impl FastDir {
                 self.marked = self.rows[lo..=hi]
                     .iter()
                     .filter(|r| !r.path.is_empty())
+                    .filter(|r| {
+                        self.tree
+                            .as_ref()
+                            .map(|t| {
+                                t.read()
+                                    .get(&r.path)
+                                    .map(|n| !n.is_special())
+                                    .unwrap_or(true)
+                            })
+                            .unwrap_or(true)
+                    })
                     .map(|r| r.path.clone())
                     .collect();
                 self.selected = Some(ix);
@@ -110,6 +135,7 @@ impl FastDir {
 
     /// The selection as file operations see it: items inside another selected
     /// folder are dropped, so nothing is counted or deleted twice.
+    /// Pseudo-items are never targets (they have no file-system path).
     pub(super) fn targets(&self) -> Vec<Target> {
         let Some(tree) = &self.tree else {
             return Vec::new();
@@ -124,6 +150,9 @@ impl FastDir {
             let (Some(node), Some(fs)) = (tree.get(&path), tree.fs_path(&path)) else {
                 continue;
             };
+            if node.is_special() {
+                continue;
+            }
             out.push(Target {
                 fs,
                 is_dir: node.is_dir(),

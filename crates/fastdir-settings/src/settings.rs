@@ -12,6 +12,10 @@ pub struct Settings {
     pub skipped_version: Option<String>,
     /// Version that ran last, used to show "Updated to vX" after an update.
     pub last_run_version: Option<String>,
+    /// Show `<Free space>` in the treemap (F6, off by default like WinDirStat).
+    pub show_free_space: bool,
+    /// Show `<Unknown>` in the treemap (F7, off by default like WinDirStat).
+    pub show_unknown: bool,
 }
 
 impl Default for Settings {
@@ -20,6 +24,8 @@ impl Default for Settings {
             auto_check_updates: true,
             skipped_version: None,
             last_run_version: None,
+            show_free_space: false,
+            show_unknown: false,
         }
     }
 }
@@ -62,6 +68,8 @@ mod tests {
         let s: Settings = serde_json::from_str("{}").unwrap();
         assert!(s.auto_check_updates);
         assert!(s.skipped_version.is_none());
+        assert!(!s.show_free_space);
+        assert!(!s.show_unknown);
     }
 
     #[test]
@@ -70,9 +78,13 @@ mod tests {
             auto_check_updates: false,
             skipped_version: Some("0.2.0".into()),
             last_run_version: Some("0.1.0".into()),
+            show_free_space: true,
+            show_unknown: true,
         };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert!(!back.auto_check_updates);
         assert_eq!(back.skipped_version.as_deref(), Some("0.2.0"));
+        assert!(back.show_free_space);
+        assert!(back.show_unknown);
     }
 }

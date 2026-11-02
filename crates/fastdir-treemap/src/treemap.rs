@@ -9,7 +9,7 @@
 //! and highlighting re-run the layout only along a single path instead of
 //! keeping millions of rectangles in memory.
 
-use fastdir_core::model::{NO_EXT, Node, NodePath};
+use fastdir_core::model::{NO_EXT, Node, NodeKind, NodePath};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,6 +65,9 @@ const PALETTE: [(u8, u8, u8); 18] = [
     (255, 0, 128),
 ];
 const OTHER: (u8, u8, u8) = (200, 200, 200);
+/// WinDirStat colours for the drive pseudo-items.
+pub const FREE_SPACE_COLOR: (u8, u8, u8) = (128, 128, 128);
+pub const UNKNOWN_COLOR: (u8, u8, u8) = (255, 255, 0);
 
 /// Normalise so channel overflow spills into the others (keeps hue, avoids clipping).
 fn normalize(r: &mut f64, g: &mut f64, b: &mut f64) {
@@ -114,8 +117,18 @@ pub fn ext_color(ext: u16) -> (u8, u8, u8) {
     PALETTE.get(ext as usize).copied().unwrap_or(OTHER)
 }
 
-fn shade_color(ext: u16) -> [f64; 3] {
-    bright_color(ext_color(ext))
+/// Display colour for a node: pseudo-items get their WinDirStat colours,
+// otherwise the extension colour.
+pub fn node_color(node: &Node) -> (u8, u8, u8) {
+    match node.kind {
+        NodeKind::FreeSpace => FREE_SPACE_COLOR,
+        NodeKind::Unknown => UNKNOWN_COLOR,
+        _ => ext_color(node.ext),
+    }
+}
+
+fn shade_node(node: &Node) -> [f64; 3] {
+    bright_color(node_color(node))
 }
 
 /// Desaturate and darken a colour so non-highlighted leaves fade into the
@@ -223,6 +236,153 @@ pub fn squarify(children: &[Node], total: u64, rc: Rect, mut f: impl FnMut(usize
     }
 }
 
+/// Whether `node` is laid out given the pseudo-item flags.
+#[inline]
+fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
+    match node.kind {
+        NodeKind::FreeSpace => show_free,
+        NodeKind::Unknown => show_unknown,
+        _ => true,
+    }
+}
+
+#[inline]
+fn has_hidden_special(children: &[Node], show_free: bool, show_unknown: bool) -> bool {
+    children.iter().any(|c| {
+        matches!(c.kind, NodeKind::FreeSpace | NodeKind::Unknown)
+            && !is_visible(c, show_free, show_unknown)
+    })
+}
+
+/// Squarify `sizes` (already sorted descending, all > 0) into `rc`. `sizes[i]`
+/// corresponds to the original child `indices[i]`.
+fn squarify_sizes(
+    sizes: &[u64],
+    indices: &[usize],
+    total: u64,
+    rc: Rect,
+    mut f: impl FnMut(usize, Rect),
+) {
+    let n = sizes.len();
+    if n == 0 || total == 0 {
+        return;
+    }
+    let mut rc = rc;
+    let mut remaining = total as f64;
+    let mut start = 0;
+    while start < n {
+        let w = rc.w();
+        let h = rc.h();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let horizontal = w >= h;
+        let side = if horizontal { h } else { w };
+        let area_per_byte = w * h / remaining;
+
+        let max_size = sizes[start] as f64;
+        let mut end = start;
+        let mut row_sum = 0.0;
+        let mut worst = f64::INFINITY;
+        while end < n {
+            let s = sizes[end] as f64;
+            let new_sum = row_sum + s;
+            let thickness = new_sum * area_per_byte / side;
+            let ratio = |sz: f64| {
+                let len = sz * area_per_byte / thickness;
+                if len > thickness { len / thickness } else { thickness / len }
+            };
+            let new_worst = ratio(max_size).max(ratio(s));
+            if end > start && new_worst > worst {
+                break;
+            }
+            worst = new_worst;
+            row_sum = new_sum;
+            end += 1;
+        }
+
+        let last_row = end == n;
+        let frac = row_sum / remaining;
+        if horizontal {
+            let split = if last_row { rc.x1 } else { rc.x0 + w * frac };
+            let mut y = rc.y0;
+            for i in start..end {
+                let y_next = if i + 1 == end {
+                    rc.y1
+                } else {
+                    y + h * (sizes[i] as f64 / row_sum)
+                };
+                f(
+                    indices[i],
+                    Rect {
+                        x0: rc.x0,
+                        y0: y,
+                        x1: split,
+                        y1: y_next,
+                    },
+                );
+                y = y_next;
+            }
+            rc.x0 = split;
+        } else {
+            let split = if last_row { rc.y1 } else { rc.y0 + h * frac };
+            let mut x = rc.x0;
+            for i in start..end {
+                let x_next = if i + 1 == end {
+                    rc.x1
+                } else {
+                    x + w * (sizes[i] as f64 / row_sum)
+                };
+                f(
+                    indices[i],
+                    Rect {
+                        x0: x,
+                        y0: rc.y0,
+                        x1: x_next,
+                        y1: split,
+                    },
+                );
+                x = x_next;
+            }
+            rc.y0 = split;
+        }
+        remaining -= row_sum;
+        start = end;
+    }
+}
+
+/// Like [`squarify`], but skips hidden pseudo-items. The callback still gets
+/// the original child indices. Children are assumed sorted by size, largest
+/// first (as [`Node::finalize`] keeps them).
+fn squarify_filtered(
+    children: &[Node],
+    total: u64,
+    rc: Rect,
+    show_free: bool,
+    show_unknown: bool,
+    f: impl FnMut(usize, Rect),
+) {
+    if !has_hidden_special(children, show_free, show_unknown) {
+        squarify(children, total, rc, f);
+        return;
+    }
+    let mut sizes = Vec::with_capacity(children.len());
+    let mut indices = Vec::with_capacity(children.len());
+    let mut visible_total = 0u64;
+    for (i, c) in children.iter().enumerate() {
+        if c.size == 0 {
+            break;
+        }
+        if !is_visible(c, show_free, show_unknown) {
+            continue;
+        }
+        sizes.push(c.size);
+        indices.push(i);
+        visible_total += c.size;
+    }
+    squarify_sizes(&sizes, &indices, visible_total, rc, f);
+}
+
 #[derive(Clone, Copy)]
 struct Surface([f64; 4]);
 
@@ -308,7 +468,19 @@ fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light
     }
 }
 
-fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u32, t: Target, light: &Light, highlight: Option<u16>) {
+fn draw(
+    node: &Node,
+    rc: Rect,
+    surface: Surface,
+    h: f64,
+    as_root: bool,
+    depth: u32,
+    t: Target,
+    light: &Light,
+    highlight: Option<u16>,
+    show_free: bool,
+    show_unknown: bool,
+) {
     if rc.w() <= 0.0 || rc.h() <= 0.0 {
         return;
     }
@@ -320,8 +492,8 @@ fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u
     let subdivide = node.is_dir() && node.size > 0 && !node.children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
     if !subdivide {
         let ext = node.dominant_ext();
-        let mut color = shade_color(ext);
-        if highlight.is_some_and(|h| h != ext) {
+        let mut color = shade_node(node);
+        if highlight.is_some_and(|hl| hl != ext) {
             color = dim_color(color);
         }
         render_leaf(t, &rc, &surface, color, light);
@@ -330,21 +502,69 @@ fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u
     let h_child = h * SCALE;
     if depth < 4 && node.children.len() > 1 {
         let mut cells = Vec::with_capacity(node.children.len().min(4096));
-        squarify(&node.children, node.size, rc, |i, r| cells.push((i, r)));
+        squarify_filtered(
+            &node.children,
+            node.size,
+            rc,
+            show_free,
+            show_unknown,
+            |i, r| cells.push((i, r)),
+        );
         cells.par_iter().with_min_len(8).for_each(|&(i, r)| {
-            draw(&node.children[i], r, surface, h_child, false, depth + 1, t, light, highlight);
+            draw(
+                &node.children[i],
+                r,
+                surface,
+                h_child,
+                false,
+                depth + 1,
+                t,
+                light,
+                highlight,
+                show_free,
+                show_unknown,
+            );
         });
     } else {
-        squarify(&node.children, node.size, rc, |i, r| {
-            draw(&node.children[i], r, surface, h_child, false, depth + 1, t, light, highlight);
-        });
+        squarify_filtered(
+            &node.children,
+            node.size,
+            rc,
+            show_free,
+            show_unknown,
+            |i, r| {
+                draw(
+                    &node.children[i],
+                    r,
+                    surface,
+                    h_child,
+                    false,
+                    depth + 1,
+                    t,
+                    light,
+                    highlight,
+                    show_free,
+                    show_unknown,
+                );
+            },
+        );
     }
 }
 
 /// Render the subtree under `root` (the scan root, or the zoomed-in folder)
 /// into a `w`×`h` BGRA buffer. When `highlight` is `Some(ext)`, leaves of that
-/// extension stay in full colour and everything else is dimmed.
-pub fn render(root: &Node, w: u32, h: u32, background: [u8; 3], highlight: Option<u16>) -> Vec<u8> {
+/// extension stay in full colour and everything else is dimmed. Drive
+/// pseudo-items are only laid out when `show_free` / `show_unknown` are set
+/// (both off by default, like WinDirStat).
+pub fn render(
+    root: &Node,
+    w: u32,
+    h: u32,
+    background: [u8; 3],
+    highlight: Option<u16>,
+    show_free: bool,
+    show_unknown: bool,
+) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let mut buf = vec![0u8; w * h * 4];
     for px in buf.chunks_exact_mut(4) {
@@ -370,13 +590,34 @@ pub fn render(root: &Node, w: u32, h: u32, background: [u8; 3], highlight: Optio
         x1: w as f64,
         y1: h as f64,
     };
-    draw(root, rc, Surface([0.0; 4]), HEIGHT, true, 0, t, &light, highlight);
+    draw(
+        root,
+        rc,
+        Surface([0.0; 4]),
+        HEIGHT,
+        true,
+        0,
+        t,
+        &light,
+        highlight,
+        show_free,
+        show_unknown,
+    );
     buf
 }
 
 /// The node under pixel (`x`, `y`), descending as far as the layout goes.
-/// The returned path is relative to `root`.
-pub fn hit_test(root: &Node, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath> {
+/// The returned path is relative to `root`. Hidden pseudo-items are never
+/// returned.
+pub fn hit_test(
+    root: &Node,
+    w: f64,
+    h: f64,
+    x: f64,
+    y: f64,
+    show_free: bool,
+    show_unknown: bool,
+) -> Option<NodePath> {
     let mut rc = Rect {
         x0: 0.0,
         y0: 0.0,
@@ -393,11 +634,18 @@ pub fn hit_test(root: &Node, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath>
             return Some(path);
         }
         let mut found = None;
-        squarify(&node.children, node.size, rc, |i, r| {
-            if found.is_none() && r.contains(x, y) {
-                found = Some((i, r));
-            }
-        });
+        squarify_filtered(
+            &node.children,
+            node.size,
+            rc,
+            show_free,
+            show_unknown,
+            |i, r| {
+                if found.is_none() && r.contains(x, y) {
+                    found = Some((i, r));
+                }
+            },
+        );
         let (i, r) = found?;
         path.push(i as u32);
         node = &node.children[i];
@@ -406,8 +654,15 @@ pub fn hit_test(root: &Node, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath>
 }
 
 /// The rectangle of the node at `path` (relative to `root`), if it is laid
-/// out at this size.
-pub fn rect_of(root: &Node, w: f64, h: f64, path: &[u32]) -> Option<Rect> {
+/// out at this size. Returns `None` for hidden pseudo-items.
+pub fn rect_of(
+    root: &Node,
+    w: f64,
+    h: f64,
+    path: &[u32],
+    show_free: bool,
+    show_unknown: bool,
+) -> Option<Rect> {
     let mut rc = Rect {
         x0: 0.0,
         y0: 0.0,
@@ -419,12 +674,25 @@ pub fn rect_of(root: &Node, w: f64, h: f64, path: &[u32]) -> Option<Rect> {
         if rc.w() < 1.0 || rc.h() < 1.0 {
             return Some(rc);
         }
+        // Hidden pseudo-items have no rectangle.
+        if let Some(next) = node.children.get(want as usize)
+            && !is_visible(next, show_free, show_unknown)
+        {
+            return None;
+        }
         let mut found = None;
-        squarify(&node.children, node.size, rc, |i, r| {
-            if i == want as usize {
-                found = Some(r);
-            }
-        });
+        squarify_filtered(
+            &node.children,
+            node.size,
+            rc,
+            show_free,
+            show_unknown,
+            |i, r| {
+                if i == want as usize {
+                    found = Some(r);
+                }
+            },
+        );
         rc = found?;
         node = node.children.get(want as usize)?;
     }
@@ -488,12 +756,15 @@ mod tests {
     #[test]
     fn rect_of_and_hit_test_agree() {
         let root = two_file_root();
-        let r = rect_of(&root, 100.0, 100.0, &[0]).unwrap();
+        let r = rect_of(&root, 100.0, 100.0, &[0], false, false).unwrap();
         let (x, y) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
-        assert_eq!(hit_test(&root, 100.0, 100.0, x, y), Some(vec![0]));
+        assert_eq!(
+            hit_test(&root, 100.0, 100.0, x, y, false, false),
+            Some(vec![0])
+        );
 
-        assert_eq!(hit_test(&root, 100.0, 100.0, -1.0, 0.0), None);
-        assert_eq!(rect_of(&root, 100.0, 100.0, &[99]), None);
+        assert_eq!(hit_test(&root, 100.0, 100.0, -1.0, 0.0, false, false), None);
+        assert_eq!(rect_of(&root, 100.0, 100.0, &[99], false, false), None);
     }
 
     #[test]
@@ -505,10 +776,69 @@ mod tests {
     }
 
     #[test]
+    fn pseudo_item_colours_match_windirstat() {
+        assert_eq!(node_color(&Node::free_space(1)), FREE_SPACE_COLOR);
+        assert_eq!(node_color(&Node::unknown(1)), UNKNOWN_COLOR);
+        assert_eq!(node_color(&file("a.txt", 1)), OTHER);
+    }
+
+    #[test]
     fn render_writes_an_opaque_bgra_buffer() {
         let root = two_file_root();
-        let buf = render(&root, 16, 16, [24, 24, 27], None);
+        let buf = render(&root, 16, 16, [24, 24, 27], None, false, false);
         assert_eq!(buf.len(), 16 * 16 * 4);
         assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
+    }
+
+    #[test]
+    fn hidden_pseudo_items_are_skipped() {
+        let mut root = Node::dir("root".into(), 0);
+        root.children.push(file("real", 50));
+        root.children.push(Node::free_space(30));
+        root.children.push(Node::unknown(20));
+        root.finalize();
+        assert_eq!(root.size, 100);
+
+        // Hidden: only the real file is laid out over the whole rect.
+        let mut cells = Vec::new();
+        squarify_filtered(
+            &root.children,
+            root.size,
+            test_rect(),
+            false,
+            false,
+            |i, r| cells.push((i, r)),
+        );
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].0, 0);
+        assert!((cells[0].1.w() * cells[0].1.h() - 8000.0).abs() < 0.01);
+
+        // Shown: all three take part.
+        let mut cells = Vec::new();
+        squarify_filtered(
+            &root.children,
+            root.size,
+            test_rect(),
+            true,
+            true,
+            |i, r| cells.push((i, r)),
+        );
+        assert_eq!(cells.len(), 3);
+
+        // hit_test never returns hidden pseudo-items.
+        let hit = hit_test(&root, 100.0, 80.0, 50.0, 40.0, false, false).unwrap();
+        assert_eq!(hit, vec![0]);
+        // rect_of returns None for hidden pseudo-items.
+        assert_eq!(rect_of(&root, 100.0, 80.0, &[1], false, false), None);
+        assert!(rect_of(&root, 100.0, 80.0, &[1], true, false).is_some());
+    }
+
+    fn test_rect() -> Rect {
+        Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 100.0,
+            y1: 80.0,
+        }
     }
 }
