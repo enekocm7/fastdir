@@ -1539,6 +1539,8 @@ dependencies = [
  "chrono",
  "parking_lot",
  "rayon",
+ "serde",
+ "serde_json",
  "trash",
  "windows-sys 0.61.2",
 ]

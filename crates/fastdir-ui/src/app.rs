@@ -80,11 +80,13 @@ actions!(
         FocusSearch,
         OpenFilters,
         OpenSettings,
+        ExportResults,
     ]
 );
 
 mod context_menu;
 mod dialogs;
+mod export;
 mod file_list;
 mod filter;
 mod scan_state;
@@ -94,6 +96,7 @@ mod status;
 mod toolbar;
 mod update_ui;
 
+use self::export::ExportForm;
 use self::filter::FilterForm;
 
 const CONTEXT: &str = "FastDir";
@@ -131,6 +134,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
         KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-e", ExportResults, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
     ]);
 }
@@ -286,6 +290,7 @@ pub struct FastDir {
     search: Entity<InputState>,
     filter: Filter,
     filter_form: FilterForm,
+    export_form: ExportForm,
     /// The N largest files in the whole scan, sorted by `top_sort`.
     top_files: Vec<FileEntry>,
     /// The last top-files computation is stale and should run again when the
@@ -440,6 +445,7 @@ impl FastDir {
             search,
             filter: Filter::default(),
             filter_form: FilterForm::default(),
+            export_form: ExportForm::default(),
             top_files: Vec::new(),
             top_stale: true,
             top_selected: None,
@@ -973,6 +979,7 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::toggle_unknown))
             .on_action(cx.listener(Self::focus_search))
             .on_action(cx.listener(Self::open_filters))
+            .on_action(cx.listener(Self::open_export))
             .on_action(cx.listener(Self::open_settings))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
