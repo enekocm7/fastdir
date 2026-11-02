@@ -32,7 +32,8 @@ culprit? Rename, move, recycle or delete it right there.
   - **Extension list** with the colour each type has in the treemap.
   - **Cushion treemap** (squarified, SequoiaView-style shading), rendered on
     the CPU in parallel and drawn as one image. Hover to see a path, click
-    to find the item in the tree.
+    to find the item in the tree, double-click to open it. Zoom into any
+    folder and climb back out with the breadcrumb above the treemap.
   - Panels can be resized by dragging.
 - **File operations** that update the tree in place, with no rescan:
   rename, move (also across drives), move to Recycle Bin, delete permanently,
@@ -76,6 +77,8 @@ fastdir.exe "C:\Users"   scan a folder right away
 | Enter | Toggle the folder |
 | Backspace | Select the parent folder |
 | Ctrl+Enter | Open with the default app |
+| Z | Zoom the treemap into the selected folder |
+| Shift+Z | Zoom the treemap out one folder |
 | Ctrl+E | Show in Explorer |
 | Ctrl+Shift+C | Copy the path |
 | F2 | Rename |
@@ -134,7 +137,7 @@ a release.
 | `src/scanner.rs` | Parallel directory scanner |
 | `src/model.rs` | The scanned tree, extension stats, and how they update after each operation |
 | `src/treemap.rs` | Squarified layout, cushion shading, hit testing |
-| `src/treemap_view.rs` | Treemap panel (off-thread rendering, selection, hover) |
+| `src/treemap_view.rs` | Treemap panel (off-thread rendering, selection, hover, zoom, breadcrumb) |
 | `src/app.rs` | Main window: drive overview, progress, tree, extension list, toolbar, dialogs |
 | `src/drives.rs` | Volume detection |
 | `src/fsops.rs` | Delete / rename / move / reveal |

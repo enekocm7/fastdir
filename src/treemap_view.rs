@@ -1,16 +1,19 @@
 //! The treemap panel: shows the cushion image rendered off the main thread
-//! and turns clicks into selections.
+//! and turns clicks into selections. It can be zoomed into any folder; a
+//! breadcrumb above the image leads back up.
 
 use crate::format;
-use crate::model::{NodePath, Tree};
+use crate::model::{Node, NodePath, Tree};
 use crate::treemap;
 use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use image::{Frame, RgbaImage};
 use parking_lot::RwLock;
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +32,8 @@ struct Key {
     h: u32,
     dark: bool,
     highlight: Option<u16>,
+    /// Bumped whenever the zoom root changes.
+    zoom: u64,
 }
 
 pub struct TreemapView {
@@ -39,6 +44,12 @@ pub struct TreemapView {
     stale: Rc<std::cell::RefCell<Vec<Arc<RenderImage>>>>,
     selection: Option<NodePath>,
     highlight: Option<u16>,
+    /// Folder the treemap is rooted at (`[]` is the scan root).
+    zoom: NodePath,
+    /// File-system path of `zoom`, used to find it again after the tree
+    /// changes (indices shift when sizes change or items are removed).
+    zoom_fs: Option<PathBuf>,
+    zoom_gen: u64,
     hover: Option<(NodePath, SharedString)>,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     scale: Rc<Cell<f32>>,
@@ -58,6 +69,9 @@ impl TreemapView {
             stale: Default::default(),
             selection: None,
             highlight: None,
+            zoom: Vec::new(),
+            zoom_fs: None,
+            zoom_gen: 0,
             hover: None,
             bounds: Rc::new(Cell::new(Bounds::default())),
             scale: Rc::new(Cell::new(1.0)),
@@ -70,6 +84,9 @@ impl TreemapView {
         self.tree = tree;
         self.selection = None;
         self.highlight = None;
+        self.zoom.clear();
+        self.zoom_fs = None;
+        self.zoom_gen += 1;
         self.hover = None;
         if let Some(img) = self.image.take() {
             self.stale.borrow_mut().push(img);
@@ -95,10 +112,75 @@ impl TreemapView {
         }
     }
 
-    /// The tree changed: drop the hover label (paths may have shifted).
+    /// The tree changed: drop the hover label (paths may have shifted) and
+    /// find the zoom folder again, falling back to its closest surviving
+    /// ancestor if it was deleted or moved away.
     pub fn invalidate(&mut self, cx: &mut Context<Self>) {
         self.hover = None;
+        if let (Some(tree), Some(fs)) = (self.tree.clone(), self.zoom_fs.clone()) {
+            let t = tree.read();
+            let found = fs
+                .ancestors()
+                .find_map(|p| t.find(p).filter(|path| t.get(path).is_some_and(Node::is_dir)).map(|path| (path, p)));
+            let (path, p) = found.unwrap_or_else(|| (Vec::new(), t.root_path.as_path()));
+            let p = p.to_path_buf();
+            drop(t);
+            if path != self.zoom {
+                self.zoom = path;
+                self.zoom_gen += 1;
+            }
+            self.zoom_fs = Some(p);
+        }
         cx.notify();
+    }
+
+    /// `old` was renamed or moved to `new` (the tree is already updated). If
+    /// the zoom folder is `old` or inside it, follow it to its new location,
+    /// unless it left the scanned tree. Call before [`Self::invalidate`].
+    pub fn path_moved(&mut self, old: &std::path::Path, new: &std::path::Path) {
+        let in_tree = self.tree.as_ref().is_some_and(|t| t.read().find(new).is_some());
+        if !in_tree {
+            return;
+        }
+        if let Some(rest) = self.zoom_fs.as_deref().and_then(|z| z.strip_prefix(old).ok()) {
+            self.zoom_fs = Some(new.join(rest));
+        }
+    }
+
+    /// The folder the treemap is rooted at.
+    pub fn zoom(&self) -> &NodePath {
+        &self.zoom
+    }
+
+    /// Root the treemap at the folder `path`. Files zoom to their folder.
+    pub fn set_zoom(&mut self, mut path: NodePath, cx: &mut Context<Self>) {
+        let Some(tree) = self.tree.clone() else { return };
+        let fs = {
+            let t = tree.read();
+            while !path.is_empty() && !t.get(&path).is_some_and(Node::is_dir) {
+                path.pop();
+            }
+            t.fs_path(&path)
+        };
+        if path == self.zoom {
+            return;
+        }
+        self.zoom = path;
+        self.zoom_fs = fs;
+        self.zoom_gen += 1;
+        self.hover = None;
+        cx.notify();
+    }
+
+    /// Go up one folder. Returns false when already at the scan root.
+    pub fn zoom_out(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.zoom.is_empty() {
+            return false;
+        }
+        let mut path = self.zoom.clone();
+        path.pop();
+        self.set_zoom(path, cx);
+        true
     }
 
     fn request(&mut self, key: Key, cx: &mut Context<Self>) {
@@ -110,6 +192,7 @@ impl TreemapView {
         self.rendering = true;
         let background = if key.dark { [24, 24, 27] } else { [235, 235, 235] };
         let first = self.image.is_none();
+        let zoom = self.zoom.clone();
         self._task = Some(cx.spawn(async move |this, cx| {
             // Coalesce bursts of resizes into one render.
             if !first {
@@ -121,7 +204,8 @@ impl TreemapView {
                 .background_executor()
                 .spawn(async move {
                     let t = tree.read();
-                    treemap::render(&t, key.w, key.h, background, key.highlight)
+                    let root = t.get(&zoom).unwrap_or(&t.root);
+                    treemap::render(root, key.w, key.h, background, key.highlight)
                 })
                 .await;
             let Some(img) = RgbaImage::from_raw(key.w, key.h, buf) else {
@@ -157,7 +241,11 @@ impl TreemapView {
     fn hit(&self, position: Point<Pixels>) -> Option<NodePath> {
         let tree = self.tree.as_ref()?.read();
         let (w, h, x, y) = self.device_point(position);
-        treemap::hit_test(&tree, w, h, x, y)
+        let root = tree.get(&self.zoom)?;
+        let rel = treemap::hit_test(root, w, h, x, y)?;
+        let mut path = self.zoom.clone();
+        path.extend(rel);
+        Some(path)
     }
 
     fn on_mouse_down(&mut self, ev: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -203,6 +291,8 @@ impl Render for TreemapView {
         let pending = self.pending;
         let image_key = self.image_key;
         let highlight = self.highlight;
+        let zoom = self.zoom_gen;
+        let zoom_path = self.zoom.clone();
         let has_tree = self.tree.is_some();
         let _ = window;
 
@@ -214,7 +304,7 @@ impl Render for TreemapView {
                 let w = (f32::from(bounds.size.width) * scale).round() as u32;
                 let h = (f32::from(bounds.size.height) * scale).round() as u32;
                 if has_tree && w >= 4 && h >= 4 {
-                    let key = Key { generation, w, h, dark, highlight };
+                    let key = Key { generation, w, h, dark, highlight, zoom };
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
                             entity.update(cx, |this, cx| this.request(key, cx)).ok();
@@ -232,12 +322,14 @@ impl Render for TreemapView {
                         .ok();
                 }
                 let (Some(tree), Some(sel)) = (tree, selection) else { return };
+                // Only things inside the zoomed folder are on screen.
+                let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else { return };
                 let scale = window.scale_factor() as f64;
                 let w = (f32::from(bounds.size.width) as f64 * scale).round();
                 let h = (f32::from(bounds.size.height) as f64 * scale).round();
                 let rect = {
                     let t = tree.read();
-                    treemap::rect_of(&t, w, h, &sel)
+                    t.get(&zoom_path).and_then(|root| treemap::rect_of(root, w, h, rel))
                 };
                 if let Some(r) = rect {
                     let origin = bounds.origin;
@@ -279,11 +371,14 @@ impl Render for TreemapView {
         let muted = theme.muted_foreground;
         let popover = theme.popover;
         let fg = theme.popover_foreground;
+        let breadcrumb = has_tree.then(|| self.render_breadcrumb(cx));
 
-        div()
+        let body = div()
             .id("treemap")
             .relative()
-            .size_full()
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .overflow_hidden()
             .bg(if dark { rgb(0x18181b) } else { rgb(0xebebeb) })
             .child(canvas)
@@ -338,6 +433,83 @@ impl Render for TreemapView {
                         .overflow_hidden()
                         .child(label.clone()),
                 )
-            })
+            });
+
+        v_flex()
+            .size_full()
+            .children(breadcrumb)
+            .child(body)
+    }
+}
+
+impl TreemapView {
+    /// `C:\ > Users > me > AppData`, one clickable part per folder.
+    fn render_breadcrumb(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme();
+        let mut parts: Vec<(SharedString, NodePath)> = Vec::new();
+        if let Some(tree) = &self.tree {
+            let t = tree.read();
+            parts.push((t.root_path.display().to_string().into(), Vec::new()));
+            let mut node = &t.root;
+            for (depth, &i) in self.zoom.iter().enumerate() {
+                let Some(child) = node.children.get(i as usize) else { break };
+                parts.push((child.name.to_string().into(), self.zoom[..=depth].to_vec()));
+                node = child;
+            }
+        }
+        let last = parts.len().saturating_sub(1);
+        let (fg, muted, hover_bg) = (theme.foreground, theme.muted_foreground, theme.secondary_hover);
+        let zoomed = !self.zoom.is_empty();
+
+        h_flex()
+            .h(px(26.))
+            .flex_shrink_0()
+            .w_full()
+            .px_2()
+            .gap_2()
+            .justify_between()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .text_xs()
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .gap_0p5()
+                    .children(parts.into_iter().enumerate().map(|(ix, (label, path))| {
+                        let current = ix == last;
+                        h_flex()
+                            .flex_shrink_0()
+                            .gap_0p5()
+                            .when(ix > 0, |this| {
+                                this.child(Icon::new(IconName::ChevronRight).xsmall().text_color(muted))
+                            })
+                            .child(
+                                div()
+                                    .id(("crumb", ix))
+                                    .px_1()
+                                    .rounded_sm()
+                                    .text_color(if current { fg } else { muted })
+                                    .when(current, |this| this.font_weight(FontWeight::SEMIBOLD))
+                                    .when(!current, |this| {
+                                        this.cursor_pointer()
+                                            .hover(move |s| s.bg(hover_bg).text_color(fg))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.set_zoom(path.clone(), cx);
+                                            }))
+                                    })
+                                    .child(label),
+                            )
+                    })),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_color(muted)
+                    .child(if zoomed { "Z zoom in · Shift+Z zoom out" } else { "Z to zoom into a folder" }),
+            )
     }
 }

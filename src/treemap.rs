@@ -9,7 +9,7 @@
 //! and highlighting re-run the layout only along a single path instead of
 //! keeping millions of rectangles in memory.
 
-use crate::model::{NO_EXT, Node, NodePath, Tree};
+use crate::model::{NO_EXT, Node, NodePath};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -341,10 +341,10 @@ fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u
     }
 }
 
-/// Render the whole tree into a `w`×`h` BGRA buffer. When `highlight` is
-/// `Some(ext)`, leaves of that extension stay in full colour and everything
-/// else is dimmed.
-pub fn render(tree: &Tree, w: u32, h: u32, background: [u8; 3], highlight: Option<u16>) -> Vec<u8> {
+/// Render the subtree under `root` (the scan root, or the zoomed-in folder)
+/// into a `w`×`h` BGRA buffer. When `highlight` is `Some(ext)`, leaves of that
+/// extension stay in full colour and everything else is dimmed.
+pub fn render(root: &Node, w: u32, h: u32, background: [u8; 3], highlight: Option<u16>) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let mut buf = vec![0u8; w * h * 4];
     for px in buf.chunks_exact_mut(4) {
@@ -370,12 +370,13 @@ pub fn render(tree: &Tree, w: u32, h: u32, background: [u8; 3], highlight: Optio
         x1: w as f64,
         y1: h as f64,
     };
-    draw(&tree.root, rc, Surface([0.0; 4]), HEIGHT, true, 0, t, &light, highlight);
+    draw(root, rc, Surface([0.0; 4]), HEIGHT, true, 0, t, &light, highlight);
     buf
 }
 
 /// The node under pixel (`x`, `y`), descending as far as the layout goes.
-pub fn hit_test(tree: &Tree, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath> {
+/// The returned path is relative to `root`.
+pub fn hit_test(root: &Node, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath> {
     let mut rc = Rect {
         x0: 0.0,
         y0: 0.0,
@@ -385,7 +386,7 @@ pub fn hit_test(tree: &Tree, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath>
     if !rc.contains(x, y) {
         return None;
     }
-    let mut node = &tree.root;
+    let mut node = root;
     let mut path = Vec::new();
     loop {
         if !node.is_dir() || node.children.is_empty() || rc.w() < 1.0 || rc.h() < 1.0 {
@@ -404,15 +405,16 @@ pub fn hit_test(tree: &Tree, w: f64, h: f64, x: f64, y: f64) -> Option<NodePath>
     }
 }
 
-/// The rectangle of the node at `path`, if it is laid out at this size.
-pub fn rect_of(tree: &Tree, w: f64, h: f64, path: &[u32]) -> Option<Rect> {
+/// The rectangle of the node at `path` (relative to `root`), if it is laid
+/// out at this size.
+pub fn rect_of(root: &Node, w: f64, h: f64, path: &[u32]) -> Option<Rect> {
     let mut rc = Rect {
         x0: 0.0,
         y0: 0.0,
         x1: w,
         y1: h,
     };
-    let mut node = &tree.root;
+    let mut node = root;
     for &want in path {
         if rc.w() < 1.0 || rc.h() < 1.0 {
             return Some(rc);
