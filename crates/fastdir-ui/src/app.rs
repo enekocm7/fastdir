@@ -6,7 +6,7 @@ use fastdir_core::drives::{self, Drive};
 use fastdir_core::format;
 use fastdir_core::fsops;
 use fastdir_core::model::{NO_EXT, Node, NodePath, Subtree, Tree};
-use fastdir_core::scanner::{self, Progress, ScanResult};
+use fastdir_core::scanner::{self, LiveScanResult, Progress};
 use fastdir_settings::Settings;
 use fastdir_treemap as treemap;
 use fastdir_updater::{self as updater, Release};
@@ -214,6 +214,8 @@ pub struct FastDir {
     tree: Option<Arc<RwLock<Tree>>>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
+    /// Tree generation the visible rows were built from during a live scan.
+    partial_generation: u64,
     rows: Vec<Row>,
     /// Extension ids with files left, in rank order.
     ext_rows: Vec<u16>,
@@ -303,6 +305,7 @@ impl FastDir {
             tree: None,
             scan_root: None,
             last_scan: None,
+            partial_generation: 0,
             rows: Vec::new(),
             ext_rows: Vec::new(),
             selected: None,
@@ -363,6 +366,27 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Show or hide finished folders while a scan is still running.
+    pub(super) fn toggle_partial_results(&mut self, cx: &mut Context<Self>) {
+        self.settings.show_partial_results = !self.settings.show_partial_results;
+        self.settings.save();
+        let show = self.settings.show_partial_results;
+        let scanning = matches!(self.phase, Phase::Scanning { .. });
+        if scanning {
+            // The tree has been filling in all along; make the view catch up
+            // (or stop refreshing the preview) right away.
+            if show {
+                self.partial_generation = 0;
+                self.rebuild_rows();
+            }
+            self.treemap.update(cx, |t, cx| {
+                t.set_partial(show, cx);
+                t.invalidate(cx);
+            });
+        }
+        cx.notify();
+    }
+
     /// Switch the treemap between logical size and size on disk.
     pub(super) fn toggle_treemap_disk_size(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.settings.treemap_disk_size = !self.settings.treemap_disk_size;
@@ -409,8 +433,12 @@ use std::rc::Rc;
 
 impl Render for FastDir {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let live = matches!(self.phase, Phase::Scanning { .. })
+            && self.settings.show_partial_results
+            && self.tree.is_some();
         let body = match self.phase {
             Phase::Home => self.render_home(cx).into_any_element(),
+            Phase::Scanning { .. } if live => self.render_ready(cx).into_any_element(),
             Phase::Scanning { .. } => self.render_scanning(cx).into_any_element(),
             Phase::Ready => self.render_ready(cx).into_any_element(),
         };
