@@ -18,9 +18,19 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Ctrl+click (Cmd+click on macOS) adds to or removes from the selection.
+pub fn is_toggle_click(m: &Modifiers) -> bool {
+    if cfg!(target_os = "macos") { m.platform } else { m.control }
+}
+
 pub enum TreemapEvent {
-    /// The user clicked a cell (left or right button).
-    Select(NodePath),
+    /// The user clicked a cell. `toggle` is set for Ctrl+click (add to or
+    /// remove from the selection), `context` for a right click.
+    Select {
+        path: NodePath,
+        toggle: bool,
+        context: bool,
+    },
     /// Double-click: open the item.
     Activate(NodePath),
 }
@@ -42,7 +52,8 @@ pub struct TreemapView {
     image_key: Option<Key>,
     pending: Option<Key>,
     stale: Rc<std::cell::RefCell<Vec<Arc<RenderImage>>>>,
-    selection: Option<NodePath>,
+    /// Every selected node; each one gets an outline.
+    selection: Vec<NodePath>,
     highlight: Option<u16>,
     /// Folder the treemap is rooted at (`[]` is the scan root).
     zoom: NodePath,
@@ -67,7 +78,7 @@ impl TreemapView {
             image_key: None,
             pending: None,
             stale: Default::default(),
-            selection: None,
+            selection: Vec::new(),
             highlight: None,
             zoom: Vec::new(),
             zoom_fs: None,
@@ -82,7 +93,7 @@ impl TreemapView {
 
     pub fn set_tree(&mut self, tree: Option<Arc<RwLock<Tree>>>, cx: &mut Context<Self>) {
         self.tree = tree;
-        self.selection = None;
+        self.selection.clear();
         self.highlight = None;
         self.zoom.clear();
         self.zoom_fs = None;
@@ -96,7 +107,7 @@ impl TreemapView {
         cx.notify();
     }
 
-    pub fn set_selection(&mut self, selection: Option<NodePath>, cx: &mut Context<Self>) {
+    pub fn set_selection(&mut self, selection: Vec<NodePath>, cx: &mut Context<Self>) {
         if self.selection != selection {
             self.selection = selection;
             cx.notify();
@@ -250,13 +261,18 @@ impl TreemapView {
 
     fn on_mouse_down(&mut self, ev: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(path) = self.hit(ev.position) {
-            self.selection = Some(path.clone());
-            if ev.button == MouseButton::Left && ev.click_count >= 2 {
+            // The owner decides what the click does to the selection and
+            // pushes the result back through `set_selection`.
+            let toggle = ev.button == MouseButton::Left && is_toggle_click(&ev.modifiers);
+            if !toggle && ev.button == MouseButton::Left && ev.click_count >= 2 {
                 cx.emit(TreemapEvent::Activate(path));
             } else {
-                cx.emit(TreemapEvent::Select(path));
+                cx.emit(TreemapEvent::Select {
+                    path,
+                    toggle,
+                    context: ev.button == MouseButton::Right,
+                });
             }
-            cx.notify();
         }
     }
 
@@ -321,17 +337,16 @@ impl Render for TreemapView {
                         .paint_image(bounds, bounds, Corners::default(), img, 0, false)
                         .ok();
                 }
-                let (Some(tree), Some(sel)) = (tree, selection) else { return };
-                // Only things inside the zoomed folder are on screen.
-                let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else { return };
+                let Some(tree) = tree else { return };
                 let scale = window.scale_factor() as f64;
                 let w = (f32::from(bounds.size.width) as f64 * scale).round();
                 let h = (f32::from(bounds.size.height) as f64 * scale).round();
-                let rect = {
-                    let t = tree.read();
-                    t.get(&zoom_path).and_then(|root| treemap::rect_of(root, w, h, rel))
-                };
-                if let Some(r) = rect {
+                let t = tree.read();
+                let Some(root) = t.get(&zoom_path) else { return };
+                for sel in &selection {
+                    // Only things inside the zoomed folder are on screen.
+                    let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else { continue };
+                    let Some(r) = treemap::rect_of(root, w, h, rel) else { continue };
                     let origin = bounds.origin;
                     let rb = Bounds::new(
                         point(
@@ -343,7 +358,7 @@ impl Render for TreemapView {
                             px((r.h() / scale).max(2.0) as f32),
                         ),
                     );
-                    let _ = cx;
+                    let _ = &cx;
                     window.paint_quad(quad(
                         rb,
                         px(0.),

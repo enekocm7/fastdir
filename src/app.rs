@@ -9,7 +9,7 @@ use crate::scanner::{self, Progress, ScanResult};
 use crate::settings::Settings;
 use crate::updater::{self, Release};
 use crate::treemap;
-use crate::treemap_view::{TreemapEvent, TreemapView};
+use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogButtonProps;
@@ -30,6 +30,7 @@ use gpui_kit::component::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use parking_lot::RwLock;
 use std::cell::Cell;
+use std::collections::BTreeSet;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,6 +42,8 @@ actions!(
     [
         SelectPrev,
         SelectNext,
+        ExtendPrev,
+        ExtendNext,
         SelectFirst,
         SelectLast,
         PageUp,
@@ -74,6 +77,8 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrev, Some(CONTEXT)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
+        KeyBinding::new("shift-up", ExtendPrev, Some(CONTEXT)),
+        KeyBinding::new("shift-down", ExtendNext, Some(CONTEXT)),
         KeyBinding::new("home", SelectFirst, Some(CONTEXT)),
         KeyBinding::new("end", SelectLast, Some(CONTEXT)),
         KeyBinding::new("pageup", PageUp, Some(CONTEXT)),
@@ -124,6 +129,39 @@ enum SortKey {
     Modified,
 }
 
+/// What a click does to the selection.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ClickMode {
+    /// Select just this item.
+    Plain,
+    /// Ctrl+click: add to or remove from the selection.
+    Toggle,
+    /// Shift+click: select everything from the anchor to here.
+    Range,
+    /// Right click: keep a multi-selection if the item is part of it.
+    Context,
+}
+
+impl ClickMode {
+    fn from_modifiers(m: &Modifiers) -> Self {
+        if m.shift {
+            Self::Range
+        } else if is_toggle_click(m) {
+            Self::Toggle
+        } else {
+            Self::Plain
+        }
+    }
+}
+
+/// One item of the (normalised) selection, ready for a file operation.
+struct Target {
+    path: NodePath,
+    fs: PathBuf,
+    is_dir: bool,
+    size: u64,
+}
+
 #[derive(Clone)]
 struct Row {
     path: NodePath,
@@ -152,7 +190,14 @@ pub struct FastDir {
     rows: Vec<Row>,
     /// Extension ids with files left, in rank order.
     ext_rows: Vec<u16>,
+    /// The cursor row. With a multi-selection it is the item clicked last.
     selected: Option<usize>,
+    /// Multi-selection (Ctrl/Shift+click). Empty means "just the cursor row".
+    /// Never contains the scan root. Cleared whenever the tree changes, since
+    /// node paths shift then.
+    marked: BTreeSet<NodePath>,
+    /// Where a Shift+click range starts.
+    anchor: Option<NodePath>,
     /// Extension rank highlighted in the treemap, picked from the ext list.
     selected_ext: Option<u16>,
     sort: (SortKey, bool),
@@ -176,12 +221,19 @@ impl FastDir {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let treemap = cx.new(|_| TreemapView::new());
         let sub = cx.subscribe_in(&treemap, window, |this, _, ev: &TreemapEvent, window, cx| match ev {
-            TreemapEvent::Select(path) => {
-                this.reveal_in_list(path.clone(), cx);
+            TreemapEvent::Select { path, toggle, context } => {
+                let mode = if *toggle {
+                    ClickMode::Toggle
+                } else if *context {
+                    ClickMode::Context
+                } else {
+                    ClickMode::Plain
+                };
+                this.reveal_in_list(path.clone(), mode, cx);
                 this.focus.focus(window, cx);
             }
             TreemapEvent::Activate(path) => {
-                this.reveal_in_list(path.clone(), cx);
+                this.reveal_in_list(path.clone(), ClickMode::Plain, cx);
                 this.open_selected(&OpenItem, window, cx);
             }
         });
@@ -210,6 +262,8 @@ impl FastDir {
             rows: Vec::new(),
             ext_rows: Vec::new(),
             selected: None,
+            marked: BTreeSet::new(),
+            anchor: None,
             selected_ext: None,
             sort: (SortKey::Size, true),
             list_scroll: UniformListScrollHandle::new(),
@@ -254,6 +308,8 @@ impl FastDir {
         self.tree = None;
         self.rows.clear();
         self.selected = None;
+        self.marked.clear();
+        self.anchor = None;
         self.selected_ext = None;
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
         window.set_window_title(&format!("FastDir — scanning {}", root.display()));
@@ -305,11 +361,13 @@ impl FastDir {
         self.last_scan = Some((elapsed, cancelled));
         self.phase = Phase::Ready;
         self.selected = Some(0);
+        self.marked.clear();
+        self.anchor = Some(Vec::new());
         self.selected_ext = None;
         self.rebuild_rows();
         self.treemap.update(cx, |t, cx| {
             t.set_tree(Some(tree), cx);
-            t.set_selection(Some(Vec::new()), cx);
+            t.set_selection(vec![Vec::new()], cx);
         });
         let msg = format!(
             "Scanned {} files ({}) in {}",
@@ -378,6 +436,8 @@ impl FastDir {
         self.tree = None;
         self.rows.clear();
         self.selected = None;
+        self.marked.clear();
+        self.anchor = None;
         self.drives = drives::list();
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
         window.set_window_title("FastDir");
@@ -458,15 +518,113 @@ impl FastDir {
         }
         let ix = ix.min(self.rows.len() - 1);
         self.selected = Some(ix);
+        self.marked.clear();
+        self.anchor = Some(self.rows[ix].path.clone());
         self.list_scroll.scroll_to_item(ix, ScrollStrategy::Top);
-        let path = self.rows[ix].path.clone();
-        self.treemap
-            .update(cx, |t, cx| t.set_selection(Some(path), cx));
+        self.sync_treemap_selection(cx);
         cx.notify();
     }
 
-    /// Expand all ancestors of `path`, select it and scroll it into view.
-    fn reveal_in_list(&mut self, path: NodePath, cx: &mut Context<Self>) {
+    /// Move the cursor to `ix` keeping the anchor, selecting the range
+    /// between them (Shift+arrows).
+    fn extend_row(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.rows.is_empty() {
+            return;
+        }
+        let ix = ix.min(self.rows.len() - 1);
+        if self.anchor.is_none() {
+            self.anchor = self.selected_path();
+        }
+        let path = self.rows[ix].path.clone();
+        self.list_scroll.scroll_to_item(ix, ScrollStrategy::Top);
+        self.apply_click(path, ix, ClickMode::Range, cx);
+    }
+
+    /// Apply a click on the row/cell `path` (currently at row `ix`) to the
+    /// selection and tell the treemap.
+    fn apply_click(&mut self, path: NodePath, ix: usize, mode: ClickMode, cx: &mut Context<Self>) {
+        match mode {
+            ClickMode::Context if self.marked.len() > 1 && self.marked.contains(&path) => {
+                self.selected = Some(ix);
+            }
+            ClickMode::Toggle if !path.is_empty() => {
+                if self.marked.is_empty() {
+                    if let Some(cur) = self.selected_path().filter(|p| !p.is_empty()) {
+                        self.marked.insert(cur);
+                    }
+                }
+                if !self.marked.remove(&path) {
+                    self.marked.insert(path.clone());
+                }
+                // Unticking the last item leaves nothing selected.
+                self.selected = (!self.marked.is_empty()).then_some(ix);
+                self.anchor = Some(path);
+            }
+            ClickMode::Range if !path.is_empty() => {
+                let from = self
+                    .anchor
+                    .as_ref()
+                    .and_then(|a| self.rows.iter().position(|r| &r.path == a))
+                    .or(self.selected)
+                    .unwrap_or(ix);
+                let (lo, hi) = (from.min(ix), from.max(ix));
+                self.marked = self.rows[lo..=hi]
+                    .iter()
+                    .filter(|r| !r.path.is_empty())
+                    .map(|r| r.path.clone())
+                    .collect();
+                self.selected = Some(ix);
+            }
+            _ => {
+                self.marked.clear();
+                self.selected = Some(ix);
+                self.anchor = Some(path);
+            }
+        }
+        self.sync_treemap_selection(cx);
+        cx.notify();
+    }
+
+    fn sync_treemap_selection(&mut self, cx: &mut Context<Self>) {
+        let sel = self.selection();
+        self.treemap.update(cx, |t, cx| t.set_selection(sel, cx));
+    }
+
+    /// Every selected node path, sorted. Without a multi-selection this is
+    /// just the cursor row.
+    fn selection(&self) -> Vec<NodePath> {
+        if self.marked.is_empty() {
+            self.selected_path().into_iter().collect()
+        } else {
+            self.marked.iter().cloned().collect()
+        }
+    }
+
+    /// More than one item is selected.
+    fn is_multi(&self) -> bool {
+        self.marked.len() > 1
+    }
+
+    /// The selection as file operations see it: items inside another selected
+    /// folder are dropped, so nothing is counted or deleted twice.
+    fn targets(&self) -> Vec<Target> {
+        let Some(tree) = &self.tree else { return Vec::new() };
+        let tree = tree.read();
+        let mut out: Vec<Target> = Vec::new();
+        // Sorted, so a folder always comes right before what is inside it.
+        for path in self.selection() {
+            if out.last().is_some_and(|t| path.starts_with(&t.path)) {
+                continue;
+            }
+            let (Some(node), Some(fs)) = (tree.get(&path), tree.fs_path(&path)) else { continue };
+            out.push(Target { fs, is_dir: node.is_dir(), size: node.size, path });
+        }
+        out
+    }
+
+    /// Expand all ancestors of `path`, select it (per `mode`) and scroll it
+    /// into view.
+    fn reveal_in_list(&mut self, path: NodePath, mode: ClickMode, cx: &mut Context<Self>) {
         let Some(tree) = self.tree.clone() else { return };
         {
             let mut t = tree.write();
@@ -478,12 +636,9 @@ impl FastDir {
         }
         self.rebuild_rows();
         if let Some(ix) = self.rows.iter().position(|r| r.path == path) {
-            self.selected = Some(ix);
             self.list_scroll.scroll_to_item(ix, ScrollStrategy::Center);
+            self.apply_click(path, ix, mode, cx);
         }
-        self.treemap
-            .update(cx, |t, cx| t.set_selection(Some(path), cx));
-        cx.notify();
     }
 
     fn set_expanded(&mut self, ix: usize, expanded: Option<bool>, cx: &mut Context<Self>) {
@@ -529,13 +684,16 @@ impl FastDir {
             }
         }
         self.selected = None;
+        // Node paths shifted, so a multi-selection no longer points anywhere.
+        self.marked.clear();
         self.rebuild_rows();
         let sel = select.unwrap_or_default();
         self.selected = self.rows.iter().position(|r| r.path == sel).or(Some(0));
         if let Some(ix) = self.selected {
             self.list_scroll.scroll_to_item(ix, ScrollStrategy::Center);
         }
-        let sel = self.selected_path();
+        self.anchor = self.selected_path();
+        let sel = self.selection();
         self.treemap.update(cx, |t, cx| {
             t.invalidate(cx);
             t.set_selection(sel, cx);
@@ -554,6 +712,14 @@ impl FastDir {
     fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {
         let ix = self.selected.map(|i| i + 1).unwrap_or(0);
         self.select_row(ix, cx);
+    }
+    fn extend_prev(&mut self, _: &ExtendPrev, _: &mut Window, cx: &mut Context<Self>) {
+        let ix = self.selected.unwrap_or(0).saturating_sub(1);
+        self.extend_row(ix, cx);
+    }
+    fn extend_next(&mut self, _: &ExtendNext, _: &mut Window, cx: &mut Context<Self>) {
+        let ix = self.selected.map(|i| i + 1).unwrap_or(0);
+        self.extend_row(ix, cx);
     }
     fn select_first(&mut self, _: &SelectFirst, _: &mut Window, cx: &mut Context<Self>) {
         self.select_row(0, cx);
@@ -652,22 +818,38 @@ impl FastDir {
     }
 
     fn open_selected(&mut self, _: &OpenItem, _: &mut Window, _: &mut Context<Self>) {
+        if self.is_multi() {
+            return;
+        }
         if let Some((_, p, _)) = self.selected_fs_path() {
             fsops::open(&p);
         }
     }
 
     fn reveal_selected(&mut self, _: &RevealItem, _: &mut Window, _: &mut Context<Self>) {
+        if self.is_multi() {
+            return;
+        }
         if let Some((_, p, _)) = self.selected_fs_path() {
             fsops::reveal(&p);
         }
     }
 
     fn copy_path(&mut self, _: &CopyPath, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((_, p, _)) = self.selected_fs_path() {
-            cx.write_to_clipboard(ClipboardItem::new_string(p.display().to_string()));
-            window.push_notification("Path copied to clipboard", cx);
+        let targets = self.targets();
+        if targets.is_empty() {
+            return;
         }
+        let text = targets
+            .iter()
+            .map(|t| t.fs.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        window.push_notification(
+            if targets.len() > 1 { "Paths copied to clipboard" } else { "Path copied to clipboard" },
+            cx,
+        );
     }
 
     fn trash_item(&mut self, _: &TrashItem, window: &mut Window, cx: &mut Context<Self>) {
@@ -682,28 +864,42 @@ impl FastDir {
         if self.busy.is_some() {
             return;
         }
-        let Some((path, fs, is_dir)) = self.selected_fs_path() else { return };
-        if path.is_empty() {
+        let targets = self.targets();
+        if targets.is_empty() {
+            return;
+        }
+        if targets.iter().any(|t| t.path.is_empty()) {
             window.push_notification(
                 (NotificationType::Warning, "The scan root itself cannot be deleted here."),
                 cx,
             );
             return;
         }
-        let (size, items) = {
-            let tree = self.tree.as_ref().unwrap().read();
-            let n = tree.get(&path).unwrap();
-            (n.size, n.items())
-        };
-        let what = if is_dir {
-            format!(
-                "the folder \"{}\" ({}, {} items)",
-                fs.display(),
-                format::bytes(size),
-                format::count(items)
-            )
+        let what = if let [t] = targets.as_slice() {
+            if t.is_dir {
+                let items = self
+                    .tree
+                    .as_ref()
+                    .and_then(|tree| tree.read().get(&t.path).map(Node::items))
+                    .unwrap_or(0);
+                format!(
+                    "the folder \"{}\" ({}, {} items)",
+                    t.fs.display(),
+                    format::bytes(t.size),
+                    format::count(items)
+                )
+            } else {
+                format!("the file \"{}\" ({})", t.fs.display(), format::bytes(t.size))
+            }
         } else {
-            format!("the file \"{}\" ({})", fs.display(), format::bytes(size))
+            let folders = targets.iter().filter(|t| t.is_dir).count();
+            format!(
+                "{} selected items ({} folders, {} files) totalling {}",
+                targets.len(),
+                folders,
+                targets.len() - folders,
+                format::bytes(targets.iter().map(|t| t.size).sum())
+            )
         };
         let description: SharedString = if permanent {
             format!("Permanently delete {what}? This cannot be undone.").into()
@@ -711,10 +907,11 @@ impl FastDir {
             format!("Move {what} to the Recycle Bin?").into()
         };
         let title = if permanent { "Delete permanently" } else { "Move to Recycle Bin" };
+        let paths: Vec<PathBuf> = targets.into_iter().map(|t| t.fs).collect();
         let entity = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let entity = entity.clone();
-            let fs = fs.clone();
+            let paths = paths.clone();
             alert
                 .title(title)
                 .description(description.clone())
@@ -726,43 +923,74 @@ impl FastDir {
                         .cancel_text("Cancel"),
                 )
                 .on_ok(move |_, window, cx| {
-                    let fs = fs.clone();
+                    let paths = paths.clone();
                     entity
-                        .update(cx, |this, cx| this.run_delete(fs, permanent, window, cx))
+                        .update(cx, |this, cx| this.run_delete(paths, permanent, window, cx))
                         .ok();
                     true
                 })
         });
     }
 
-    fn run_delete(&mut self, fs: PathBuf, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.busy = Some(format!("Deleting {}…", fs.display()).into());
+    fn run_delete(&mut self, paths: Vec<PathBuf>, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let total = paths.len();
+        self.busy = Some(
+            match paths.as_slice() {
+                [one] => format!("Deleting {}…", one.display()),
+                _ => format!("Deleting {total} items…"),
+            }
+            .into(),
+        );
         cx.notify();
-        let target = fs.clone();
-        let job = cx
-            .background_executor()
-            .spawn(async move { fsops::delete(&target, permanent) });
+        let job = cx.background_executor().spawn(async move {
+            paths
+                .into_iter()
+                .map(|p| {
+                    let res = fsops::delete(&p, permanent);
+                    (p, res)
+                })
+                .collect::<Vec<_>>()
+        });
         cx.spawn_in(window, async move |this, cx| {
-            let res = job.await;
+            let results = job.await;
             this.update_in(cx, |this, window, cx| {
                 this.busy = None;
-                match res {
-                    Ok(()) => {
-                        let parent = this.remove_from_tree(&fs);
-                        this.tree_changed(parent, cx);
-                        window.push_notification(
-                            Notification::success(format!("Deleted {}", fs.display())),
-                            cx,
-                        );
+                let mut select = None;
+                let mut done = Vec::new();
+                let mut failed = Vec::new();
+                for (path, res) in results {
+                    match res {
+                        Ok(()) => {
+                            // The last removal leaves the final, valid path.
+                            if let Some(parent) = this.remove_from_tree(&path) {
+                                select = Some(parent);
+                            }
+                            done.push(path);
+                        }
+                        Err(e) => failed.push((path, e)),
                     }
-                    Err(e) => {
-                        window.push_notification(
-                            Notification::error(format!("Could not delete {}: {e}", fs.display()))
-                                .title("Delete failed"),
-                            cx,
-                        );
-                        cx.notify();
-                    }
+                }
+                if done.is_empty() {
+                    cx.notify();
+                } else {
+                    this.tree_changed(select, cx);
+                    let msg = match done.as_slice() {
+                        [one] => format!("Deleted {}", one.display()),
+                        _ => format!("Deleted {} items", done.len()),
+                    };
+                    window.push_notification(Notification::success(msg), cx);
+                }
+                if let Some((first, err)) = failed.first() {
+                    let msg = if total == 1 {
+                        format!("Could not delete {}: {err}", first.display())
+                    } else {
+                        format!(
+                            "Could not delete {} of {total} items. {}: {err}",
+                            failed.len(),
+                            first.display()
+                        )
+                    };
+                    window.push_notification(Notification::error(msg).title("Delete failed"), cx);
                 }
             })
             .ok();
@@ -781,7 +1009,7 @@ impl FastDir {
     }
 
     fn rename_item(&mut self, _: &RenameItem, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy.is_some() {
+        if self.busy.is_some() || self.is_multi() {
             return;
         }
         let Some((path, fs, _)) = self.selected_fs_path() else { return };
@@ -901,10 +1129,12 @@ impl FastDir {
         if self.busy.is_some() {
             return;
         }
-        let Some((path, fs, _)) = self.selected_fs_path() else { return };
-        if path.is_empty() {
+        let targets = self.targets();
+        if targets.is_empty() || targets.iter().any(|t| t.path.is_empty()) {
             return;
         }
+        let total_size: u64 = targets.iter().map(|t| t.size).sum();
+        let srcs: Vec<PathBuf> = targets.into_iter().map(|t| t.fs).collect();
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -914,57 +1144,133 @@ impl FastDir {
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = rx.await else { return };
             let Some(dest_dir) = paths.into_iter().next() else { return };
-            let src = fs.clone();
-            let label: SharedString = format!("Moving {} → {}…", fs.display(), dest_dir.display()).into();
-            this.update(cx, |this, cx| {
-                this.busy = Some(label);
-                cx.notify();
+            this.update_in(cx, |this, window, cx| {
+                if srcs.len() == 1 {
+                    // Picking the folder was the confirmation.
+                    this.run_move(srcs, dest_dir, window, cx);
+                } else {
+                    this.confirm_move(srcs, total_size, dest_dir, window, cx);
+                }
             })
             .ok();
-            let dest_dir2 = dest_dir.clone();
-            let res = cx
-                .background_executor()
-                .spawn(async move {
-                    let dest = fsops::move_into(&src, &dest_dir2)?;
-                    // Measure what arrived so the destination's size is right.
-                    let meta = std::fs::symlink_metadata(&dest).ok();
-                    let node = if meta.as_ref().is_some_and(|m| m.is_dir()) {
-                        scanner::scan_subtree(&dest)
-                    } else {
-                        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                        let modified = meta
-                            .and_then(|m| m.modified().ok())
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
-                        let name = dest.file_name().unwrap().to_string_lossy();
-                        Node::file(name.into(), size, modified)
-                    };
-                    Ok::<_, String>((dest, node))
+        })
+        .detach();
+    }
+
+    /// One confirmation for a whole multi-selection, showing its total size.
+    fn confirm_move(
+        &mut self,
+        srcs: Vec<PathBuf>,
+        total_size: u64,
+        dest_dir: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let description: SharedString = format!(
+            "Move {} selected items ({}) to \"{}\"?",
+            srcs.len(),
+            format::bytes(total_size),
+            dest_dir.display()
+        )
+        .into();
+        let entity = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let entity = entity.clone();
+            let srcs = srcs.clone();
+            let dest_dir = dest_dir.clone();
+            alert
+                .title("Move items")
+                .description(description.clone())
+                .confirm()
+                .button_props(DialogButtonProps::default().ok_text("Move").cancel_text("Cancel"))
+                .on_ok(move |_, window, cx| {
+                    let (srcs, dest_dir) = (srcs.clone(), dest_dir.clone());
+                    entity
+                        .update(cx, |this, cx| this.run_move(srcs, dest_dir, window, cx))
+                        .ok();
+                    true
                 })
-                .await;
+        });
+    }
+
+    fn run_move(&mut self, srcs: Vec<PathBuf>, dest_dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let total = srcs.len();
+        self.busy = Some(
+            match srcs.as_slice() {
+                [one] => format!("Moving {} → {}…", one.display(), dest_dir.display()),
+                _ => format!("Moving {total} items → {}…", dest_dir.display()),
+            }
+            .into(),
+        );
+        cx.notify();
+        let dest = dest_dir.clone();
+        let job = cx.background_executor().spawn(async move {
+            srcs.into_iter()
+                .map(|src| {
+                    let res = fsops::move_into(&src, &dest).map(|dest| {
+                        // Measure what arrived so the destination's size is right.
+                        let meta = std::fs::symlink_metadata(&dest).ok();
+                        let node = if meta.as_ref().is_some_and(|m| m.is_dir()) {
+                            scanner::scan_subtree(&dest)
+                        } else {
+                            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                            let modified = meta
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0);
+                            let name = dest.file_name().unwrap().to_string_lossy();
+                            Node::file(name.into(), size, modified)
+                        };
+                        (dest, node)
+                    });
+                    (src, res)
+                })
+                .collect::<Vec<_>>()
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let results = job.await;
             this.update_in(cx, |this, window, cx| {
                 this.busy = None;
-                match res {
-                    Ok((dest, node)) => {
-                        let mut select = this.remove_from_tree(&fs);
-                        if let Some(tree) = &this.tree {
-                            let mut t = tree.write();
-                            if let Some(dir) = t.find(&dest_dir) {
-                                select = t.insert(&dir, node);
+                let mut select = None;
+                let mut moved = Vec::new();
+                let mut failed = Vec::new();
+                for (src, res) in results {
+                    match res {
+                        Ok((dest, node)) => {
+                            let mut sel = this.remove_from_tree(&src);
+                            if let Some(tree) = &this.tree {
+                                let mut t = tree.write();
+                                if let Some(dir) = t.find(&dest_dir) {
+                                    sel = t.insert(&dir, node);
+                                }
                             }
+                            if sel.is_some() {
+                                select = sel;
+                            }
+                            this.treemap.update(cx, |t, _| t.path_moved(&src, &dest));
+                            moved.push(dest);
                         }
-                        this.treemap.update(cx, |t, _| t.path_moved(&fs, &dest));
-                        this.tree_changed(select, cx);
-                        window.push_notification(
-                            Notification::success(format!("Moved to {}", dest.display())),
-                            cx,
-                        );
+                        Err(e) => failed.push((src, e)),
                     }
-                    Err(e) => {
-                        window.push_notification(Notification::error(e).title("Move failed"), cx);
-                        cx.notify();
-                    }
+                }
+                if moved.is_empty() {
+                    cx.notify();
+                } else {
+                    this.tree_changed(select, cx);
+                    let msg = match moved.as_slice() {
+                        [one] => format!("Moved to {}", one.display()),
+                        _ => format!("Moved {} items to {}", moved.len(), dest_dir.display()),
+                    };
+                    window.push_notification(Notification::success(msg), cx);
+                }
+                if let Some((first, err)) = failed.first() {
+                    let msg = if total == 1 {
+                        err.clone()
+                    } else {
+                        format!("Could not move {} of {total} items. {}: {err}", failed.len(), first.display())
+                    };
+                    window.push_notification(Notification::error(msg).title("Move failed"), cx);
                 }
             })
             .ok();
@@ -974,7 +1280,7 @@ impl FastDir {
 
     /// Re-scan just the selected folder and splice it into the tree.
     fn refresh_item(&mut self, _: &RefreshItem, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy.is_some() {
+        if self.busy.is_some() || self.is_multi() {
             return;
         }
         let Some((path, fs, is_dir)) = self.selected_fs_path() else { return };
@@ -1027,24 +1333,30 @@ impl FastDir {
     // ------------------------------------------------------------------
 
     fn build_context_menu(&self, menu: PopupMenu, cx: &App) -> PopupMenu {
-        let is_root = self.selected_path().is_some_and(|p| p.is_empty());
-        let is_dir = self.selected_fs_path().is_some_and(|s| s.2);
+        let multi = self.is_multi();
+        let is_root = self.only_root();
+        let is_dir = !multi && self.selected_fs_path().is_some_and(|s| s.2);
         let can_zoom_in = self.can_zoom_in(cx);
         let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
         menu.action_context(self.focus.clone())
-            .menu_with_icon("Open", IconName::ExternalLink, Box::new(OpenItem))
-            .menu_with_icon("Show in Explorer", IconName::FolderOpen, Box::new(RevealItem))
+            .menu_with_icon_and_disabled("Open", IconName::ExternalLink, Box::new(OpenItem), multi)
+            .menu_with_icon_and_disabled("Show in Explorer", IconName::FolderOpen, Box::new(RevealItem), multi)
             .menu_with_icon("Copy path", IconName::Copy, Box::new(CopyPath))
             .separator()
             .menu_with_icon_and_disabled("Zoom in", IconName::ZoomIn, Box::new(ZoomIn), !can_zoom_in)
             .menu_with_icon_and_disabled("Zoom out", IconName::ZoomOut, Box::new(ZoomOut), !can_zoom_out)
             .separator()
-            .menu_with_icon_and_disabled("Rename…", IconName::Pencil, Box::new(RenameItem), is_root)
+            .menu_with_icon_and_disabled("Rename…", IconName::Pencil, Box::new(RenameItem), is_root || multi)
             .menu_with_icon_and_disabled("Move to…", IconName::FolderInput, Box::new(MoveItem), is_root)
             .menu_with_icon_and_disabled("Refresh", IconName::RefreshCw, Box::new(RefreshItem), !is_dir)
             .separator()
             .menu_with_icon_and_disabled("Move to Recycle Bin", IconName::Recycle, Box::new(TrashItem), is_root)
             .menu_with_icon_and_disabled("Delete permanently", IconName::Trash, Box::new(DeleteItem), is_root)
+    }
+
+    /// Only the scan root is selected (it cannot be deleted, moved or renamed).
+    fn only_root(&self) -> bool {
+        self.marked.is_empty() && self.selected_path().is_some_and(|p| p.is_empty())
     }
 
     fn render_rows(&mut self, range: Range<usize>, _: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -1071,7 +1383,11 @@ impl FastDir {
                 tree.get(&row.path[..row.path.len() - 1]).map(|p| p.size).unwrap_or(node.size)
             };
             let frac = if parent_size == 0 { 0.0 } else { node.size as f32 / parent_size as f32 };
-            let is_sel = selected == Some(ix);
+            let is_sel = if self.marked.is_empty() {
+                selected == Some(ix)
+            } else {
+                self.marked.contains(&row.path)
+            };
             let is_dir = node.is_dir();
             let has_children = is_dir && !node.children.is_empty();
             let depth = row.depth as f32;
@@ -1136,8 +1452,9 @@ impl FastDir {
                     MouseButton::Left,
                     cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                         this.focus.focus(window, cx);
-                        this.select_row_no_scroll(ix, cx);
-                        if ev.click_count == 2 {
+                        let mode = ClickMode::from_modifiers(&ev.modifiers);
+                        this.click_row(ix, mode, cx);
+                        if ev.click_count == 2 && mode == ClickMode::Plain {
                             this.set_expanded(ix, None, cx);
                         }
                     }),
@@ -1146,7 +1463,7 @@ impl FastDir {
                     MouseButton::Right,
                     cx.listener(move |this, _, window, cx| {
                         this.focus.focus(window, cx);
-                        this.select_row_no_scroll(ix, cx);
+                        this.click_row(ix, ClickMode::Context, cx);
                     }),
                 )
                 .child(
@@ -1195,15 +1512,13 @@ impl FastDir {
         out
     }
 
-    fn select_row_no_scroll(&mut self, ix: usize, cx: &mut Context<Self>) {
-        self.selected = Some(ix);
-        if let Some(row) = self.rows.get(ix) {
-            let path = row.path.clone();
-            self.treemap
-                .update(cx, |t, cx| t.set_selection(Some(path), cx));
+    fn click_row(&mut self, ix: usize, mode: ClickMode, cx: &mut Context<Self>) {
+        let Some(row) = self.rows.get(ix) else { return };
+        let path = row.path.clone();
+        self.apply_click(path, ix, mode, cx);
+        if self.selected == Some(ix) {
+            self.highlight_ext_of_row(ix, cx);
         }
-        self.highlight_ext_of_row(ix, cx);
-        cx.notify();
     }
 
     /// Highlight one extension in the treemap (`None` clears it).
@@ -1397,8 +1712,9 @@ impl FastDir {
         let theme = cx.theme();
         let ready = matches!(self.phase, Phase::Ready);
         let scanning = matches!(self.phase, Phase::Scanning { .. });
-        let has_sel = ready && self.selected.is_some();
-        let is_root = self.selected_path().is_some_and(|p| p.is_empty());
+        let has_sel = ready && !self.selection().is_empty();
+        let multi = self.is_multi();
+        let is_root = self.only_root();
         let drives = self.drives.clone();
         let entity = cx.entity().downgrade();
         let update_entity = entity.clone();
@@ -1475,23 +1791,23 @@ impl FastDir {
             .child(Separator::vertical().h(px(20.)).mx_1())
             .child(
                 tool("up", IconName::ArrowUp, "Select parent (Backspace)")
-                    .disabled(!has_sel || is_root)
+                    .disabled(!has_sel || is_root || multi)
                     .on_click(cx.listener(|this, _, w, cx| this.go_parent(&GoParent, w, cx))),
             )
             .child(
                 tool("reveal", IconName::FolderOpen, "Show in Explorer (Ctrl+E)")
-                    .disabled(!has_sel)
+                    .disabled(!has_sel || multi)
                     .on_click(cx.listener(|this, _, w, cx| this.reveal_selected(&RevealItem, w, cx))),
             )
             .child(
                 tool("refresh", IconName::RotateCw, "Refresh selected folder (F5)")
-                    .disabled(!has_sel || busy)
+                    .disabled(!has_sel || busy || multi)
                     .on_click(cx.listener(|this, _, w, cx| this.refresh_item(&RefreshItem, w, cx))),
             )
             .child(Separator::vertical().h(px(20.)).mx_1())
             .child(
                 tool("rename", IconName::Pencil, "Rename (F2)")
-                    .disabled(!has_sel || is_root || busy)
+                    .disabled(!has_sel || is_root || busy || multi)
                     .on_click(cx.listener(|this, _, w, cx| this.rename_item(&RenameItem, w, cx))),
             )
             .child(
@@ -1857,6 +2173,16 @@ impl FastDir {
                 format::bytes(progress.bytes.load(Ordering::Relaxed))
             )
             .into(),
+            Phase::Ready if self.is_multi() => {
+                // Folders inside a selected folder are not counted twice.
+                let size: u64 = self.targets().iter().map(|t| t.size).sum();
+                format!(
+                    "{} items selected  ·  {}",
+                    format::count(self.marked.len() as u64),
+                    format::bytes(size)
+                )
+                .into()
+            }
             Phase::Ready => self
                 .selected_fs_path()
                 .map(|(p, fs, _)| {
@@ -1928,6 +2254,8 @@ impl Render for FastDir {
             .text_color(theme.foreground)
             .on_action(cx.listener(Self::select_prev))
             .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::extend_prev))
+            .on_action(cx.listener(Self::extend_next))
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
             .on_action(cx.listener(Self::page_up))

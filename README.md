@@ -38,6 +38,10 @@ culprit? Rename, move, recycle or delete it right there.
 - **File operations** that update the tree in place, with no rescan:
   rename, move (also across drives), move to Recycle Bin, delete permanently,
   refresh a single folder, show in Explorer, open, copy path.
+- **Multi-select**: Ctrl+click toggles, Shift+click selects a range (also in
+  the treemap, where every selected cell is outlined). The status bar shows
+  the count and total size; move / recycle / delete run on the whole
+  selection after one confirmation.
 - **Light and dark themes.**
 - **Explorer integration** (optional, from the installer): right-click any
   folder or drive → *Analyze with FastDir*.
@@ -73,6 +77,7 @@ fastdir.exe "C:\Users"   scan a folder right away
 | Key | Action |
 |---|---|
 | ↑ ↓ / PgUp PgDn / Home End | Move the selection |
+| Shift+↑ / Shift+↓ | Extend the selection |
 | → / ← | Expand / collapse (or go to parent) |
 | Enter | Toggle the folder |
 | Backspace | Select the parent folder |
