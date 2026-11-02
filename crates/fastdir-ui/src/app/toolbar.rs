@@ -4,6 +4,7 @@ use super::*;
 
 impl FastDir {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let op_view = self.op.as_ref().map(|op| self.render_op(op, cx));
         let theme = cx.theme();
         let ready = matches!(self.phase, Phase::Ready);
         let scanning = matches!(self.phase, Phase::Scanning { .. });
@@ -16,7 +17,7 @@ impl FastDir {
         let entity = cx.entity().downgrade();
         let update_entity = entity.clone();
         let focus = self.focus.clone();
-        let busy = self.busy.is_some();
+        let busy = self.is_busy();
 
         let tool = |id: &'static str, icon: IconName, tip: &'static str| {
             Button::new(id).ghost().small().icon(icon).tooltip(tip)
@@ -135,6 +136,7 @@ impl FastDir {
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
             .child(div().flex_1())
+            .children(op_view)
             .when_some(self.busy.clone(), |d, label| {
                 d.child(
                     h_flex()
@@ -267,6 +269,78 @@ impl FastDir {
                 )
                 .on_click(cx.listener(|this, _, w, cx| this.toggle_theme(&ToggleTheme, w, cx))),
             )
+    }
+
+    /// Progress of a running delete / move: label, bar, counts and Cancel.
+    fn render_op(&self, op: &FileOp, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let items = op
+            .progress
+            .items
+            .load(Ordering::Relaxed)
+            .min(op.total_items);
+        let bytes = op
+            .progress
+            .bytes
+            .load(Ordering::Relaxed)
+            .min(op.total_bytes);
+        let cancelling = op.progress.is_cancelled();
+        let (done, total) = if op.by_bytes && op.total_bytes > 0 {
+            (bytes, op.total_bytes)
+        } else {
+            (items, op.total_items)
+        };
+        let pct = (total > 0).then(|| (done as f64 / total as f64 * 100.0).min(100.0) as f32);
+        let detail = if op.by_bytes {
+            format!(
+                "{} / {}",
+                format::bytes(bytes),
+                format::bytes(op.total_bytes)
+            )
+        } else {
+            format!(
+                "{} / {} items",
+                format::count(items),
+                format::count(op.total_items)
+            )
+        };
+        h_flex()
+            .gap_2()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .max_w(px(640.))
+            .overflow_hidden()
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(if cancelling {
+                        SharedString::from("Cancelling…")
+                    } else {
+                        op.label.clone()
+                    }),
+            )
+            .child(
+                div().w(px(140.)).flex_shrink_0().child(
+                    ProgressBar::new("op-progress")
+                        .when_some(pct, |p, v| p.value(v))
+                        .when(pct.is_none(), |p| p.loading(true)),
+                ),
+            )
+            .child(div().flex_shrink_0().whitespace_nowrap().child(detail))
+            .child(
+                Button::new("op-cancel")
+                    .ghost()
+                    .small()
+                    .icon(IconName::CircleStop)
+                    .label("Cancel")
+                    .tooltip("Cancel (Esc)")
+                    .disabled(cancelling)
+                    .on_click(cx.listener(|this, _, _, cx| this.cancel_op(cx))),
+            )
+            .into_any_element()
     }
 
     pub(super) fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {

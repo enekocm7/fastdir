@@ -166,11 +166,25 @@ impl ClickMode {
 }
 
 /// One item of the (normalised) selection, ready for a file operation.
+#[derive(Clone)]
 struct Target {
     path: NodePath,
     fs: PathBuf,
     is_dir: bool,
     size: u64,
+    /// Files and folders this item stands for, itself included.
+    items: u64,
+}
+
+/// A delete or move running in the background, shown in the toolbar with a
+/// progress bar and a cancel button.
+struct FileOp {
+    label: SharedString,
+    progress: Arc<fsops::OpProgress>,
+    total_items: u64,
+    total_bytes: u64,
+    /// Moves are measured in bytes copied, deletes in items removed.
+    by_bytes: bool,
 }
 
 #[derive(Clone)]
@@ -216,6 +230,7 @@ pub struct FastDir {
     ext_scroll: UniformListScrollHandle,
     treemap: Entity<TreemapView>,
     busy: Option<SharedString>,
+    op: Option<FileOp>,
     settings: Settings,
     /// A newer release the user can install.
     available: Option<Arc<Release>>,
@@ -226,6 +241,7 @@ pub struct FastDir {
     _scan_task: Option<Task<()>>,
     _ticker: Option<Task<()>>,
     _update_ticker: Option<Task<()>>,
+    _op_ticker: Option<Task<()>>,
 }
 
 impl FastDir {
@@ -295,6 +311,7 @@ impl FastDir {
             ext_scroll: UniformListScrollHandle::new(),
             treemap,
             busy: None,
+            op: None,
             settings,
             available: None,
             checking: false,
@@ -304,6 +321,7 @@ impl FastDir {
             _scan_task: None,
             _ticker: None,
             _update_ticker: None,
+            _op_ticker: None,
         }
     }
 
