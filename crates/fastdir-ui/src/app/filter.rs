@@ -284,7 +284,10 @@ impl FastDir {
                     .small()
                     .icon(IconName::Funnel)
                     .label(label)
-                    .tooltip("Minimum size, extension, modified date (Ctrl+Shift+F)")
+                    .tooltip(format!(
+                        "Minimum size, extension, modified date ({}+Shift+F)",
+                        platform::mod_key()
+                    ))
                     .disabled(!ready)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_filters(&OpenFilters, window, cx)

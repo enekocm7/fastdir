@@ -1537,6 +1537,7 @@ name = "fastdir-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "parking_lot",
  "rayon",
  "serde",

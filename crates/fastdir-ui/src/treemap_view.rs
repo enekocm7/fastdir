@@ -32,8 +32,8 @@ pub fn is_toggle_click(m: &Modifiers) -> bool {
 }
 
 pub enum TreemapEvent {
-    /// The user clicked a cell. `toggle` is set for Ctrl+click (add to or
-    /// remove from the selection), `context` for a right click.
+    /// The user clicked a cell. `toggle` is set for Ctrl+click (Cmd+click on
+    /// macOS) to add to or remove from the selection, `context` for a right click.
     Select {
         path: NodePath,
         toggle: bool,
@@ -186,7 +186,12 @@ impl TreemapView {
     /// Push all `[treemap]` display settings at once (`highlight` is managed
     /// separately through [`Self::set_highlight`]). Anything that changed
     /// redraws the image.
-    pub fn set_render(&mut self, opts: &RenderOptions, decimal_sizes: bool, cx: &mut Context<Self>) {
+    pub fn set_render(
+        &mut self,
+        opts: &RenderOptions,
+        decimal_sizes: bool,
+        cx: &mut Context<Self>,
+    ) {
         let mut changed = false;
         changed |= set_if_diff(&mut self.show_free, opts.show_free);
         changed |= set_if_diff(&mut self.show_unknown, opts.show_unknown);
