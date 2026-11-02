@@ -275,8 +275,9 @@ impl TreemapView {
                 .background_executor()
                 .spawn(async move {
                     let t = tree.read();
-                    let root = t.get(&zoom).unwrap_or(&t.root);
+                    let root = t.get(&zoom).unwrap_or(t.root());
                     treemap::render(
+                        &t,
                         root,
                         key.w,
                         key.h,
@@ -323,6 +324,7 @@ impl TreemapView {
         let (w, h, x, y) = self.device_point(position);
         let root = tree.get(&self.zoom)?;
         let rel = treemap::hit_test(
+            &tree,
             root,
             w,
             h,
@@ -368,7 +370,7 @@ impl TreemapView {
             } else {
                 node.size
             };
-            let link = if node.hard_link {
+            let link = if node.hard_link() {
                 "  ·  hard link"
             } else {
                 ""
@@ -451,9 +453,16 @@ impl Render for TreemapView {
                     let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else {
                         continue;
                     };
-                    let Some(r) =
-                        treemap::rect_of(root, w, h, rel, show_free, show_unknown, use_disk_size)
-                    else {
+                    let Some(r) = treemap::rect_of(
+                        &t,
+                        root,
+                        w,
+                        h,
+                        rel,
+                        show_free,
+                        show_unknown,
+                        use_disk_size,
+                    ) else {
                         continue;
                     };
                     let origin = bounds.origin;
@@ -575,12 +584,15 @@ impl TreemapView {
         if let Some(tree) = &self.tree {
             let t = tree.read();
             parts.push((t.root_path.display().to_string().into(), Vec::new()));
-            let mut node = &t.root;
+            let mut node = t.root();
             for (depth, &i) in self.zoom.iter().enumerate() {
-                let Some(child) = node.children.get(i as usize) else {
+                let Some(child) = t.children(node).get(i as usize) else {
                     break;
                 };
-                parts.push((child.name.to_string().into(), self.zoom[..=depth].to_vec()));
+                parts.push((
+                    t.name(child).to_string().into(),
+                    self.zoom[..=depth].to_vec(),
+                ));
                 node = child;
             }
         }

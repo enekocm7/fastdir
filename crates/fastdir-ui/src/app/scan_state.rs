@@ -91,7 +91,7 @@ impl FastDir {
         if let Some(drive) = self.drives.iter().find(|d| d.path == tree.root_path) {
             tree.attach_volume_info(drive.total, drive.free);
         }
-        let files = tree.root.files;
+        let files = tree.root().files;
         let size = tree.scanned_bytes();
         let tree = Arc::new(RwLock::new(tree));
         self.tree = Some(tree.clone());

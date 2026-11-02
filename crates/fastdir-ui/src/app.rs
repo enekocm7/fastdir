@@ -5,7 +5,7 @@ use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::format;
 use fastdir_core::fsops;
-use fastdir_core::model::{NO_EXT, Node, NodePath, Tree};
+use fastdir_core::model::{NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, Progress, ScanResult};
 use fastdir_settings::Settings;
 use fastdir_treemap as treemap;
