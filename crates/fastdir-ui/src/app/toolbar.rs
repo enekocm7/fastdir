@@ -5,6 +5,7 @@ use super::*;
 impl FastDir {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let op_view = self.op.as_ref().map(|op| self.render_op(op, cx));
+        let search = self.render_search(cx);
         let scan_view = self.render_scan_progress(cx);
         let theme = cx.theme();
         let ready = matches!(self.phase, Phase::Ready);
@@ -136,6 +137,8 @@ impl FastDir {
                     .disabled(!has_sel || is_root || busy || special)
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
+            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(search)
             .child(div().flex_1())
             .children(op_view)
             .children(scan_view)

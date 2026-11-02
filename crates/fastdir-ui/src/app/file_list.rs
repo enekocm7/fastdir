@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Sort the flat top-files list in place. Name comparisons stay
+/// case-insensitive, like the tree.
+fn sort_top_files(files: &mut [FileEntry], sort: (SortKey, bool)) {
+    let (key, desc) = sort;
+    files.sort_unstable_by(|a, b| {
+        let ord = match key {
+            SortKey::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            SortKey::Size => a.size.cmp(&b.size),
+            SortKey::Disk => a.disk_size.cmp(&b.disk_size),
+            SortKey::Modified => a.modified.cmp(&b.modified),
+            _ => a.size.cmp(&b.size),
+        }
+        .then_with(|| a.name.cmp(&b.name));
+        if desc { ord.reverse() } else { ord }
+    });
+}
+
 impl FastDir {
     pub(super) fn child_order(tree: &Tree, node: &Node, sort: (SortKey, bool)) -> Vec<u32> {
         let c = tree.children(node);
@@ -35,12 +52,13 @@ impl FastDir {
     }
 
     pub(super) fn rebuild_rows(&mut self) {
-        let selected_path = self.selected_path();
+        let selected_path = self.selected_tree_path();
         self.rows.clear();
         let Some(tree) = self.tree.clone() else {
             return;
         };
         let tree = tree.read();
+        /// Add a node and its expanded descendants.
         fn walk(
             tree: &Tree,
             node: &Node,
@@ -52,6 +70,7 @@ impl FastDir {
             rows.push(Row {
                 path: path.clone(),
                 depth,
+                matched: false,
             });
             if node.expanded() && node.is_dir() {
                 let children = tree.children(node);
@@ -62,14 +81,75 @@ impl FastDir {
                 }
             }
         }
+        /// Keep every match plus the ancestors needed to reach it. Returns
+        /// whether this subtree contributed a row.
+        fn walk_filtered(
+            tree: &Tree,
+            node: &Node,
+            path: &mut NodePath,
+            depth: u16,
+            rows: &mut Vec<Row>,
+            sort: (SortKey, bool),
+            filter: &Filter,
+        ) -> bool {
+            let start = rows.len();
+            let mut any = false;
+            if node.is_dir() {
+                let children = tree.children(node);
+                for i in FastDir::child_order(tree, node, sort) {
+                    path.push(i);
+                    any |= walk_filtered(
+                        tree,
+                        &children[i as usize],
+                        path,
+                        depth + 1,
+                        rows,
+                        sort,
+                        filter,
+                    );
+                    path.pop();
+                }
+            }
+            let matched = filter.matches(tree.name(node), node, tree.ext_name(node));
+            if matched || any {
+                rows.insert(
+                    start,
+                    Row {
+                        path: path.clone(),
+                        depth,
+                        matched,
+                    },
+                );
+                true
+            } else {
+                false
+            }
+        }
         let mut path = Vec::new();
-        walk(&tree, tree.root(), &mut path, 0, &mut self.rows, self.sort);
+        if self.filter.is_active() {
+            walk_filtered(
+                &tree,
+                tree.root(),
+                &mut path,
+                0,
+                &mut self.rows,
+                self.sort,
+                &self.filter,
+            );
+            // Start on the first actual match, not on an ancestor shown for
+            // context.
+            let previous = selected_path
+                .and_then(|sel| self.rows.iter().position(|r| r.path == sel && r.matched));
+            self.selected = previous.or_else(|| self.rows.iter().position(|r| r.matched));
+        } else {
+            walk(&tree, tree.root(), &mut path, 0, &mut self.rows, self.sort);
+            self.selected = selected_path
+                .and_then(|sel| self.rows.iter().position(|r| r.path == sel))
+                .or_else(|| (!self.rows.is_empty()).then_some(0));
+        }
         self.ext_rows = (0..tree.exts.len() as u16)
             .filter(|&i| tree.exts[i as usize].files > 0)
             .collect();
-        if let Some(sel) = selected_path {
-            self.selected = self.rows.iter().position(|r| r.path == sel).or(Some(0));
-        }
     }
 
     pub(super) fn set_expanded(
@@ -126,8 +206,10 @@ impl FastDir {
         let theme = cx.theme();
         let total = tree.root().size.max(1);
         let selected = self.selected;
+        let filtering = self.filter.is_active();
         let fg = theme.foreground;
         let muted = theme.muted_foreground;
+        let primary = theme.primary;
         let active = theme.list_active;
         let active_border = theme.list_active_border;
         let hover = theme.list_hover;
@@ -161,6 +243,14 @@ impl FastDir {
             };
             let is_dir = node.is_dir();
             let has_children = is_dir && node.has_children();
+            // While filtering, ancestors of a match are shown expanded even
+            // if the user had collapsed them before.
+            let expanded = node.expanded()
+                || (filtering
+                    && self
+                        .rows
+                        .get(ix + 1)
+                        .is_some_and(|next| next.depth > row.depth));
             let depth = row.depth as f32;
             let bar_color = rgb(DEPTH_COLORS[row.depth as usize % DEPTH_COLORS.len()]);
             let icon = if node.is_special() {
@@ -175,7 +265,7 @@ impl FastDir {
                     .text_color(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32))
             } else if row.path.is_empty() {
                 Icon::new(IconName::HardDrive).xsmall().text_color(muted)
-            } else if node.expanded() {
+            } else if expanded {
                 Icon::new(IconName::FolderOpen)
                     .xsmall()
                     .text_color(rgb(0xe0b04a))
@@ -195,7 +285,7 @@ impl FastDir {
                 .when(has_children, |d| {
                     d.hover(|s| s.bg(track))
                         .child(
-                            Icon::new(if node.expanded() {
+                            Icon::new(if expanded {
                                 IconName::ChevronDown
                             } else {
                                 IconName::ChevronRight
@@ -222,7 +312,13 @@ impl FastDir {
                     .whitespace_nowrap()
                     .child(s)
             };
-            let name_color = if node.error() { danger } else { fg };
+            let name_color = if node.error() {
+                danger
+            } else if filtering && row.matched {
+                primary
+            } else {
+                fg
+            };
             let el = h_flex()
                 .id(("row", ix))
                 .h(px(ROW_H))
@@ -271,7 +367,10 @@ impl FastDir {
                                 .whitespace_nowrap()
                                 .text_ellipsis()
                                 .text_color(name_color)
-                                .when(is_dir, |d| d.font_weight(FontWeight::MEDIUM))
+                                .when(is_dir || row.matched, |d| d.font_weight(FontWeight::MEDIUM))
+                                .when(filtering && row.matched, |d| {
+                                    d.font_weight(FontWeight::SEMIBOLD)
+                                })
                                 .child(SharedString::from(tree.name(node).to_string())),
                         )
                         .when(node.hard_link(), |d| {
@@ -474,9 +573,96 @@ impl FastDir {
     }
 
     pub(super) fn render_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .size_full()
+            .child(self.render_tabs(cx))
+            .child(match self.tab {
+                ListTab::Tree => self.render_tree_table(cx).into_any_element(),
+                ListTab::TopFiles => self.render_top_table(cx).into_any_element(),
+            })
+    }
+
+    fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let fg = theme.foreground;
+        let muted = theme.muted_foreground;
+        let primary = theme.primary;
+        let border = theme.border;
+        let head = theme.list_head;
+        let tree_tab = self.tab == ListTab::Tree;
+        let top_tab = self.tab == ListTab::TopFiles;
+        let tab = |id: &'static str,
+                   label: String,
+                   active: bool,
+                   which: ListTab,
+                   cx: &mut Context<Self>| {
+            h_flex()
+                .id(id)
+                .h_full()
+                .px_3()
+                .cursor_pointer()
+                .text_xs()
+                .font_weight(if active {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::NORMAL
+                })
+                .text_color(if active { fg } else { muted })
+                .when(active, |d| d.border_b_2().border_color(primary))
+                .when(!active, |d| {
+                    d.border_b_2()
+                        .border_color(transparent_black())
+                        .hover(|s| s.text_color(fg))
+                })
+                .on_click(cx.listener(move |this, _, _, cx| this.set_tab(which, cx)))
+                .child(label)
+        };
+        h_flex()
+            .h(px(30.))
+            .flex_shrink_0()
+            .w_full()
+            .gap_1()
+            .px_1()
+            .border_b_1()
+            .border_color(border)
+            .bg(head)
+            .child(tab(
+                "tab-tree",
+                "Directory tree".to_string(),
+                tree_tab,
+                ListTab::Tree,
+                cx,
+            ))
+            .child(tab(
+                "tab-top-files",
+                format!("Top files ({})", format::count(self.top_files.len() as u64)),
+                top_tab,
+                ListTab::TopFiles,
+                cx,
+            ))
+    }
+
+    fn render_tree_table(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.rows.len();
         let entity = cx.entity();
-        v_flex().size_full().child(self.render_header(cx)).child(
+        let theme = cx.theme();
+        let body: AnyElement = if count == 0 {
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(if self.filter.is_active() {
+                    "No items match the filter"
+                } else {
+                    "This folder is empty"
+                })
+                .into_any_element()
+        } else {
             div()
                 .id("list-body")
                 .relative()
@@ -489,8 +675,354 @@ impl FastDir {
                         .track_scroll(&self.list_scroll),
                 )
                 .child(Scrollbar::vertical(&self.list_scroll))
-                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx)),
-        )
+                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                .into_any_element()
+        };
+        v_flex()
+            .size_full()
+            .child(self.render_header(cx))
+            .child(body)
+    }
+
+    /// Switch between the tree and the flat largest-files list.
+    pub(super) fn set_tab(&mut self, tab: ListTab, cx: &mut Context<Self>) {
+        if self.tab == tab {
+            return;
+        }
+        self.tab = tab;
+        self.marked.clear();
+        if tab == ListTab::TopFiles {
+            if self.top_stale {
+                self.refresh_top_files();
+            }
+            if self.top_selected.is_none() && !self.top_files.is_empty() {
+                self.top_selected = Some(0);
+            }
+        }
+        self.sync_treemap_selection(cx);
+        cx.notify();
+    }
+
+    /// Recompute the bounded "largest files" list from the current tree.
+    pub(super) fn refresh_top_files(&mut self) {
+        let limit = self.settings.top_files_limit.clamp(1, 100_000);
+        let mut files = self
+            .tree
+            .as_ref()
+            .map(|tree| tree.read().top_files(limit))
+            .unwrap_or_default();
+        sort_top_files(&mut files, self.top_sort);
+        self.top_files = files;
+        self.top_selected = match self.top_selected {
+            Some(ix) if ix < self.top_files.len() => Some(ix),
+            _ if !self.top_files.is_empty() => Some(0),
+            _ => None,
+        };
+        self.top_stale = false;
+    }
+
+    fn set_top_limit(&mut self, limit: usize, cx: &mut Context<Self>) {
+        self.settings.top_files_limit = limit;
+        self.settings.save();
+        self.refresh_top_files();
+        cx.notify();
+    }
+
+    pub(super) fn set_top_sort(&mut self, key: SortKey, cx: &mut Context<Self>) {
+        if self.top_sort.0 == key {
+            self.top_sort.1 = !self.top_sort.1;
+        } else {
+            self.top_sort = (key, key != SortKey::Name);
+        }
+        let selected = self
+            .top_selected
+            .and_then(|ix| self.top_files.get(ix))
+            .map(|f| f.path.clone());
+        sort_top_files(&mut self.top_files, self.top_sort);
+        self.top_selected = selected
+            .and_then(|path| self.top_files.iter().position(|f| f.path == path))
+            .or_else(|| (!self.top_files.is_empty()).then_some(0));
+        if let Some(ix) = self.top_selected {
+            self.top_scroll.scroll_to_item(ix, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn select_top_row(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.top_files.is_empty() {
+            return;
+        }
+        let ix = ix.min(self.top_files.len() - 1);
+        self.top_selected = Some(ix);
+        self.marked.clear();
+        self.anchor = None;
+        self.top_scroll.scroll_to_item(ix, ScrollStrategy::Top);
+        self.sync_treemap_selection(cx);
+        cx.notify();
+    }
+
+    /// Show a top-files entry in its place in the directory tree.
+    pub(super) fn reveal_top_file(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(entry) = self.top_files.get(ix).cloned() else {
+            return;
+        };
+        if self.filter.is_active() {
+            self.clear_filters(window, cx);
+        }
+        self.tab = ListTab::Tree;
+        self.marked.clear();
+        self.reveal_in_list(entry.path, ClickMode::Plain, cx);
+        self.focus.focus(window, cx);
+    }
+
+    fn render_top_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (key, desc) = self.top_sort;
+        let head = |id: &'static str,
+                    label: &'static str,
+                    k: SortKey,
+                    w: Option<f32>,
+                    right: bool,
+                    cx: &mut Context<Self>| {
+            let active = key == k;
+            let arrow = if desc {
+                IconName::ArrowDown
+            } else {
+                IconName::ArrowUp
+            };
+            h_flex()
+                .id(id)
+                .h_full()
+                .px_2()
+                .gap_1()
+                .cursor_pointer()
+                .when_some(w, |d, w| d.w(px(w)).flex_shrink_0())
+                .when(w.is_none(), |d| d.flex_1().min_w(px(220.)).pl(px(8.)))
+                .when(right, |d| d.justify_end())
+                .hover(|s| s.bg(cx.theme().list_hover))
+                .when(active, |d| d.text_color(cx.theme().foreground))
+                .child(label)
+                .when(active, |d| d.child(Icon::new(arrow).xsmall()))
+                .on_click(cx.listener(move |this, _, _, cx| this.set_top_sort(k, cx)))
+        };
+        let limit = self.settings.top_files_limit.clamp(1, 100_000);
+        let entity = cx.entity().downgrade();
+        h_flex()
+            .h(px(28.))
+            .w_full()
+            .flex_shrink_0()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.list_head)
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme.muted_foreground)
+            .child(head("top-name", "Name", SortKey::Name, None, false, cx))
+            .child(head(
+                "top-size",
+                "Size",
+                SortKey::Size,
+                Some(COL_SIZE),
+                true,
+                cx,
+            ))
+            .child(head(
+                "top-disk",
+                "Size on disk",
+                SortKey::Disk,
+                Some(COL_DISK),
+                true,
+                cx,
+            ))
+            .child(head(
+                "top-date",
+                "Last Change",
+                SortKey::Modified,
+                Some(COL_DATE),
+                true,
+                cx,
+            ))
+            .child(
+                Button::new("top-limit")
+                    .ghost()
+                    .small()
+                    .label(format!("Top {}", format::count(limit as u64)))
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |menu, _, _| {
+                        let mut menu = menu;
+                        for n in [100usize, 500, 1000, 5000] {
+                            let entity = entity.clone();
+                            menu = menu.item(
+                                gpui_kit::component::menu::PopupMenuItem::new(format!(
+                                    "Top {}",
+                                    format::count(n as u64)
+                                ))
+                                .checked(limit == n)
+                                .on_click(move |_, _, cx| {
+                                    entity.update(cx, |this, cx| this.set_top_limit(n, cx)).ok();
+                                }),
+                            );
+                        }
+                        menu
+                    }),
+            )
+    }
+
+    fn render_top_table(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let count = self.top_files.len();
+        let entity = cx.entity();
+        let theme = cx.theme();
+        let body: AnyElement = if count == 0 {
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child("No files to show")
+                .into_any_element()
+        } else {
+            div()
+                .id("top-body")
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(
+                    uniform_list("top-rows", count, cx.processor(Self::render_top_rows))
+                        .size_full()
+                        .track_scroll(&self.top_scroll),
+                )
+                .child(Scrollbar::vertical(&self.top_scroll))
+                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                .into_any_element()
+        };
+        v_flex()
+            .size_full()
+            .child(self.render_top_header(cx))
+            .child(body)
+    }
+
+    fn render_top_rows(
+        &mut self,
+        range: Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(tree) = self.tree.clone() else {
+            return Vec::new();
+        };
+        let tree = tree.read();
+        let theme = cx.theme();
+        let fg = theme.foreground;
+        let muted = theme.muted_foreground;
+        let active = theme.list_active;
+        let active_border = theme.list_active_border;
+        let hover = theme.list_hover;
+        let even = theme.list_even;
+        let selected = self.top_selected;
+        let num = |w: f32, s: String| {
+            div()
+                .w(px(w))
+                .flex_shrink_0()
+                .px_2()
+                .text_right()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(s)
+        };
+        let mut out = Vec::with_capacity(range.len());
+        for ix in range {
+            let Some(entry) = self.top_files.get(ix) else {
+                continue;
+            };
+            let is_sel = selected == Some(ix);
+            let (r, g, b) = treemap::ext_color(entry.ext);
+            let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
+            let parent = tree
+                .fs_path(&entry.path)
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .map(|p| {
+                    p.strip_prefix(&tree.root_path)
+                        .unwrap_or(&p)
+                        .display()
+                        .to_string()
+                })
+                .unwrap_or_default();
+            out.push(
+                h_flex()
+                    .id(("top-row", ix))
+                    .h(px(ROW_H))
+                    .w_full()
+                    .text_xs()
+                    .text_color(fg)
+                    .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
+                    .when(is_sel, |d| {
+                        d.bg(active).border_l_2().border_color(active_border)
+                    })
+                    .when(!is_sel, |d| {
+                        d.border_l_2()
+                            .border_color(transparent_black())
+                            .hover(|s| s.bg(hover))
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                            this.focus.focus(window, cx);
+                            this.select_top_row(ix, cx);
+                            if ev.click_count == 2 {
+                                this.reveal_top_file(ix, window, cx);
+                            }
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, _, window, cx| {
+                            this.focus.focus(window, cx);
+                            this.select_top_row(ix, cx);
+                        }),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w(px(220.))
+                            .overflow_hidden()
+                            .gap_2()
+                            .pl_2()
+                            .child(Icon::new(IconName::File).xsmall().text_color(color))
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .whitespace_nowrap()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(SharedString::from(entry.name.to_string())),
+                            )
+                            .when(!parent.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_color(muted)
+                                        .child(parent),
+                                )
+                            }),
+                    )
+                    .child(num(COL_SIZE, format::bytes(entry.size)).font_weight(FontWeight::MEDIUM))
+                    .child(num(COL_DISK, format::bytes(entry.disk_size)))
+                    .child(num(COL_DATE, format::date(entry.modified)).text_color(muted))
+                    .into_any_element(),
+            );
+        }
+        out
     }
 
     pub(super) fn render_ext_rows(

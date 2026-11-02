@@ -41,6 +41,12 @@ culprit? Rename, move, recycle or delete it right there.
 - **WinDirStat-style layout**
   - **Directory tree** with subtree-percentage bars, %, size, items, files,
     folders and last change. Sort by any column.
+  - **Search and filters** – `Ctrl+F` filters the tree by name or glob
+    (`*.iso`), expanding to every match. Filter by minimum size, extension and
+    modified date (`Ctrl+Shift+F`).
+  - **Top files** – a flat, sortable list of the N largest files in the whole
+    scan (bounded heap, default 1,000), the quickest way to find cleanup
+    targets.
   - **Extension list** with the colour each type has in the treemap.
   - **Cushion treemap** (squarified, SequoiaView-style shading), rendered on
     the CPU in parallel and drawn as one image. Hover to see a path, click
@@ -108,7 +114,9 @@ fastdir.exe "C:\Users"   scan a folder right away
 | F5 | Refresh the selected folder |
 | Ctrl+R | Rescan everything |
 | Ctrl+O | Scan a folder… |
-| Esc | Stop scanning |
+| Ctrl+F | Focus the search box |
+| Ctrl+Shift+F | Minimum size / extension / date filters |
+| Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |
 | Ctrl+, | Open settings |
 

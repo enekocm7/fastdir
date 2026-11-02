@@ -3,10 +3,22 @@
 use super::*;
 
 impl FastDir {
-    pub(super) fn selected_path(&self) -> Option<NodePath> {
+    /// The cursor row of the directory tree, regardless of the active tab.
+    pub(super) fn selected_tree_path(&self) -> Option<NodePath> {
         self.selected
             .and_then(|i| self.rows.get(i))
             .map(|r| r.path.clone())
+    }
+
+    /// The active selection: the tree cursor or the top-files row.
+    pub(super) fn selected_path(&self) -> Option<NodePath> {
+        match self.tab {
+            ListTab::Tree => self.selected_tree_path(),
+            ListTab::TopFiles => self
+                .top_selected
+                .and_then(|i| self.top_files.get(i))
+                .map(|f| f.path.clone()),
+        }
     }
 
     pub(super) fn select_row(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -216,7 +228,12 @@ impl FastDir {
         if let Some(ix) = self.selected {
             self.list_scroll.scroll_to_item(ix, ScrollStrategy::Center);
         }
-        self.anchor = self.selected_path();
+        self.anchor = self.selected_tree_path();
+        // The largest files may have changed, or a path may have moved.
+        self.top_stale = true;
+        if self.tab == ListTab::TopFiles {
+            self.refresh_top_files();
+        }
         let sel = self.selection();
         self.treemap.update(cx, |t, cx| {
             t.invalidate(cx);
@@ -225,37 +242,71 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Move the cursor in whichever list is showing.
+    fn step(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.tab == ListTab::TopFiles {
+            self.select_top_row(ix, cx);
+        } else {
+            self.select_row(ix, cx);
+        }
+    }
+
+    fn step_extend(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.tab == ListTab::TopFiles {
+            self.select_top_row(ix, cx);
+        } else {
+            self.extend_row(ix, cx);
+        }
+    }
+
+    fn current_row(&self) -> Option<usize> {
+        match self.tab {
+            ListTab::Tree => self.selected,
+            ListTab::TopFiles => self.top_selected,
+        }
+    }
+
     pub(super) fn select_prev(&mut self, _: &SelectPrev, _: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.selected.unwrap_or(0).saturating_sub(1);
-        self.select_row(ix, cx);
+        let ix = self.current_row().unwrap_or(0).saturating_sub(1);
+        self.step(ix, cx);
     }
     pub(super) fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.selected.map(|i| i + 1).unwrap_or(0);
-        self.select_row(ix, cx);
+        let ix = self.current_row().map(|i| i + 1).unwrap_or(0);
+        self.step(ix, cx);
     }
     pub(super) fn extend_prev(&mut self, _: &ExtendPrev, _: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.selected.unwrap_or(0).saturating_sub(1);
-        self.extend_row(ix, cx);
+        let ix = self.current_row().unwrap_or(0).saturating_sub(1);
+        self.step_extend(ix, cx);
     }
     pub(super) fn extend_next(&mut self, _: &ExtendNext, _: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.selected.map(|i| i + 1).unwrap_or(0);
-        self.extend_row(ix, cx);
+        let ix = self.current_row().map(|i| i + 1).unwrap_or(0);
+        self.step_extend(ix, cx);
     }
     pub(super) fn select_first(&mut self, _: &SelectFirst, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_row(0, cx);
+        self.step(0, cx);
     }
     pub(super) fn select_last(&mut self, _: &SelectLast, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_row(usize::MAX, cx);
+        self.step(usize::MAX, cx);
     }
     pub(super) fn page_up(&mut self, _: &PageUp, _: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.selected.unwrap_or(0).saturating_sub(20);
-        self.select_row(ix, cx);
+        let ix = self.current_row().unwrap_or(0).saturating_sub(20);
+        self.step(ix, cx);
     }
     pub(super) fn page_down(&mut self, _: &PageDown, _: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.selected.unwrap_or(0) + 20;
-        self.select_row(ix, cx);
+        let ix = self.current_row().unwrap_or(0) + 20;
+        self.step(ix, cx);
     }
-    pub(super) fn expand_item(&mut self, _: &ExpandItem, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn expand_item(
+        &mut self,
+        _: &ExpandItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tab == ListTab::TopFiles {
+            let ix = self.top_selected.unwrap_or(0);
+            self.reveal_top_file(ix, window, cx);
+            return;
+        }
         let Some(ix) = self.selected else { return };
         let expanded = self.is_expanded(ix);
         if expanded {
@@ -277,6 +328,9 @@ impl FastDir {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.tab == ListTab::TopFiles {
+            return;
+        }
         let Some(ix) = self.selected else { return };
         if self.is_expanded(ix) {
             self.set_expanded(ix, Some(false), cx);
@@ -284,12 +338,25 @@ impl FastDir {
             self.go_parent(&GoParent, w, cx);
         }
     }
-    pub(super) fn toggle_item(&mut self, _: &ToggleItem, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_item(
+        &mut self,
+        _: &ToggleItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tab == ListTab::TopFiles {
+            let ix = self.top_selected.unwrap_or(0);
+            self.reveal_top_file(ix, window, cx);
+            return;
+        }
         if let Some(ix) = self.selected {
             self.set_expanded(ix, None, cx);
         }
     }
     pub(super) fn go_parent(&mut self, _: &GoParent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.tab == ListTab::TopFiles {
+            return;
+        }
         let Some(ix) = self.selected else { return };
         let depth = self.rows[ix].depth;
         if depth == 0 {
