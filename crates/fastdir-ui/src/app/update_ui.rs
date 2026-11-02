@@ -2,7 +2,7 @@
 //! dialog, release notes and "Skip this version".
 
 use super::*;
-use crate::updater::{self, DownloadProgress, InstallKind, Release, UpdateError};
+use fastdir_updater::{self as updater, DownloadProgress, InstallKind, Release, UpdateError};
 
 /// Live contents of the "Updating FastDir" dialog.
 struct DownloadView {

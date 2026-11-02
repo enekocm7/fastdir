@@ -1526,21 +1526,62 @@ dependencies = [
 name = "fastdir"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "embed-resource",
+ "fastdir-ui",
+ "fastdir-updater",
+ "resvg 0.45.1",
+]
+
+[[package]]
+name = "fastdir-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "parking_lot",
+ "rayon",
+ "trash",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "fastdir-settings"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fastdir-treemap"
+version = "0.1.0"
+dependencies = [
+ "fastdir-core",
+ "rayon",
+]
+
+[[package]]
+name = "fastdir-ui"
+version = "0.1.0"
+dependencies = [
+ "fastdir-core",
+ "fastdir-settings",
+ "fastdir-treemap",
+ "fastdir-updater",
  "gpui-kit",
  "image",
  "parking_lot",
- "rayon",
- "resvg 0.45.1",
+ "smallvec",
+]
+
+[[package]]
+name = "fastdir-updater"
+version = "0.1.0"
+dependencies = [
  "semver",
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "smallvec",
- "trash",
  "ureq",
- "windows-sys 0.61.2",
  "zip",
 ]
 

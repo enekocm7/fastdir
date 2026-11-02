@@ -1,0 +1,10 @@
+[package]
+name = "fastdir-treemap"
+version.workspace = true
+edition.workspace = true
+description = "Squarified cushion treemap layout and rendering for FastDir"
+repository.workspace = true
+
+[dependencies]
+fastdir-core.workspace = true
+rayon.workspace = true

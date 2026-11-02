@@ -2,9 +2,9 @@
 //! and turns clicks into selections. It can be zoomed into any folder; a
 //! breadcrumb above the image leads back up.
 
-use crate::format;
-use crate::model::{Node, NodePath, Tree};
-use crate::treemap;
+use fastdir_core::format;
+use fastdir_core::model::{Node, NodePath, Tree};
+use fastdir_treemap as treemap;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::assets::IconName;

@@ -58,3 +58,46 @@ pub fn duration(d: std::time::Duration) -> String {
         format!("{}m {:02}s", (s / 60.0) as u64, (s % 60.0) as u64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bytes_uses_binary_units_and_sensible_precision() {
+        assert_eq!(bytes(0), "0 B");
+        assert_eq!(bytes(1023), "1023 B");
+        assert_eq!(bytes(1024), "1.00 KB");
+        assert_eq!(bytes(10 * 1024), "10.0 KB");
+        assert_eq!(bytes(150 * 1024), "150 KB");
+        assert_eq!(bytes(5 * 1024 * 1024 * 1024), "5.00 GB");
+    }
+
+    #[test]
+    fn count_groups_thousands() {
+        assert_eq!(count(0), "0");
+        assert_eq!(count(999), "999");
+        assert_eq!(count(1_000), "1,000");
+        assert_eq!(count(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn percent_handles_empty_totals() {
+        assert_eq!(percent(0, 0), "—");
+        assert_eq!(percent(1, 4), "25.0%");
+        assert_eq!(percent(2, 3), "66.7%");
+    }
+
+    #[test]
+    fn dates_before_the_epoch_are_blank() {
+        assert_eq!(date(0), "");
+        assert_eq!(date(-1), "");
+        assert!(!date(1_700_000_000).is_empty());
+    }
+
+    #[test]
+    fn durations_switch_to_minutes() {
+        assert_eq!(duration(std::time::Duration::from_millis(1500)), "1.5s");
+        assert_eq!(duration(std::time::Duration::from_secs(61)), "1m 01s");
+    }
+}

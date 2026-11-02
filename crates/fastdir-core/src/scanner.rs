@@ -259,3 +259,70 @@ fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir() -> PathBuf {
+        let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("fastdir-scanner-test-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn scans_files_and_subdirectories() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("a.txt"), b"hello").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.join("sub/empty.dat"), b"").unwrap();
+
+        let result = scan(dir.clone(), Arc::new(Progress::default()));
+        assert!(!result.cancelled);
+        assert_eq!(result.tree.root.files, 3);
+        assert_eq!(result.tree.root.dirs, 1);
+        assert_eq!(result.tree.root.size, 15);
+        assert!(result.tree.find(&dir.join("sub/b.bin")).is_some());
+
+        let sub = result.tree.find(&dir.join("sub")).unwrap();
+        assert_eq!(result.tree.get(&sub).unwrap().size, 10);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_subtree_returns_a_detached_node() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("one.txt"), b"1234").unwrap();
+        let node = scan_subtree(&dir);
+        assert!(node.is_dir());
+        assert_eq!(node.files, 1);
+        assert_eq!(node.size, 4);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cancellation_stops_the_scan() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("a.txt"), b"hello").unwrap();
+        let progress = Arc::new(Progress::default());
+        progress.cancel.store(true, Ordering::Relaxed);
+        let result = scan(dir.clone(), progress);
+        assert!(result.cancelled);
+        assert_eq!(result.tree.root.files, 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn missing_directory_is_marked_as_an_error() {
+        let dir = temp_dir().join("does-not-exist");
+        let result = scan(dir, Arc::new(Progress::default()));
+        assert!(result.tree.root.error);
+    }
+}

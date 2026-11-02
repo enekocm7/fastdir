@@ -1,0 +1,273 @@
+//! The top toolbar and the window title bar.
+
+use super::*;
+
+impl FastDir {
+    pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let ready = matches!(self.phase, Phase::Ready);
+        let scanning = matches!(self.phase, Phase::Scanning { .. });
+        let has_sel = ready && !self.selection().is_empty();
+        let multi = self.is_multi();
+        let is_root = self.only_root();
+        let drives = self.drives.clone();
+        let entity = cx.entity().downgrade();
+        let update_entity = entity.clone();
+        let focus = self.focus.clone();
+        let busy = self.busy.is_some();
+
+        let tool = |id: &'static str, icon: IconName, tip: &'static str| {
+            Button::new(id).ghost().small().icon(icon).tooltip(tip)
+        };
+
+        h_flex()
+            .h(px(42.))
+            .flex_shrink_0()
+            .px_2()
+            .gap_1()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .child(
+                Button::new("drives")
+                    .small()
+                    .primary()
+                    .icon(IconName::HardDrive)
+                    .label("Scan drive")
+                    .dropdown_caret(true)
+                    .dropdown_menu(move |mut menu, _, _| {
+                        for d in &drives {
+                            let path = d.path.clone();
+                            let entity = entity.clone();
+                            let label = format!(
+                                "{}   {} free of {}",
+                                d.title(),
+                                format::bytes(d.free),
+                                format::bytes(d.total)
+                            );
+                            menu = menu.item(
+                                gpui_kit::component::menu::PopupMenuItem::new(label)
+                                    .icon(IconName::HardDrive)
+                                    .on_click(move |_, window, cx| {
+                                        let path = path.clone();
+                                        entity
+                                            .update(cx, |this, cx| {
+                                                this.start_scan(path, window, cx)
+                                            })
+                                            .ok();
+                                    }),
+                            );
+                        }
+                        menu.separator().item(
+                            gpui_kit::component::menu::PopupMenuItem::new("Scan a folder…")
+                                .icon(IconName::FolderSearch)
+                                .on_click({
+                                    let focus = focus.clone();
+                                    move |_, window, cx| {
+                                        focus.dispatch_action(&OpenFolder, window, cx);
+                                    }
+                                }),
+                        )
+                    }),
+            )
+            .child(
+                tool("open", IconName::FolderSearch, "Scan a folder… (Ctrl+O)")
+                    .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
+            )
+            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(
+                tool("rescan", IconName::RefreshCw, "Rescan everything (Ctrl+R)")
+                    .disabled(self.scan_root.is_none() || scanning)
+                    .on_click(cx.listener(|this, _, w, cx| this.rescan(&Rescan, w, cx))),
+            )
+            .child(
+                tool("stop", IconName::CircleStop, "Stop scanning (Esc)")
+                    .disabled(!scanning)
+                    .on_click(cx.listener(|this, _, w, cx| this.stop_scan(&StopScan, w, cx))),
+            )
+            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(
+                tool("up", IconName::ArrowUp, "Select parent (Backspace)")
+                    .disabled(!has_sel || is_root || multi)
+                    .on_click(cx.listener(|this, _, w, cx| this.go_parent(&GoParent, w, cx))),
+            )
+            .child(
+                tool("reveal", IconName::FolderOpen, "Show in Explorer (Ctrl+E)")
+                    .disabled(!has_sel || multi)
+                    .on_click(
+                        cx.listener(|this, _, w, cx| this.reveal_selected(&RevealItem, w, cx)),
+                    ),
+            )
+            .child(
+                tool(
+                    "refresh",
+                    IconName::RotateCw,
+                    "Refresh selected folder (F5)",
+                )
+                .disabled(!has_sel || busy || multi)
+                .on_click(cx.listener(|this, _, w, cx| this.refresh_item(&RefreshItem, w, cx))),
+            )
+            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(
+                tool("rename", IconName::Pencil, "Rename (F2)")
+                    .disabled(!has_sel || is_root || busy || multi)
+                    .on_click(cx.listener(|this, _, w, cx| this.rename_item(&RenameItem, w, cx))),
+            )
+            .child(
+                tool("move", IconName::FolderInput, "Move to… (Ctrl+M)")
+                    .disabled(!has_sel || is_root || busy)
+                    .on_click(cx.listener(|this, _, w, cx| this.move_item(&MoveItem, w, cx))),
+            )
+            .child(
+                tool("trash", IconName::Recycle, "Move to Recycle Bin (Del)")
+                    .disabled(!has_sel || is_root || busy)
+                    .on_click(cx.listener(|this, _, w, cx| this.trash_item(&TrashItem, w, cx))),
+            )
+            .child(
+                Button::new("delete")
+                    .small()
+                    .ghost()
+                    .icon(Icon::new(IconName::Trash).text_color(theme.danger))
+                    .tooltip("Delete permanently (Shift+Del)")
+                    .disabled(!has_sel || is_root || busy)
+                    .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
+            )
+            .child(div().flex_1())
+            .when_some(self.busy.clone(), |d, label| {
+                d.child(
+                    h_flex()
+                        .gap_2()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .max_w(px(420.))
+                        .overflow_hidden()
+                        .child(Spinner::new().small())
+                        .child(
+                            div()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .child(label),
+                        ),
+                )
+            })
+            .when(!matches!(self.phase, Phase::Home), |d| {
+                d.child(
+                    tool("home", IconName::House, "Drive overview")
+                        .on_click(cx.listener(|this, _, w, cx| this.go_home(w, cx))),
+                )
+            })
+            .when_some(self.available.clone(), |d, rel| {
+                let entity = update_entity.clone();
+                d.child(
+                    Button::new("update")
+                        .small()
+                        .primary()
+                        .icon(IconName::ArrowDown)
+                        .label(format!("Update to v{}", rel.version))
+                        .dropdown_caret(true)
+                        .dropdown_menu(move |menu, _, _| {
+                            let (e1, e2, e3) = (entity.clone(), entity.clone(), entity.clone());
+                            menu.item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Update now")
+                                    .icon(IconName::ArrowDown)
+                                    .on_click(move |_, window, cx| {
+                                        e1.update(cx, |this, cx| this.start_update(window, cx))
+                                            .ok();
+                                    }),
+                            )
+                            .item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Release notes")
+                                    .icon(IconName::FileText)
+                                    .on_click(move |_, window, cx| {
+                                        e2.update(cx, |this, cx| {
+                                            this.show_release_notes(window, cx)
+                                        })
+                                        .ok();
+                                    }),
+                            )
+                            .item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Skip this version")
+                                    .icon(IconName::Ban)
+                                    .on_click(move |_, window, cx| {
+                                        e3.update(cx, |this, cx| this.skip_update(window, cx)).ok();
+                                    }),
+                            )
+                        }),
+                )
+            })
+            .child(tool("more", IconName::Ellipsis, "More").dropdown_menu({
+                let auto = self.settings.auto_check_updates;
+                let entity = update_entity.clone();
+                move |menu, _, _| {
+                    let (e1, e2) = (entity.clone(), entity.clone());
+                    menu.item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Check for updates")
+                            .icon(IconName::RefreshCw)
+                            .on_click(move |_, window, cx| {
+                                e1.update(cx, |this, cx| this.check_for_updates(true, window, cx))
+                                    .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(
+                            "Check for updates automatically",
+                        )
+                        .checked(auto)
+                        .on_click(move |_, _, cx| {
+                            e2.update(cx, |this, cx| this.toggle_auto_update_check(cx))
+                                .ok();
+                        }),
+                    )
+                    .separator()
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(format!(
+                            "FastDir v{}",
+                            updater::CURRENT_VERSION
+                        ))
+                        .disabled(true),
+                    )
+                }
+            }))
+            .child(
+                tool(
+                    "theme",
+                    if theme.mode.is_dark() {
+                        IconName::Sun
+                    } else {
+                        IconName::Moon
+                    },
+                    "Toggle light / dark (Ctrl+T)",
+                )
+                .on_click(cx.listener(|this, _, w, cx| this.toggle_theme(&ToggleTheme, w, cx))),
+            )
+    }
+
+    pub(super) fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let subtitle: Option<SharedString> = match &self.phase {
+            Phase::Home => None,
+            Phase::Scanning { root, .. } => Some(format!("Scanning {}", root.display()).into()),
+            Phase::Ready => self
+                .scan_root
+                .as_ref()
+                .map(|r| r.display().to_string().into()),
+        };
+        TitleBar::new().child(
+            h_flex().w_full().pr_2().justify_between().child(
+                h_flex()
+                    .gap_2()
+                    .child(img(logo()).size(px(18.)))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("FastDir"),
+                    )
+                    .when_some(subtitle, |d, s| {
+                        d.child(div().text_xs().text_color(theme.muted_foreground).child(s))
+                    }),
+            ),
+        )
+    }
+}

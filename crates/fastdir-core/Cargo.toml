@@ -1,0 +1,15 @@
+[package]
+name = "fastdir-core"
+version.workspace = true
+edition.workspace = true
+description = "Scanning, tree model and file-system operations for FastDir"
+repository.workspace = true
+
+[dependencies]
+rayon.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+trash.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

@@ -9,7 +9,7 @@
 //! and highlighting re-run the layout only along a single path instead of
 //! keeping millions of rectangles in memory.
 
-use crate::model::{NO_EXT, Node, NodePath};
+use fastdir_core::model::{NO_EXT, Node, NodePath};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -429,4 +429,86 @@ pub fn rect_of(root: &Node, w: f64, h: f64, path: &[u32]) -> Option<Rect> {
         node = node.children.get(want as usize)?;
     }
     Some(rc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(name: &str, size: u64) -> Node {
+        Node::file(name.into(), size, 0)
+    }
+
+    fn two_file_root() -> Node {
+        let mut root = Node::dir("root".into(), 0);
+        root.children.push(file("large.bin", 6));
+        root.children.push(file("small.txt", 4));
+        root.finalize();
+        root
+    }
+
+    #[test]
+    fn squarify_tiles_the_whole_rect_without_gaps() {
+        let children = vec![file("a", 6), file("b", 3), file("c", 1)];
+        let rc = Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 100.0,
+            y1: 80.0,
+        };
+        let mut cells = Vec::new();
+        squarify(&children, 10, rc, |i, r| cells.push((i, r)));
+
+        assert_eq!(cells.len(), 3);
+        let area: f64 = cells.iter().map(|(_, r)| r.w() * r.h()).sum();
+        assert!((area - 8000.0).abs() < 0.01, "area was {area}");
+        for (_, r) in cells {
+            assert!(r.w() > 0.0 && r.h() > 0.0);
+            assert!(r.x0 >= 0.0 && r.y0 >= 0.0 && r.x1 <= 100.0 && r.y1 <= 80.0);
+        }
+    }
+
+    #[test]
+    fn squarify_ignores_zero_sized_children() {
+        let children = vec![file("a", 5), file("b", 5), file("empty", 0)];
+        let rc = Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 10.0,
+            y1: 10.0,
+        };
+        let mut cells = Vec::new();
+        squarify(&children, 10, rc, |i, r| cells.push((i, r)));
+        assert_eq!(
+            cells.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn rect_of_and_hit_test_agree() {
+        let root = two_file_root();
+        let r = rect_of(&root, 100.0, 100.0, &[0]).unwrap();
+        let (x, y) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
+        assert_eq!(hit_test(&root, 100.0, 100.0, x, y), Some(vec![0]));
+
+        assert_eq!(hit_test(&root, 100.0, 100.0, -1.0, 0.0), None);
+        assert_eq!(rect_of(&root, 100.0, 100.0, &[99]), None);
+    }
+
+    #[test]
+    fn colours_follow_the_extension_rank() {
+        assert_eq!(ext_color(NO_EXT), (200, 200, 200));
+        assert_eq!(ext_color(0), (0, 0, 255));
+        assert_eq!(ext_color(1), (255, 0, 0));
+        assert_eq!(ext_color(u16::MAX - 1), (200, 200, 200));
+    }
+
+    #[test]
+    fn render_writes_an_opaque_bgra_buffer() {
+        let root = two_file_root();
+        let buf = render(&root, 16, 16, [24, 24, 27], None);
+        assert_eq!(buf.len(), 16 * 16 * 4);
+        assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
+    }
 }
