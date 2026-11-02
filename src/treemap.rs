@@ -118,6 +118,18 @@ fn shade_color(ext: u16) -> [f64; 3] {
     bright_color(ext_color(ext))
 }
 
+/// Desaturate and darken a colour so non-highlighted leaves fade into the
+/// background without disappearing completely.
+fn dim_color(color: [f64; 3]) -> [f64; 3] {
+    const DIM: f64 = 38.0;
+    const KEEP: f64 = 0.22;
+    [
+        DIM + (color[0] - DIM) * KEEP,
+        DIM + (color[1] - DIM) * KEEP,
+        DIM + (color[2] - DIM) * KEEP,
+    ]
+}
+
 /// Squarify `children` (sorted by size, descending) into `rc`. Calls `f`
 /// with each child index and its rectangle. Adjacent rectangles share exact
 /// edge values so pixel rounding never overlaps.
@@ -296,7 +308,7 @@ fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light
     }
 }
 
-fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u32, t: Target, light: &Light) {
+fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u32, t: Target, light: &Light, highlight: Option<u16>) {
     if rc.w() <= 0.0 || rc.h() <= 0.0 {
         return;
     }
@@ -307,7 +319,12 @@ fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u
     // Stop subdividing once a cell is under a pixel in either direction.
     let subdivide = node.is_dir() && node.size > 0 && !node.children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
     if !subdivide {
-        render_leaf(t, &rc, &surface, shade_color(node.dominant_ext()), light);
+        let ext = node.dominant_ext();
+        let mut color = shade_color(ext);
+        if highlight.is_some_and(|h| h != ext) {
+            color = dim_color(color);
+        }
+        render_leaf(t, &rc, &surface, color, light);
         return;
     }
     let h_child = h * SCALE;
@@ -315,17 +332,19 @@ fn draw(node: &Node, rc: Rect, surface: Surface, h: f64, as_root: bool, depth: u
         let mut cells = Vec::with_capacity(node.children.len().min(4096));
         squarify(&node.children, node.size, rc, |i, r| cells.push((i, r)));
         cells.par_iter().with_min_len(8).for_each(|&(i, r)| {
-            draw(&node.children[i], r, surface, h_child, false, depth + 1, t, light);
+            draw(&node.children[i], r, surface, h_child, false, depth + 1, t, light, highlight);
         });
     } else {
         squarify(&node.children, node.size, rc, |i, r| {
-            draw(&node.children[i], r, surface, h_child, false, depth + 1, t, light);
+            draw(&node.children[i], r, surface, h_child, false, depth + 1, t, light, highlight);
         });
     }
 }
 
-/// Render the whole tree into a `w`×`h` BGRA buffer.
-pub fn render(tree: &Tree, w: u32, h: u32, background: [u8; 3]) -> Vec<u8> {
+/// Render the whole tree into a `w`×`h` BGRA buffer. When `highlight` is
+/// `Some(ext)`, leaves of that extension stay in full colour and everything
+/// else is dimmed.
+pub fn render(tree: &Tree, w: u32, h: u32, background: [u8; 3], highlight: Option<u16>) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let mut buf = vec![0u8; w * h * 4];
     for px in buf.chunks_exact_mut(4) {
@@ -351,7 +370,7 @@ pub fn render(tree: &Tree, w: u32, h: u32, background: [u8; 3]) -> Vec<u8> {
         x1: w as f64,
         y1: h as f64,
     };
-    draw(&tree.root, rc, Surface([0.0; 4]), HEIGHT, true, 0, t, &light);
+    draw(&tree.root, rc, Surface([0.0; 4]), HEIGHT, true, 0, t, &light, highlight);
     buf
 }
 
