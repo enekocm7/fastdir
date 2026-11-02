@@ -302,7 +302,8 @@ impl FastDir {
                         gpui_kit::component::menu::PopupMenuItem::new("Show treemap in results")
                             .checked(show_treemap)
                             .on_click(move |_, _, cx| {
-                                e7.update(cx, |this, cx| this.toggle_treemap_visible(cx)).ok();
+                                e7.update(cx, |this, cx| this.toggle_treemap_visible(cx))
+                                    .ok();
                             }),
                     )
                     .separator()
@@ -315,18 +316,6 @@ impl FastDir {
                     )
                 }
             }))
-            .child(
-                tool(
-                    "theme",
-                    if theme.mode.is_dark() {
-                        IconName::Sun
-                    } else {
-                        IconName::Moon
-                    },
-                    "Toggle light / dark (Ctrl+T)",
-                )
-                .on_click(cx.listener(|this, _, w, cx| this.toggle_theme(&ToggleTheme, w, cx))),
-            )
     }
 
     /// Compact live-scan progress in the toolbar while the results are shown.
@@ -456,20 +445,48 @@ impl FastDir {
                 .map(|r| r.display().to_string().into()),
         };
         TitleBar::new().child(
-            h_flex().w_full().pr_2().justify_between().child(
-                h_flex()
-                    .gap_2()
-                    .child(img(logo()).size(px(18.)))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("FastDir"),
-                    )
-                    .when_some(subtitle, |d, s| {
-                        d.child(div().text_xs().text_color(theme.muted_foreground).child(s))
-                    }),
-            ),
+            h_flex()
+                .w_full()
+                .pr_2()
+                .justify_between()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(img(logo()).size(px(18.)))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("FastDir"),
+                        )
+                        .when_some(subtitle, |d, s| {
+                            d.child(div().text_xs().text_color(theme.muted_foreground).child(s))
+                        }),
+                )
+                .child(
+                    // The title bar is a `WindowControlArea::Drag` region, so on
+                    // Windows `WM_NCHITTEST` answers `HTCAPTION` for anything over
+                    // it and the click never reaches the button. gpui collects the
+                    // hitboxes under the cursor top-down and stops at the first
+                    // occluding one, so an occluding wrapper hides the drag area
+                    // beneath the buttons and lets them receive clicks (#18).
+                    h_flex().id("title-bar-actions").occlude().child(
+                        Button::new("theme")
+                            .ghost()
+                            .xsmall()
+                            .icon(if theme.mode.is_dark() {
+                                IconName::Sun
+                            } else {
+                                IconName::Moon
+                            })
+                            .tooltip("Toggle light / dark (Ctrl+T)")
+                            .on_click(
+                                cx.listener(|this, _, w, cx| {
+                                    this.toggle_theme(&ToggleTheme, w, cx)
+                                }),
+                            ),
+                    ),
+                ),
         )
     }
 }
