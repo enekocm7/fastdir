@@ -61,6 +61,8 @@ actions!(
         StopScan,
         OpenFolder,
         ToggleTheme,
+        ZoomIn,
+        ZoomOut,
     ]
 );
 
@@ -93,6 +95,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("escape", StopScan, Some(CONTEXT)),
         KeyBinding::new("ctrl-o", OpenFolder, Some(CONTEXT)),
         KeyBinding::new("ctrl-t", ToggleTheme, Some(CONTEXT)),
+        KeyBinding::new("z", ZoomIn, Some(CONTEXT)),
+        KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
     ]);
 }
 
@@ -601,6 +605,33 @@ impl FastDir {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Treemap zoom
+    // ------------------------------------------------------------------
+
+    /// Root the treemap at the selected folder (or the selected file's folder).
+    fn zoom_in(&mut self, _: &ZoomIn, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = self.selected_path() {
+            self.treemap.update(cx, |t, cx| t.set_zoom(path, cx));
+        }
+    }
+
+    fn zoom_out(&mut self, _: &ZoomOut, _: &mut Window, cx: &mut Context<Self>) {
+        self.treemap.update(cx, |t, cx| t.zoom_out(cx));
+    }
+
+    /// Whether Zoom in would change the treemap root.
+    fn can_zoom_in(&self, cx: &App) -> bool {
+        let (Some(tree), Some(mut path)) = (&self.tree, self.selected_path()) else {
+            return false;
+        };
+        let t = tree.read();
+        while !path.is_empty() && !t.get(&path).is_some_and(Node::is_dir) {
+            path.pop();
+        }
+        &path != self.treemap.read(cx).zoom()
+    }
+
     fn is_expanded(&self, ix: usize) -> bool {
         let (Some(tree), Some(row)) = (&self.tree, self.rows.get(ix)) else {
             return false;
@@ -848,6 +879,7 @@ impl FastDir {
                     let name = dest.file_name()?.to_string_lossy().to_string();
                     t.rename(&path, &name)
                 });
+                self.treemap.update(cx, |t, _| t.path_moved(&fs, &dest));
                 self.tree_changed(new_path, cx);
                 window.push_notification(
                     Notification::success(format!("Renamed to {}", dest.display())),
@@ -922,6 +954,7 @@ impl FastDir {
                                 select = t.insert(&dir, node);
                             }
                         }
+                        this.treemap.update(cx, |t, _| t.path_moved(&fs, &dest));
                         this.tree_changed(select, cx);
                         window.push_notification(
                             Notification::success(format!("Moved to {}", dest.display())),
@@ -993,13 +1026,18 @@ impl FastDir {
     // Rendering
     // ------------------------------------------------------------------
 
-    fn build_context_menu(&self, menu: PopupMenu) -> PopupMenu {
+    fn build_context_menu(&self, menu: PopupMenu, cx: &App) -> PopupMenu {
         let is_root = self.selected_path().is_some_and(|p| p.is_empty());
         let is_dir = self.selected_fs_path().is_some_and(|s| s.2);
+        let can_zoom_in = self.can_zoom_in(cx);
+        let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
         menu.action_context(self.focus.clone())
             .menu_with_icon("Open", IconName::ExternalLink, Box::new(OpenItem))
             .menu_with_icon("Show in Explorer", IconName::FolderOpen, Box::new(RevealItem))
             .menu_with_icon("Copy path", IconName::Copy, Box::new(CopyPath))
+            .separator()
+            .menu_with_icon_and_disabled("Zoom in", IconName::ZoomIn, Box::new(ZoomIn), !can_zoom_in)
+            .menu_with_icon_and_disabled("Zoom out", IconName::ZoomOut, Box::new(ZoomOut), !can_zoom_out)
             .separator()
             .menu_with_icon_and_disabled("Rename…", IconName::Pencil, Box::new(RenameItem), is_root)
             .menu_with_icon_and_disabled("Move to…", IconName::FolderInput, Box::new(MoveItem), is_root)
@@ -1263,7 +1301,7 @@ impl FastDir {
                             .track_scroll(&self.list_scroll),
                     )
                     .child(Scrollbar::vertical(&self.list_scroll))
-                    .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu)),
+                    .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx)),
             )
     }
 
@@ -1798,9 +1836,14 @@ impl FastDir {
                 ),
             )
             .child(
-                resizable_panel()
-                    .size_range(px(80.)..Pixels::MAX)
-                    .child(self.treemap.clone()),
+                resizable_panel().size_range(px(80.)..Pixels::MAX).child({
+                    let entity = cx.entity();
+                    div()
+                        .id("treemap-panel")
+                        .size_full()
+                        .child(self.treemap.clone())
+                        .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                }),
             )
     }
 
@@ -1905,6 +1948,8 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::stop_scan))
             .on_action(cx.listener(Self::open_folder))
             .on_action(cx.listener(Self::toggle_theme))
+            .on_action(cx.listener(Self::zoom_in))
+            .on_action(cx.listener(Self::zoom_out))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))
