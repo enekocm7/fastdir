@@ -278,12 +278,20 @@ pub struct ListSettings {
     pub date_format: DateFormat,
     /// Column and direction for new scans.
     pub sort: SortSettings,
+    /// How many files the "Top files" view lists.
+    #[serde(default = "default_top_files_limit")]
+    pub top_files_limit: usize,
     /// Visible columns.
     pub show_items: bool,
     pub show_files: bool,
     pub show_folders: bool,
     pub show_modified: bool,
     pub show_disk: bool,
+}
+
+/// Default number of rows in the "Top files" view.
+fn default_top_files_limit() -> usize {
+    1000
 }
 
 impl Default for ListSettings {
@@ -293,6 +301,7 @@ impl Default for ListSettings {
             percent_base: PercentBase::Parent,
             date_format: DateFormat::Absolute,
             sort: SortSettings::default(),
+            top_files_limit: default_top_files_limit(),
             show_items: true,
             show_files: true,
             show_folders: true,
@@ -484,6 +493,8 @@ struct LegacySettings {
     show_unknown: bool,
     treemap_disk_size: bool,
     show_partial_results: bool,
+    #[serde(default = "default_top_files_limit")]
+    top_files_limit: usize,
     theme: ThemePreference,
     sort: SortSettings,
     window: Option<WindowState>,
@@ -500,6 +511,7 @@ impl Default for LegacySettings {
             show_free_space: false,
             show_unknown: false,
             treemap_disk_size: false,
+            top_files_limit: default_top_files_limit(),
             show_partial_results: true,
             theme: ThemePreference::System,
             sort: SortSettings::default(),
@@ -525,6 +537,7 @@ impl From<LegacySettings> for Settings {
             },
             list: ListSettings {
                 sort: old.sort,
+                top_files_limit: old.top_files_limit,
                 ..ListSettings::default()
             },
             ops: OpSettings::default(),
@@ -642,6 +655,7 @@ mod tests {
         assert!(s.scan.thread_count.is_none());
         assert_eq!(s.appearance.theme, ThemePreference::System);
         assert_eq!(s.list.sort, SortSettings::default());
+        assert_eq!(s.list.top_files_limit, default_top_files_limit());
         assert!(s.window.is_none());
         assert!(s.panels.main.is_empty());
         assert!(s.startup.last_path.is_none());
@@ -700,6 +714,7 @@ mod tests {
                     column: SortColumn::Modified,
                     descending: false,
                 },
+                top_files_limit: 250,
                 show_items: false,
                 show_files: true,
                 show_folders: true,
@@ -814,5 +829,6 @@ mod tests {
         assert!(s.treemap.show_free_space);
         assert_eq!(s.appearance.theme, ThemePreference::System);
         assert_eq!(s.list.sort, SortSettings::default());
+        assert_eq!(s.list.top_files_limit, default_top_files_limit());
     }
 }

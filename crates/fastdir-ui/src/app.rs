@@ -3,10 +3,12 @@
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::drives::{self, Drive};
+use fastdir_core::elevate;
+use fastdir_core::filter::Filter;
 use fastdir_core::format;
 use fastdir_core::fsops;
 use fastdir_core::integration;
-use fastdir_core::model::{NO_EXT, Node, NodePath, Subtree, Tree};
+use fastdir_core::model::{FileEntry, NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
 use fastdir_settings::{
     DateFormat, DeleteAction, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
@@ -75,6 +77,8 @@ actions!(
         ZoomOut,
         ToggleFreeSpace,
         ToggleUnknown,
+        FocusSearch,
+        OpenFilters,
         OpenSettings,
     ]
 );
@@ -82,12 +86,15 @@ actions!(
 mod context_menu;
 mod dialogs;
 mod file_list;
+mod filter;
 mod scan_state;
 mod selection;
 mod settings_ui;
 mod status;
 mod toolbar;
 mod update_ui;
+
+use self::filter::FilterForm;
 
 const CONTEXT: &str = "FastDir";
 
@@ -122,6 +129,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
         KeyBinding::new("f6", ToggleFreeSpace, Some(CONTEXT)),
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
+        KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
     ]);
 }
@@ -181,6 +190,13 @@ fn update_channel_of(channel: UpdateChannel) -> fastdir_updater::Channel {
         UpdateChannel::Prerelease => fastdir_updater::Channel::Prerelease,
     }
 }
+
+/// The two lists in the top-left panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ListTab {
+    Tree,
+    TopFiles,
+}
 /// What a click does to the selection.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ClickMode {
@@ -232,6 +248,9 @@ struct FileOp {
 struct Row {
     path: NodePath,
     depth: u16,
+    /// The row itself passes the active filter (ancestors are shown for
+    /// context and have this cleared).
+    matched: bool,
 }
 
 enum Phase {
@@ -256,9 +275,25 @@ pub struct FastDir {
     tree: Option<Arc<RwLock<Tree>>>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
+    /// Folders that could not be read in the last finished scan (access denied).
+    last_errors: u64,
     /// Tree generation the visible rows were built from during a live scan.
     partial_generation: u64,
     rows: Vec<Row>,
+    /// The tree view or the flat "largest files" list.
+    tab: ListTab,
+    /// Search box contents drive `filter` live.
+    search: Entity<InputState>,
+    filter: Filter,
+    filter_form: FilterForm,
+    /// The N largest files in the whole scan, sorted by `top_sort`.
+    top_files: Vec<FileEntry>,
+    /// The last top-files computation is stale and should run again when the
+    /// tab is shown.
+    top_stale: bool,
+    top_selected: Option<usize>,
+    top_sort: (SortKey, bool),
+    top_scroll: UniformListScrollHandle,
     /// Extension ids with files left, in rank order.
     ext_rows: Vec<u16>,
     /// The cursor row. With a multi-selection it is the item clicked last.
@@ -334,13 +369,31 @@ impl FastDir {
                     } else {
                         ClickMode::Plain
                     };
+                    this.tab = ListTab::Tree;
                     this.reveal_in_list(path.clone(), mode, cx);
                     this.focus.focus(window, cx);
                 }
                 TreemapEvent::Activate(path) => {
+                    this.tab = ListTab::Tree;
                     this.reveal_in_list(path.clone(), ClickMode::Plain, cx);
                     this.open_selected(&OpenItem, window, cx);
                 }
+            },
+        );
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Search name or *.glob (Ctrl+F)"));
+        let search_sub = cx.subscribe_in(
+            &search,
+            window,
+            |this, state, ev: &InputEvent, window, cx| match ev {
+                InputEvent::Change => {
+                    let query = state.read(cx).value().to_string();
+                    this.set_filter_query(query, cx);
+                }
+                InputEvent::PressEnter { .. } => {
+                    this.focus.focus(window, cx);
+                }
+                _ => {}
             },
         );
         let focus = cx.focus_handle();
@@ -380,8 +433,18 @@ impl FastDir {
             tree: None,
             scan_root: None,
             last_scan: None,
+            last_errors: 0,
             partial_generation: 0,
             rows: Vec::new(),
+            tab: ListTab::Tree,
+            search,
+            filter: Filter::default(),
+            filter_form: FilterForm::default(),
+            top_files: Vec::new(),
+            top_stale: true,
+            top_selected: None,
+            top_sort: (SortKey::Size, true),
+            top_scroll: UniformListScrollHandle::new(),
             ext_rows: Vec::new(),
             selected: None,
             marked: BTreeSet::new(),
@@ -399,7 +462,7 @@ impl FastDir {
             available: None,
             checking: false,
             updating: false,
-            _subscriptions: vec![sub],
+            _subscriptions: vec![sub, search_sub],
             _appearance_sub: None,
             _rename_sub: None,
             _scan_task: None,
@@ -566,6 +629,7 @@ impl FastDir {
         let entity = cx.entity().downgrade();
         let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
         let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
+        let banner = self.render_elevate_banner(cx);
         let lists = h_resizable("top-split")
             .with_state(&self.top_split)
             .on_resize({
@@ -592,10 +656,10 @@ impl FastDir {
                     .child(self.render_ext_list(cx)),
             );
         // List-only layout for small screens or very large scans.
-        if !self.settings.treemap.show {
-            return div().size_full().child(lists).into_any_element();
-        }
-        v_resizable("main-split")
+        let body: AnyElement = if !self.settings.treemap.show {
+            div().size_full().child(lists).into_any_element()
+        } else {
+            v_resizable("main-split")
             .with_state(&self.main_split)
             .on_resize({
                 let entity = entity.clone();
@@ -621,6 +685,104 @@ impl FastDir {
                     .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
             }))
             .into_any_element()
+        };
+
+        match banner {
+            Some(banner) => v_flex()
+                .size_full()
+                .child(banner)
+                .child(div().flex_1().min_h_0().w_full().child(body))
+                .into_any_element(),
+            None => body,
+        }
+    }
+
+    /// Warning shown above the results when folders could not be read.
+    /// Offers to relaunch elevated, passing the current scan path so the new
+    /// instance resumes the same scan.
+    fn render_elevate_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let errors = match &self.phase {
+            Phase::Scanning { progress, .. } => progress.errors.load(Ordering::Relaxed),
+            Phase::Ready => self.last_errors,
+            Phase::Home => return None,
+        };
+        if errors == 0 {
+            return None;
+        }
+        let theme = cx.theme();
+        let root = self.scan_root.clone();
+        let elevated = elevate::is_elevated();
+        Some(
+            h_flex()
+                .flex_shrink_0()
+                .w_full()
+                .px_3()
+                .py_1()
+                .gap_3()
+                .items_center()
+                .justify_between()
+                .border_b_1()
+                .border_color(theme.border)
+                .bg(theme.warning.opacity(0.12))
+                .child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_xs()
+                        .text_color(theme.warning)
+                        .child(format!(
+                            "{} folders could not be read (access denied) — totals are incomplete",
+                            format::count(errors)
+                        )),
+                )
+                .when(!elevated, |d| {
+                    d.child(
+                        Button::new("restart-admin-ready")
+                            .small()
+                            .outline()
+                            .icon(IconName::Shield)
+                            .label("Restart as administrator")
+                            .tooltip(
+                                "Relaunch FastDir elevated so protected folders can be scanned",
+                            )
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.restart_elevated(root.clone(), w, cx)
+                            })),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// Relaunch the app elevated, passing `path` so the new instance resumes
+    /// the same scan. Quits this instance on success; UAC cancellation or a
+    /// launch failure is reported and keeps this instance running.
+    pub(super) fn restart_elevated(
+        &mut self,
+        path: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match elevate::restart_as_admin(path.as_deref()) {
+            Ok(()) => cx.quit(),
+            Err(e) if e == "Elevation was cancelled" => {
+                window.push_notification(
+                    Notification::info(
+                        "Staying without elevation — protected folders will be skipped.",
+                    )
+                    .title("Elevation cancelled"),
+                    cx,
+                );
+            }
+            Err(e) => {
+                window.push_notification(
+                    Notification::error(e).title("Could not restart as administrator"),
+                    cx,
+                );
+            }
+        }
     }
 
     /// Remember where the user dragged a divider.
@@ -809,6 +971,8 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::zoom_out))
             .on_action(cx.listener(Self::toggle_free_space))
             .on_action(cx.listener(Self::toggle_unknown))
+            .on_action(cx.listener(Self::focus_search))
+            .on_action(cx.listener(Self::open_filters))
             .on_action(cx.listener(Self::open_settings))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
