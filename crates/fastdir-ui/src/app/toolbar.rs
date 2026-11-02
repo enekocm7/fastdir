@@ -118,6 +118,15 @@ impl FastDir {
                 .disabled(!has_sel || busy || multi || special)
                 .on_click(cx.listener(|this, _, w, cx| this.refresh_item(&RefreshItem, w, cx))),
             )
+            .child(
+                tool(
+                    "export",
+                    IconName::Download,
+                    "Export results… (Ctrl+Shift+E)",
+                )
+                .disabled(!ready || busy || self.tree.is_none())
+                .on_click(cx.listener(|this, _, w, cx| this.open_export(&ExportResults, w, cx))),
+            )
             .child(Separator::vertical().h(px(20.)).mx_1())
             .child(
                 tool("rename", IconName::Pencil, "Rename (F2)")
