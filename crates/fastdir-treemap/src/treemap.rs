@@ -64,10 +64,32 @@ const PALETTE: [(u8, u8, u8); 18] = [
     (200, 120, 60),
     (255, 0, 128),
 ];
-const OTHER: (u8, u8, u8) = (200, 200, 200);
+/// Colour-blind friendlier alternative to [`PALETTE`] (Okabe-Ito inspired,
+/// extended with lighter / darker variants past the first eight).
+const COLORBLIND_PALETTE: [(u8, u8, u8); 18] = [
+    (0, 114, 178),
+    (230, 159, 0),
+    (0, 158, 115),
+    (204, 121, 167),
+    (86, 180, 233),
+    (213, 94, 0),
+    (240, 228, 66),
+    (0, 0, 0),
+    (119, 172, 212),
+    (255, 190, 93),
+    (115, 209, 173),
+    (232, 167, 198),
+    (141, 211, 244),
+    (244, 162, 97),
+    (247, 243, 158),
+    (120, 120, 120),
+    (70, 70, 178),
+    (178, 120, 60),
+];
 /// WinDirStat colours for the drive pseudo-items.
 pub const FREE_SPACE_COLOR: (u8, u8, u8) = (128, 128, 128);
 pub const UNKNOWN_COLOR: (u8, u8, u8) = (255, 255, 0);
+const OTHER: (u8, u8, u8) = (200, 200, 200);
 
 /// Normalise so channel overflow spills into the others (keeps hue, avoids clipping).
 fn normalize(r: &mut f64, g: &mut f64, b: &mut f64) {
@@ -111,24 +133,92 @@ fn bright_color((r, g, b): (u8, u8, u8)) -> [f64; 3] {
 
 /// The display colour (sRGB 0-255) for an extension rank, as shown in the legend.
 pub fn ext_color(ext: u16) -> (u8, u8, u8) {
+    ext_color_with(Palette::Default, ext)
+}
+
+/// [`ext_color`] for an explicit [`Palette`].
+pub fn ext_color_with(palette: Palette, ext: u16) -> (u8, u8, u8) {
     if ext == NO_EXT {
         return OTHER;
     }
-    PALETTE.get(ext as usize).copied().unwrap_or(OTHER)
+    match palette {
+        Palette::Default => PALETTE.get(ext as usize).copied().unwrap_or(OTHER),
+        Palette::ColorBlind => COLORBLIND_PALETTE
+            .get(ext as usize)
+            .copied()
+            .unwrap_or(OTHER),
+        Palette::Mono => {
+            // Greyscale ramp by rank; past the ramp everything is mid-grey.
+            const STEPS: usize = 18;
+            if (ext as usize) < STEPS {
+                let v = 235u8.saturating_sub((ext as u16 * 150 / STEPS as u16) as u8);
+                (v, v, v)
+            } else {
+                OTHER
+            }
+        }
+    }
 }
 
 /// Display colour for a node: pseudo-items get their WinDirStat colours,
 // otherwise the extension colour.
 pub fn node_color(node: &Node) -> (u8, u8, u8) {
+    node_color_with(Palette::Default, node)
+}
+
+/// [`node_color`] for an explicit [`Palette`].
+pub fn node_color_with(palette: Palette, node: &Node) -> (u8, u8, u8) {
     match node.kind() {
         NodeKind::FreeSpace => FREE_SPACE_COLOR,
         NodeKind::Unknown => UNKNOWN_COLOR,
-        _ => ext_color(node.ext),
+        _ => ext_color_with(palette, node.ext),
     }
 }
 
-fn shade_node(node: &Node) -> [f64; 3] {
-    bright_color(node_color(node))
+/// Warm-to-cold colour for a file modified at `modified` ("now" is `now`,
+/// both Unix seconds). New files glow red, year-old ones are blue.
+fn age_color(modified: i64, now: i64) -> (u8, u8, u8) {
+    if modified <= 0 {
+        return (128, 128, 128);
+    }
+    const STOPS: [(f64, (u8, u8, u8)); 5] = [
+        (0.0, (231, 76, 60)),
+        (7.0, (230, 126, 34)),
+        (30.0, (241, 196, 15)),
+        (180.0, (46, 204, 113)),
+        (365.0, (52, 152, 219)),
+    ];
+    let days = now.saturating_sub(modified).max(0) as f64 / 86_400.0;
+    let mut prev = STOPS[0];
+    for &stop in &STOPS[1..] {
+        if days <= stop.0 {
+            let t = if stop.0 > prev.0 {
+                ((days - prev.0) / (stop.0 - prev.0)).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let lerp = |a: u8, b: u8| (a as f64 + (b as f64 - a as f64) * t).round() as u8;
+            return (
+                lerp(prev.1.0, stop.1.0),
+                lerp(prev.1.1, stop.1.1),
+                lerp(prev.1.2, stop.1.2),
+            );
+        }
+        prev = stop;
+    }
+    STOPS[STOPS.len() - 1].1
+}
+
+fn shade_node(node: &Node, opts: &RenderOptions) -> [f64; 3] {
+    let rgb = match node.kind() {
+        NodeKind::FreeSpace => FREE_SPACE_COLOR,
+        NodeKind::Unknown => UNKNOWN_COLOR,
+        _ => match opts.color_mode {
+            ColorMode::Extension => ext_color_with(opts.palette, node.ext),
+            ColorMode::Age => age_color(node.modified(), opts.now),
+        },
+    };
+    bright_color(rgb)
 }
 
 /// Desaturate and darken a colour so non-highlighted leaves fade into the
@@ -240,6 +330,75 @@ pub fn squarify(children: &[Node], total: u64, rc: Rect, mut f: impl FnMut(usize
     }
 }
 
+/// Which palette maps extension ranks to colours.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Palette {
+    /// WinDirStat-style rainbow.
+    #[default]
+    Default,
+    /// Okabe-Ito inspired, friendlier to red-green colour blindness.
+    ColorBlind,
+    /// Greyscale ramp (prints well, calm).
+    Mono,
+}
+
+/// What decides a leaf's colour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColorMode {
+    /// Colour by file extension (the extension list doubles as a legend).
+    #[default]
+    Extension,
+    /// Colour by age: new files are warm, old files are cold.
+    Age,
+}
+
+/// Everything about how a treemap looks. Passed as one struct so new display
+/// settings stay a settings-only change.
+#[derive(Clone, Copy, Debug)]
+pub struct RenderOptions {
+    /// Extension rank in full colour, everything else dimmed. Ignored when
+    /// [`ColorMode::Age`] is active (there is no extension to highlight).
+    pub highlight: Option<u16>,
+    /// Lay out the `<Free space>` pseudo-item.
+    pub show_free: bool,
+    /// Lay out the `<Unknown>` pseudo-item.
+    pub show_unknown: bool,
+    /// Size cells by allocated (on-disk) bytes instead of logical bytes.
+    pub use_disk: bool,
+    pub palette: Palette,
+    pub color_mode: ColorMode,
+    /// Cushion (SequoiaView pillow) shading, or flat rectangles.
+    pub cushion: bool,
+    /// Ridge height multiplier for the cushion shading (0.0..=2.0).
+    pub cushion_strength: f32,
+    /// Leave a 1px gap between cells.
+    pub borders: bool,
+    /// Stop subdividing once a cell is smaller than this (device px).
+    pub min_cell: f32,
+    /// Unix timestamp used as "now" for age colours.
+    pub now: i64,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self {
+            highlight: None,
+            show_free: false,
+            show_unknown: false,
+            use_disk: false,
+            palette: Palette::Default,
+            color_mode: ColorMode::Extension,
+            cushion: true,
+            cushion_strength: 1.0,
+            borders: false,
+            min_cell: 1.0,
+            now: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+        }
+    }
+}
 /// The metric used to size a cell: logical bytes or allocated bytes.
 #[inline]
 fn node_size(node: &Node, use_disk: bool) -> u64 {
@@ -449,10 +608,37 @@ struct Light {
     lz: f64,
 }
 
-fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light) {
+fn render_leaf(
+    t: Target,
+    rc: &Rect,
+    s: &Surface,
+    color: [f64; 3],
+    light: &Light,
+    cushion: bool,
+) {
     let (x0, x1) = px_range(rc.x0, rc.x1, t.w);
     let (y0, y1) = px_range(rc.y0, rc.y1, t.h);
     if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    // Flat rectangles: one fill, no per-pixel lighting (easier to read for
+    // some people, and cheaper to render).
+    if !cushion {
+        let r = color[0].clamp(0.0, 255.0) as u8;
+        let g = color[1].clamp(0.0, 255.0) as u8;
+        let b = color[2].clamp(0.0, 255.0) as u8;
+        for iy in y0..y1 {
+            let row = unsafe { t.ptr.add((iy * t.w + x0) * 4) };
+            for k in 0..(x1 - x0) {
+                unsafe {
+                    let p = row.add(k * 4);
+                    *p = b;
+                    *p.add(1) = g;
+                    *p.add(2) = r;
+                    *p.add(3) = 255;
+                }
+            }
+        }
         return;
     }
     let ia = AMBIENT;
@@ -501,10 +687,7 @@ fn draw(
     depth: u32,
     t: Target,
     light: &Light,
-    highlight: Option<u16>,
-    show_free: bool,
-    show_unknown: bool,
-    use_disk: bool,
+    opts: &RenderOptions,
 ) {
     if rc.w() <= 0.0 || rc.h() <= 0.0 {
         return;
@@ -513,18 +696,35 @@ fn draw(
     if !as_root {
         surface.add_ridge(&rc, h);
     }
-    // Stop subdividing once a cell is under a pixel in either direction.
-    let size = node_size(node, use_disk);
+    // Stop subdividing once a cell is under the minimum size in either
+    // direction (1px by default; files below it merge into their parent).
+    let min = opts.min_cell.max(0.5) as f64;
+    let size = node_size(node, opts.use_disk);
     let children = tree.children(node);
     let subdivide =
-        node.is_dir() && size > 0 && !children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
+        node.is_dir() && size > 0 && !children.is_empty() && rc.w() >= min && rc.h() >= min;
     if !subdivide {
         let ext = tree.dominant_ext(node);
-        let mut color = shade_node(node);
-        if highlight.is_some_and(|hl| hl != ext) {
+        let mut color = shade_node(node, opts);
+        // Extension highlighting only makes sense when colouring by
+        // extension; in age mode every leaf keeps its own colour.
+        if opts.color_mode == ColorMode::Extension
+            && opts.highlight.is_some_and(|hl| hl != ext)
+        {
             color = dim_color(color);
         }
-        render_leaf(t, &rc, &surface, color, light);
+        // Cell borders: shrink the leaf so a hairline of background shows.
+        let rc = if opts.borders && rc.w() > 2.0 && rc.h() > 2.0 {
+            Rect {
+                x0: rc.x0 + 0.5,
+                y0: rc.y0 + 0.5,
+                x1: rc.x1 - 0.5,
+                y1: rc.y1 - 0.5,
+            }
+        } else {
+            rc
+        };
+        render_leaf(t, &rc, &surface, color, light, opts.cushion);
         return;
     }
     let h_child = h * SCALE;
@@ -534,26 +734,14 @@ fn draw(
             children,
             size,
             rc,
-            show_free,
-            show_unknown,
-            use_disk,
+            opts.show_free,
+            opts.show_unknown,
+            opts.use_disk,
             |i, r| cells.push((i, r)),
         );
         cells.par_iter().with_min_len(8).for_each(|&(i, r)| {
             draw(
-                tree,
-                &children[i],
-                r,
-                surface,
-                h_child,
-                false,
-                depth + 1,
-                t,
-                light,
-                highlight,
-                show_free,
-                show_unknown,
-                use_disk,
+                tree, &children[i], r, surface, h_child, false, depth + 1, t, light, opts,
             );
         });
     } else {
@@ -561,9 +749,9 @@ fn draw(
             children,
             size,
             rc,
-            show_free,
-            show_unknown,
-            use_disk,
+            opts.show_free,
+            opts.show_unknown,
+            opts.use_disk,
             |i, r| {
                 draw(
                     tree,
@@ -575,10 +763,7 @@ fn draw(
                     depth + 1,
                     t,
                     light,
-                    highlight,
-                    show_free,
-                    show_unknown,
-                    use_disk,
+                    opts,
                 );
             },
         );
@@ -586,22 +771,17 @@ fn draw(
 }
 
 /// Render the subtree under `root` (the scan root, or the zoomed-in folder
-/// of `tree`) into a `w`×`h` BGRA buffer. When `highlight` is `Some(ext)`, leaves of that
-/// extension stay in full colour and everything else is dimmed. Drive
-/// pseudo-items are only laid out when `show_free` / `show_unknown` are set
-/// (both off by default, like WinDirStat). `use_disk` sizes cells by their
-/// allocated bytes instead of their logical bytes.
-#[allow(clippy::too_many_arguments)]
+/// of `tree`) into a `w`×`h` BGRA buffer. All display choices (pseudo-items,
+/// size metric, palette, cushion shading, borders, …) come from `opts`.
+/// When `highlight` is `Some(ext)`, leaves of that extension stay in full
+/// colour and everything else is dimmed.
 pub fn render(
     tree: &Tree,
     root: &Node,
     w: u32,
     h: u32,
     background: [u8; 3],
-    highlight: Option<u16>,
-    show_free: bool,
-    show_unknown: bool,
-    use_disk: bool,
+    opts: &RenderOptions,
 ) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let mut buf = vec![0u8; w * h * 4];
@@ -633,15 +813,12 @@ pub fn render(
         root,
         rc,
         Surface([0.0; 4]),
-        HEIGHT,
+        HEIGHT * opts.cushion_strength.clamp(0.0, 2.0) as f64,
         true,
         0,
         t,
         &light,
-        highlight,
-        show_free,
-        show_unknown,
-        use_disk,
+        opts,
     );
     buf
 }
@@ -649,7 +826,6 @@ pub fn render(
 /// The node under pixel (`x`, `y`), descending as far as the layout goes.
 /// The returned path is relative to `root`, a node of `tree`. Hidden pseudo-items are never
 /// returned.
-#[allow(clippy::too_many_arguments)]
 pub fn hit_test(
     tree: &Tree,
     root: &Node,
@@ -657,9 +833,7 @@ pub fn hit_test(
     h: f64,
     x: f64,
     y: f64,
-    show_free: bool,
-    show_unknown: bool,
-    use_disk: bool,
+    opts: &RenderOptions,
 ) -> Option<NodePath> {
     let mut rc = Rect {
         x0: 0.0,
@@ -670,21 +844,22 @@ pub fn hit_test(
     if !rc.contains(x, y) {
         return None;
     }
+    let min = opts.min_cell.max(0.5) as f64;
     let mut node = root;
     let mut path = Vec::new();
     loop {
         let children = tree.children(node);
-        if !node.is_dir() || children.is_empty() || rc.w() < 1.0 || rc.h() < 1.0 {
+        if !node.is_dir() || children.is_empty() || rc.w() < min || rc.h() < min {
             return Some(path);
         }
         let mut found = None;
         squarify_filtered(
             children,
-            node_size(node, use_disk),
+            node_size(node, opts.use_disk),
             rc,
-            show_free,
-            show_unknown,
-            use_disk,
+            opts.show_free,
+            opts.show_unknown,
+            opts.use_disk,
             |i, r| {
                 if found.is_none() && r.contains(x, y) {
                     found = Some((i, r));
@@ -700,16 +875,13 @@ pub fn hit_test(
 
 /// The rectangle of the node at `path` (relative to `root`, a node of
 /// `tree`), if it is laid out at this size. Returns `None` for hidden pseudo-items.
-#[allow(clippy::too_many_arguments)]
 pub fn rect_of(
     tree: &Tree,
     root: &Node,
     w: f64,
     h: f64,
     path: &[u32],
-    show_free: bool,
-    show_unknown: bool,
-    use_disk: bool,
+    opts: &RenderOptions,
 ) -> Option<Rect> {
     let mut rc = Rect {
         x0: 0.0,
@@ -718,25 +890,26 @@ pub fn rect_of(
         y1: h,
     };
     let mut node = root;
+    let min = opts.min_cell.max(0.5) as f64;
     for &want in path {
-        if rc.w() < 1.0 || rc.h() < 1.0 {
+        if rc.w() < min || rc.h() < min {
             return Some(rc);
         }
         let children = tree.children(node);
         // Hidden pseudo-items have no rectangle.
         if let Some(next) = children.get(want as usize)
-            && !is_visible(next, show_free, show_unknown)
+            && !is_visible(next, opts.show_free, opts.show_unknown)
         {
             return None;
         }
         let mut found = None;
         squarify_filtered(
             children,
-            node_size(node, use_disk),
+            node_size(node, opts.use_disk),
             rc,
-            show_free,
-            show_unknown,
-            use_disk,
+            opts.show_free,
+            opts.show_unknown,
+            opts.use_disk,
             |i, r| {
                 if i == want as usize {
                     found = Some(r);
@@ -816,21 +989,16 @@ mod tests {
     fn rect_of_and_hit_test_agree() {
         let tree = two_file_root();
         let root = tree.root();
-        let r = rect_of(&tree, root, 100.0, 100.0, &[0], false, false, false).unwrap();
+        let opts = RenderOptions::default();
+        let r = rect_of(&tree, root, 100.0, 100.0, &[0], &opts).unwrap();
         let (x, y) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
         assert_eq!(
-            hit_test(&tree, root, 100.0, 100.0, x, y, false, false, false),
+            hit_test(&tree, root, 100.0, 100.0, x, y, &opts),
             Some(vec![0])
         );
 
-        assert_eq!(
-            hit_test(&tree, root, 100.0, 100.0, -1.0, 0.0, false, false, false),
-            None
-        );
-        assert_eq!(
-            rect_of(&tree, root, 100.0, 100.0, &[99], false, false, false),
-            None
-        );
+        assert_eq!(hit_test(&tree, root, 100.0, 100.0, -1.0, 0.0, &opts), None);
+        assert_eq!(rect_of(&tree, root, 100.0, 100.0, &[99], &opts), None);
     }
 
     #[test]
@@ -847,18 +1015,13 @@ mod tests {
         let compressed = position("compressed.bin");
         let small = position("small.bin");
 
-        let logical = rect_of(
-            &tree,
-            root,
-            100.0,
-            100.0,
-            &[compressed],
-            false,
-            false,
-            false,
-        )
-        .unwrap();
-        let disk = rect_of(&tree, root, 100.0, 100.0, &[small], false, false, true).unwrap();
+        let logical = rect_of(&tree, root, 100.0, 100.0, &[compressed], &RenderOptions::default())
+            .unwrap();
+        let disk_opts = RenderOptions {
+            use_disk: true,
+            ..RenderOptions::default()
+        };
+        let disk = rect_of(&tree, root, 100.0, 100.0, &[small], &disk_opts).unwrap();
         assert!(
             disk.w() * disk.h() > logical.w() * logical.h(),
             "disk-sized small file should be the larger cell"
@@ -871,6 +1034,36 @@ mod tests {
         assert_eq!(ext_color(0), (0, 0, 255));
         assert_eq!(ext_color(1), (255, 0, 0));
         assert_eq!(ext_color(u16::MAX - 1), (200, 200, 200));
+    }
+
+    #[test]
+    fn palettes_stay_distinct_per_rank() {
+        // Colour-blind palette differs from the default but keeps ranks apart.
+        let a: Vec<_> = (0..8).map(|r| ext_color_with(Palette::ColorBlind, r)).collect();
+        let b: Vec<_> = (0..8).map(ext_color).collect();
+        assert_ne!(a, b);
+        let mut distinct = a.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 8);
+        // Mono is a grey ramp: channels equal, brighter for lower ranks.
+        let m0 = ext_color_with(Palette::Mono, 0);
+        let m1 = ext_color_with(Palette::Mono, 5);
+        assert_eq!(m0.0, m0.1);
+        assert_eq!(m0.1, m0.2);
+        assert!(m0.0 > m1.0);
+        assert_eq!(ext_color_with(Palette::Mono, u16::MAX - 1), (200, 200, 200));
+    }
+
+    #[test]
+    fn age_colours_run_from_warm_to_cold() {
+        let now = 1_800_000_000;
+        assert_eq!(age_color(now, now), (231, 76, 60));
+        assert_eq!(age_color(now - 400 * 86_400, now), (52, 152, 219));
+        assert_eq!(age_color(0, now), (128, 128, 128));
+        // In between stays on the gradient, never grey.
+        let mid = age_color(now - 60 * 86_400, now);
+        assert_ne!(mid, (128, 128, 128));
     }
 
     #[test]
@@ -900,12 +1093,41 @@ mod tests {
             16,
             16,
             [24, 24, 27],
-            None,
-            false,
-            false,
-            false,
+            &RenderOptions::default(),
         );
         assert_eq!(buf.len(), 16 * 16 * 4);
+        assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
+    }
+
+    #[test]
+    fn flat_and_bordered_renders_stay_opaque() {
+        let tree = two_file_root();
+        for opts in [
+            RenderOptions {
+                cushion: false,
+                ..RenderOptions::default()
+            },
+            RenderOptions {
+                borders: true,
+                ..RenderOptions::default()
+            },
+            RenderOptions {
+                color_mode: ColorMode::Age,
+                palette: Palette::ColorBlind,
+                ..RenderOptions::default()
+            },
+        ] {
+            let buf = render(&tree, tree.root(), 16, 16, [24, 24, 27], &opts);
+            assert_eq!(buf.len(), 16 * 16 * 4);
+            assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
+        }
+        // Flat mode fills each leaf with exactly its base colour.
+        let flat = RenderOptions {
+            cushion: false,
+            min_cell: 100.0,
+            ..RenderOptions::default()
+        };
+        let buf = render(&tree, tree.root(), 8, 8, [0, 0, 0], &flat);
         assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
     }
 
@@ -947,14 +1169,19 @@ mod tests {
         assert_eq!(cells.len(), 3);
 
         // hit_test never returns hidden pseudo-items.
-        let hit = hit_test(&tree, root, 100.0, 80.0, 50.0, 40.0, false, false, false).unwrap();
+        let hidden_opts = RenderOptions::default();
+        let hit = hit_test(&tree, root, 100.0, 80.0, 50.0, 40.0, &hidden_opts).unwrap();
         assert_eq!(hit, vec![0]);
         // rect_of returns None for hidden pseudo-items.
         assert_eq!(
-            rect_of(&tree, root, 100.0, 80.0, &[1], false, false, false),
+            rect_of(&tree, root, 100.0, 80.0, &[1], &hidden_opts),
             None
         );
-        assert!(rect_of(&tree, root, 100.0, 80.0, &[1], true, false, false).is_some());
+        let shown_opts = RenderOptions {
+            show_free: true,
+            ..RenderOptions::default()
+        };
+        assert!(rect_of(&tree, root, 100.0, 80.0, &[1], &shown_opts).is_some());
     }
 
     fn test_rect() -> Rect {

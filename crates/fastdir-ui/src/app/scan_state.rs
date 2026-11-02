@@ -30,8 +30,9 @@ impl FastDir {
             started: Instant::now(),
             expected,
         };
+        self.home_drives = true;
         self.scan_root = Some(root.clone());
-        self.settings.last_scan_path = Some(root.to_string_lossy().into_owned());
+        self.settings.startup.last_path = Some(root.to_string_lossy().into_owned());
         self.settings.save();
         // The scanner fills this tree in place, so the list and the treemap
         // can show finished top-level folders before the scan ends.
@@ -49,15 +50,16 @@ impl FastDir {
         self.treemap.update(cx, |t, cx| {
             t.set_tree(Some(tree.clone()), cx);
             t.set_selection(vec![Vec::new()], cx);
-            t.set_partial(true, cx);
+            t.set_partial(self.settings.scan.show_partial_results, cx);
         });
         window.set_window_title(&format!("FastDir — scanning {}", root.display()));
 
         let p = progress.clone();
         let scan_tree = tree.clone();
+        let options = self.scan_options();
         let job = cx
             .background_executor()
-            .spawn(async move { scanner::scan_live(root, p, scan_tree) });
+            .spawn(async move { scanner::scan_live(root, p, scan_tree, &options) });
         self._scan_task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
@@ -181,7 +183,7 @@ impl FastDir {
         let msg = format!(
             "Scanned {} files ({}) in {}",
             format::count(files as u64),
-            format::bytes(size),
+            self.bytes(size),
             format::duration(elapsed)
         );
         window.push_notification(
@@ -253,6 +255,7 @@ impl FastDir {
             progress.cancel.store(true, Ordering::Relaxed);
         }
         self.phase = Phase::Home;
+        self.home_drives = true;
         self.tree = None;
         self.rows.clear();
         self.selected = None;
@@ -266,6 +269,40 @@ impl FastDir {
 
     pub(super) fn render_home(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        if !self.home_drives {
+            // "Open nothing" startup mode: a blank home until the user scans.
+            return v_flex()
+                .id("home")
+                .size_full()
+                .overflow_y_scroll()
+                .items_center()
+                .pt(px(56.))
+                .gap_6()
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(FontWeight::BOLD)
+                                .child("What's using my disk?"),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child("Pick any folder to scan."),
+                        ),
+                )
+                .child(
+                    Button::new("scan-folder")
+                        .outline()
+                        .icon(IconName::FolderSearch)
+                        .label("Scan a folder…")
+                        .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
+                );
+        }
         let cards = self.drives.iter().enumerate().map(|(i, d)| {
             let path = d.path.clone();
             let frac = d.used_fraction();
@@ -329,11 +366,11 @@ impl FastDir {
                         .justify_between()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child(format!("{} used", format::bytes(d.used())))
+                        .child(format!("{} used", self.bytes(d.used())))
                         .child(format!(
                             "{} free of {}",
-                            format::bytes(d.free),
-                            format::bytes(d.total)
+                            self.bytes(d.free),
+                            self.bytes(d.total)
                         )),
                 )
         });
@@ -448,7 +485,7 @@ impl FastDir {
                     .gap_3()
                     .child(stat("Files", format::count(files)))
                     .child(stat("Folders", format::count(dirs)))
-                    .child(stat("Size", format::bytes(bytes)))
+                    .child(stat("Size", self.bytes(bytes)))
                     .child(stat("Speed", format!("{}/s", format::count(rate as u64))))
                     .child(stat("Elapsed", format::duration(elapsed))),
             )

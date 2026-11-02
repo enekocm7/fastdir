@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 const LATEST_URL: &str = "https://api.github.com/repos/enekocm7/fastdir/releases/latest";
+const RELEASES_URL: &str = "https://api.github.com/repos/enekocm7/fastdir/releases?per_page=20";
 const SUMS_NAME: &str = "SHA256SUMS.txt";
 const UPDATE_DIR: &str = "FastDir-update";
 
@@ -126,12 +127,31 @@ pub fn is_newer(current: &str, candidate: &str) -> bool {
     }
 }
 
+/// Which releases the update check looks at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Channel {
+    /// Finished releases only (GitHub's `releases/latest`).
+    #[default]
+    Stable,
+    /// Also offer pre-releases (the newest tag wins, drafts excluded).
+    Prerelease,
+}
+
 /// Parses the `releases/latest` payload. Drafts, pre-releases and tags that
 /// are not valid semver yield `None`.
 pub fn parse_release(json: &str) -> Result<Option<Release>, UpdateError> {
+    parse_release_inner(json, false)
+}
+
+/// Like [`parse_release`], but keeps pre-releases when `allow_prerelease`.
+pub fn parse_release_allowing_prerelease(json: &str) -> Result<Option<Release>, UpdateError> {
+    parse_release_inner(json, true)
+}
+
+fn parse_release_inner(json: &str, allow_prerelease: bool) -> Result<Option<Release>, UpdateError> {
     let raw: RawRelease =
         serde_json::from_str(json).map_err(|e| UpdateError::Other(format!("bad release data: {e}")))?;
-    if raw.draft || raw.prerelease {
+    if raw.draft || (!allow_prerelease && raw.prerelease) {
         return Ok(None);
     }
     let Some(version) = parse_version(&raw.tag_name) else {
@@ -196,6 +216,15 @@ fn agent(timeouts: bool) -> ureq::Agent {
     builder.build().into()
 }
 
+/// Asks GitHub for the newest release on `channel`. `Ok(None)` means there is
+/// no usable release (draft / pre-release on the stable channel / odd tag).
+pub fn fetch_channel(channel: Channel) -> Result<Option<Release>, UpdateError> {
+    match channel {
+        Channel::Stable => fetch_latest(),
+        Channel::Prerelease => fetch_latest_including_prereleases(),
+    }
+}
+
 /// Asks GitHub for the latest stable release. `Ok(None)` means there is no
 /// usable release (draft / pre-release / odd tag).
 pub fn fetch_latest() -> Result<Option<Release>, UpdateError> {
@@ -210,6 +239,49 @@ pub fn fetch_latest() -> Result<Option<Release>, UpdateError> {
         Err(e) => return Err(e.into()),
     };
     parse_release(&response.into_body().read_to_string()?)
+}
+
+/// Newest release including pre-releases (drafts still excluded). Used by
+/// the "pre-release" update channel.
+pub fn fetch_latest_including_prereleases() -> Result<Option<Release>, UpdateError> {
+    let response = match agent(true)
+        .get(RELEASES_URL)
+        .header("Accept", "application/vnd.github+json")
+        .call()
+    {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(404)) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let raws: Vec<RawRelease> = serde_json::from_str(&response.into_body().read_to_string()?)
+        .map_err(|e| UpdateError::Other(format!("bad release data: {e}")))?;
+    Ok(pick_newest(&raws))
+}
+
+/// Newest non-draft release in a `releases` listing, pre-releases included.
+fn pick_newest(raws: &[RawRelease]) -> Option<Release> {
+    raws.iter()
+        .filter(|r| !r.draft)
+        .filter_map(|r| {
+            let version = parse_version(&r.tag_name)?;
+            Some((
+                version.clone(),
+                Release {
+                    version,
+                    notes: r.body.clone().unwrap_or_default().replace("\r\n", "\n"),
+                    assets: r
+                        .assets
+                        .iter()
+                        .map(|a| Asset {
+                            name: a.name.clone(),
+                            url: a.browser_download_url.clone(),
+                        })
+                        .collect(),
+                },
+            ))
+        })
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+        .map(|(_, release)| release)
 }
 
 // ----------------------------------------------------------------------
@@ -559,6 +631,33 @@ mod tests {
         assert!(parse_release(&release_json("v0.2.0", false, true)).unwrap().is_none());
         assert!(parse_release(&release_json("nightly", false, false)).unwrap().is_none());
         assert!(parse_release("{").is_err());
+    }
+
+    #[test]
+    fn prerelease_channel_picks_the_newest_tag() {
+        // The stable parser still rejects pre-releases…
+        assert!(
+            parse_release(&release_json("v0.3.0-beta.1", false, true))
+                .unwrap()
+                .is_none()
+        );
+        // …while the opt-in parser keeps them.
+        assert!(
+            parse_release_allowing_prerelease(&release_json("v0.3.0-beta.1", false, true))
+                .unwrap()
+                .is_some()
+        );
+        let list = format!(
+            "[{}, {}, {}]",
+            release_json("v0.2.0", false, false),
+            release_json("v0.3.0-beta.1", false, true),
+            release_json("v9.9.9", true, false),
+        );
+        let raws: Vec<RawRelease> = serde_json::from_str(&list).unwrap();
+        let newest = pick_newest(&raws).unwrap();
+        // The draft ( however high its tag) loses to the beta.
+        assert_eq!(newest.version, Version::parse("0.3.0-beta.1").unwrap());
+        assert!(pick_newest(&[]).is_none());
     }
 
     #[test]

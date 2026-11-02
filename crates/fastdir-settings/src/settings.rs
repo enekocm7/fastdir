@@ -1,9 +1,11 @@
 //! Small persisted config (`%APPDATA%\FastDir\config.toml`).
 //!
-//! Everything the app remembers between launches lives here: updater state,
-//! the theme, the window geometry, the panel split, the sort order and the
-//! last scanned path. Settings written by older versions to `settings.json`
-//! are migrated on first load.
+//! Everything the app remembers between launches lives here, grouped into
+//! sections so the file stays readable as it grows: what to scan, how the
+//! treemap and the file list look, which file operations confirm, what
+//! happens on startup, and the updater state. Settings written by older
+//! versions (flat `config.toml` keys or `settings.json`) are migrated on
+//! first load, so every field keeps `#[serde(default)]`.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -31,6 +33,109 @@ pub enum SortColumn {
     Files,
     Dirs,
     Modified,
+}
+
+/// How folder sizes are displayed in the list, the status bar and tooltips.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SizeUnit {
+    /// 1024-based (the Windows convention).
+    #[default]
+    Binary,
+    /// 1000-based (SI, like macOS and drive manufacturers).
+    Decimal,
+}
+
+/// What the subtree `%` column is relative to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PercentBase {
+    /// The parent folder (WinDirStat style).
+    #[default]
+    Parent,
+    /// The whole scan root.
+    Total,
+}
+
+/// Absolute timestamps vs. relative ones (`3 days ago`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DateFormat {
+    #[default]
+    Absolute,
+    Relative,
+}
+
+/// Which treemap palette maps extension ranks to colours.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TreemapPalette {
+    /// WinDirStat-style rainbow.
+    #[default]
+    Default,
+    /// Friendlier to red-green colour blindness.
+    ColorBlind,
+    /// Greyscale ramp.
+    Mono,
+}
+
+/// What decides a treemap leaf's colour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TreemapColorMode {
+    /// Colour by file extension (the extension list is the legend).
+    #[default]
+    Extension,
+    /// Colour by age: new files are warm, old files are cold.
+    Age,
+}
+
+/// What the Delete key does (Shift+Delete always does the other).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeleteAction {
+    /// Move to the Recycle Bin.
+    #[default]
+    Recycle,
+    /// Delete permanently.
+    Permanent,
+}
+
+/// What FastDir shows on startup (a path argument always wins).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartupMode {
+    /// The drive overview.
+    #[default]
+    Drives,
+    /// Re-scan the last scanned path.
+    Last,
+    /// A blank home screen with just a "Scan a folder" button.
+    Empty,
+}
+
+/// Which releases the update check looks at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    /// Finished releases only.
+    #[default]
+    Stable,
+    /// Also offer pre-releases.
+    Prerelease,
+}
+
+/// How often the automatic update check runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateFrequency {
+    /// On every launch.
+    #[default]
+    Start,
+    /// At most once a day.
+    Daily,
+    /// At most once a week.
+    Weekly,
 }
 
 /// Sort column and direction remembered across launches.
@@ -83,36 +188,310 @@ pub struct PanelSizes {
     pub top: Vec<f32>,
 }
 
+/// What to scan and how: exclusions, hidden files, junctions, threads.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Settings {
-    /// Check GitHub for a new version every time FastDir starts.
-    pub auto_check_updates: bool,
-    /// Version the user chose to skip ("Skip this version").
-    pub skipped_version: Option<String>,
-    /// Version that ran last, used to show "Updated to vX" after an update.
-    pub last_run_version: Option<String>,
+pub struct ScanSettings {
+    /// Folder/file names to skip, matched case-insensitively against each
+    /// entry's name (`*` and `?` wildcards), e.g. `$Recycle.Bin`, `*.tmp`.
+    pub excluded: Vec<String>,
+    /// Skip hidden and system entries (dot-files on Unix).
+    pub skip_hidden_system: bool,
+    /// Descend into junctions / symlinked folders. Off by default: following
+    /// them can double-count files, and loops are only entered once.
+    pub follow_junctions: bool,
+    /// Descend into mount points on other volumes.
+    pub cross_volumes: bool,
+    /// Scan threads, or `None` for automatic. A fixed number keeps a slow
+    /// HDD or network share responsive.
+    pub thread_count: Option<u16>,
+    /// Show finished top-level folders and a treemap preview while scanning.
+    pub show_partial_results: bool,
+}
+
+impl Default for ScanSettings {
+    fn default() -> Self {
+        Self {
+            excluded: Vec::new(),
+            skip_hidden_system: false,
+            follow_junctions: false,
+            cross_volumes: true,
+            thread_count: None,
+            show_partial_results: true,
+        }
+    }
+}
+
+/// How the treemap looks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TreemapSettings {
     /// Show `<Free space>` in the treemap (F6, off by default like WinDirStat).
     pub show_free_space: bool,
     /// Show `<Unknown>` in the treemap (F7, off by default like WinDirStat).
     pub show_unknown: bool,
     /// Size treemap cells by allocated (on-disk) bytes instead of logical bytes.
-    pub treemap_disk_size: bool,
-    /// Show finished top-level folders and a treemap preview while scanning.
-    pub show_partial_results: bool,
-    /// Light, dark, or follow Windows.
-    pub theme: ThemePreference,
-    /// Column and direction of the directory list.
+    pub disk_size: bool,
+    /// Which palette maps extension ranks to colours.
+    pub palette: TreemapPalette,
+    /// Colour by extension or by age.
+    pub color_mode: TreemapColorMode,
+    /// Cushion (pillow) shading, or flat rectangles.
+    pub cushion: bool,
+    /// Ridge height multiplier for the cushion shading (0.0..=2.0).
+    pub cushion_strength: f32,
+    /// Leave a 1px gap between cells.
+    pub borders: bool,
+    /// Stop subdividing below this cell size (device px).
+    pub min_cell: f32,
+    /// Show the treemap at all (off gives a list-only layout for small
+    /// screens or very large scans).
+    pub show: bool,
+}
+
+impl Default for TreemapSettings {
+    fn default() -> Self {
+        Self {
+            show_free_space: false,
+            show_unknown: false,
+            disk_size: false,
+            palette: TreemapPalette::Default,
+            color_mode: TreemapColorMode::Extension,
+            cushion: true,
+            cushion_strength: 1.0,
+            borders: false,
+            min_cell: 1.0,
+            show: true,
+        }
+    }
+}
+
+/// How the directory list looks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ListSettings {
+    /// Binary (1024-based) vs. decimal (1000-based) size units.
+    pub size_unit: SizeUnit,
+    /// Subtree `%` relative to the parent folder or the whole scan.
+    pub percent_base: PercentBase,
+    /// Absolute timestamps vs. relative ones (`3 days ago`).
+    pub date_format: DateFormat,
+    /// Column and direction for new scans.
     pub sort: SortSettings,
+    /// Visible columns.
+    pub show_items: bool,
+    pub show_files: bool,
+    pub show_folders: bool,
+    pub show_modified: bool,
+    pub show_disk: bool,
+}
+
+impl Default for ListSettings {
+    fn default() -> Self {
+        Self {
+            size_unit: SizeUnit::Binary,
+            percent_base: PercentBase::Parent,
+            date_format: DateFormat::Absolute,
+            sort: SortSettings::default(),
+            show_items: true,
+            show_files: true,
+            show_folders: true,
+            show_modified: true,
+            show_disk: true,
+        }
+    }
+}
+
+/// Confirmations and defaults for file operations.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OpSettings {
+    /// Confirm before moving to the Recycle Bin.
+    pub confirm_recycle: bool,
+    /// Confirm before deleting permanently.
+    pub confirm_permanent: bool,
+    /// Confirm before moving files.
+    pub confirm_move: bool,
+    /// What the Delete key does (Shift+Delete does the other).
+    pub default_delete: DeleteAction,
+    /// Where the last move went, remembered for convenience.
+    pub last_move_dest: Option<String>,
+}
+
+impl Default for OpSettings {
+    fn default() -> Self {
+        Self {
+            confirm_recycle: true,
+            confirm_permanent: true,
+            confirm_move: true,
+            default_delete: DeleteAction::Recycle,
+            last_move_dest: None,
+        }
+    }
+}
+
+/// What FastDir shows on startup.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StartupSettings {
+    pub mode: StartupMode,
+    /// Root of the last scan, remembered for convenience (and re-scanned
+    /// when `mode` is `Last`).
+    pub last_path: Option<String>,
+}
+
+impl Default for StartupSettings {
+    fn default() -> Self {
+        Self {
+            mode: StartupMode::Drives,
+            last_path: None,
+        }
+    }
+}
+
+/// Updater state and preferences.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// Run the update check automatically (gated by `frequency`).
+    pub auto_check: bool,
+    /// Stable releases only, or pre-releases too.
+    pub channel: UpdateChannel,
+    /// How often the automatic check runs.
+    pub frequency: UpdateFrequency,
+    /// Unix timestamp of the last check (any check, manual or automatic).
+    pub last_check: Option<i64>,
+    /// Version the user chose to skip ("Skip this version").
+    pub skipped_version: Option<String>,
+    /// Version that ran last, used to show "Updated to vX" after an update.
+    pub last_run_version: Option<String>,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            auto_check: true,
+            channel: UpdateChannel::Stable,
+            frequency: UpdateFrequency::Start,
+            last_check: None,
+            skipped_version: None,
+            last_run_version: None,
+        }
+    }
+}
+
+/// Light, dark, or follow Windows; plus the interface scale.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppearanceSettings {
+    pub theme: ThemePreference,
+    /// Interface scale factor (1.0 = 100%), separate from Windows DPI.
+    /// Applied to the window's rem size, so text and rem-based layout grow.
+    pub ui_scale: f32,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemePreference::System,
+            ui_scale: 1.0,
+        }
+    }
+}
+
+/// Explorer integration and multi-instance behaviour.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IntegrationSettings {
+    /// "Analyze with FastDir" in the Explorer folder/drive context menu
+    /// (Windows only). Adopted from the registry on startup; toggling writes
+    /// the per-user keys, mirroring what the installer creates.
+    pub context_menu: bool,
+    /// Second launches forward their folder to the open window and exit
+    /// instead of starting a new process. Takes effect on next launch.
+    pub single_instance: bool,
+}
+
+impl Default for IntegrationSettings {
+    fn default() -> Self {
+        Self {
+            context_menu: true,
+            single_instance: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub scan: ScanSettings,
+    pub treemap: TreemapSettings,
+    pub list: ListSettings,
+    pub ops: OpSettings,
+    pub startup: StartupSettings,
+    pub updates: UpdateSettings,
+    pub appearance: AppearanceSettings,
+    /// Explorer context menu and single-instance behaviour.
+    pub integration: IntegrationSettings,
     /// Last window geometry, restored on the next launch.
     pub window: Option<WindowState>,
     /// Last divider positions.
     pub panels: PanelSizes,
-    /// Root of the last scan, remembered for convenience.
-    pub last_scan_path: Option<String>,
+    /// Kept so very old files still parse; use `list.sort` instead.
+    pub sort: SortSettings,
 }
 
 impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            scan: ScanSettings::default(),
+            treemap: TreemapSettings::default(),
+            list: ListSettings::default(),
+            ops: OpSettings::default(),
+            startup: StartupSettings::default(),
+            updates: UpdateSettings::default(),
+            appearance: AppearanceSettings::default(),
+            integration: IntegrationSettings::default(),
+            window: None,
+            panels: PanelSizes::default(),
+            sort: SortSettings::default(),
+        }
+    }
+}
+
+/// The config file currently in use.
+pub fn config_path() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA")?;
+    Some(PathBuf::from(base).join("FastDir").join("config.toml"))
+}
+
+/// Where versions before the TOML config stored their updater settings.
+fn legacy_path() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA")?;
+    Some(PathBuf::from(base).join("FastDir").join("settings.json"))
+}
+
+/// The flat keys written before settings were grouped into sections.
+/// Missing keys fall back to the old defaults (e.g. auto-check on), not to
+/// `false`, so a partial legacy file keeps behaving as it used to.
+#[derive(Deserialize)]
+#[serde(default)]
+struct LegacySettings {
+    auto_check_updates: bool,
+    skipped_version: Option<String>,
+    last_run_version: Option<String>,
+    show_free_space: bool,
+    show_unknown: bool,
+    treemap_disk_size: bool,
+    show_partial_results: bool,
+    theme: ThemePreference,
+    sort: SortSettings,
+    window: Option<WindowState>,
+    panels: PanelSizes,
+    last_scan_path: Option<String>,
+}
+
+impl Default for LegacySettings {
     fn default() -> Self {
         Self {
             auto_check_updates: true,
@@ -131,34 +510,93 @@ impl Default for Settings {
     }
 }
 
-/// The config file currently in use.
-pub fn config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("FastDir").join("config.toml"))
+impl From<LegacySettings> for Settings {
+    fn from(old: LegacySettings) -> Self {
+        Self {
+            scan: ScanSettings {
+                show_partial_results: old.show_partial_results,
+                ..ScanSettings::default()
+            },
+            treemap: TreemapSettings {
+                show_free_space: old.show_free_space,
+                show_unknown: old.show_unknown,
+                disk_size: old.treemap_disk_size,
+                ..TreemapSettings::default()
+            },
+            list: ListSettings {
+                sort: old.sort,
+                ..ListSettings::default()
+            },
+            ops: OpSettings::default(),
+            startup: StartupSettings {
+                last_path: old.last_scan_path,
+                ..StartupSettings::default()
+            },
+            updates: UpdateSettings {
+                auto_check: old.auto_check_updates,
+                skipped_version: old.skipped_version,
+                last_run_version: old.last_run_version,
+                ..UpdateSettings::default()
+            },
+            appearance: AppearanceSettings {
+                theme: old.theme,
+                ..AppearanceSettings::default()
+            },
+            integration: IntegrationSettings::default(),
+            window: old.window,
+            panels: old.panels,
+            // Written before the sort lived in `[list]`; keep both in step.
+            sort: old.sort,
+        }
+    }
 }
 
-/// Where versions before the TOML config stored their updater settings.
-fn legacy_path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("FastDir").join("settings.json"))
+/// Top-level section names of the current format. A file containing any of
+/// them is parsed as [`Settings`]; anything else falls back to the legacy
+/// flat keys so old files keep loading.
+const SECTION_KEYS: [&str; 8] = [
+    "scan",
+    "treemap",
+    "list",
+    "ops",
+    "startup",
+    "updates",
+    "appearance",
+    "integration",
+];
+
+fn parse_current(text: &str) -> Option<Settings> {
+    let table: toml::Table = toml::from_str(text).ok()?;
+    if !SECTION_KEYS.iter().any(|k| table.contains_key(*k)) {
+        return None;
+    }
+    toml::from_str(text).ok()
+}
+
+fn parse_legacy_toml(text: &str) -> Option<Settings> {
+    toml::from_str::<LegacySettings>(text)
+        .ok()
+        .map(Settings::from)
 }
 
 impl Settings {
-    /// Missing or unreadable files give the defaults. A JSON `settings.json`
-    /// from an older version is migrated to `config.toml` on first load.
+    /// Missing or unreadable files give the defaults. A flat `config.toml`
+    /// or a JSON `settings.json` from an older version is migrated to the
+    /// current format on first load.
     pub fn load() -> Self {
-        if let Some(settings) = config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| toml::from_str::<Self>(&s).ok())
-        {
-            return settings;
+        if let Some(text) = config_path().and_then(|p| std::fs::read_to_string(p).ok()) {
+            if let Some(settings) =
+                parse_current(&text).or_else(|| parse_legacy_toml(&text))
+            {
+                return settings;
+            }
         }
-        if let Some(settings) = legacy_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str::<Self>(&s).ok())
-        {
-            settings.save();
-            return settings;
+        if let Some(text) = legacy_path().and_then(|p| std::fs::read_to_string(p).ok()) {
+            if let Ok(old) = serde_json::from_str::<LegacySettings>(&text) {
+                let settings = Settings::from(old);
+                settings.save();
+                return settings;
+            }
         }
         Self::default()
     }
@@ -176,6 +614,12 @@ impl Settings {
             }
         }
     }
+
+    /// The sort currently in force: `[list] sort` wins, the legacy top-level
+    /// `sort` is only a fallback for files that predate it.
+    pub fn effective_sort(&self) -> SortSettings {
+        self.list.sort
+    }
 }
 
 #[cfg(test)]
@@ -185,49 +629,109 @@ mod tests {
     #[test]
     fn defaults_when_fields_missing() {
         let s: Settings = toml::from_str("").unwrap();
-        assert!(s.auto_check_updates);
-        assert!(s.skipped_version.is_none());
-        assert!(!s.show_free_space);
-        assert!(!s.show_unknown);
-        assert!(!s.treemap_disk_size);
-        assert!(s.show_partial_results);
-        assert_eq!(s.theme, ThemePreference::System);
-        assert_eq!(s.sort, SortSettings::default());
+        assert!(s.updates.auto_check);
+        assert!(s.updates.skipped_version.is_none());
+        assert!(!s.treemap.show_free_space);
+        assert!(!s.treemap.show_unknown);
+        assert!(!s.treemap.disk_size);
+        assert!(s.scan.show_partial_results);
+        assert!(s.scan.cross_volumes);
+        assert_eq!(s.appearance.ui_scale, 1.0);
+        assert!(s.integration.context_menu);
+        assert!(!s.integration.single_instance);
+        assert!(s.scan.thread_count.is_none());
+        assert_eq!(s.appearance.theme, ThemePreference::System);
+        assert_eq!(s.list.sort, SortSettings::default());
         assert!(s.window.is_none());
         assert!(s.panels.main.is_empty());
-        assert!(s.last_scan_path.is_none());
+        assert!(s.startup.last_path.is_none());
+        assert_eq!(s.list.size_unit, SizeUnit::Binary);
+        assert_eq!(s.list.date_format, DateFormat::Absolute);
+        assert!(s.ops.confirm_recycle);
+        assert_eq!(s.ops.default_delete, DeleteAction::Recycle);
+        assert_eq!(s.updates.channel, UpdateChannel::Stable);
     }
 
     #[test]
     fn nested_defaults_when_only_some_fields_are_given() {
         let s: Settings = toml::from_str(
             r#"
+            [appearance]
             theme = "dark"
 
-            [sort]
+            [list.sort]
             column = "name"
             "#,
         )
         .unwrap();
-        assert_eq!(s.theme, ThemePreference::Dark);
-        assert_eq!(s.sort.column, SortColumn::Name);
-        assert!(s.sort.descending, "the missing direction keeps its default");
+        assert_eq!(s.appearance.theme, ThemePreference::Dark);
+        assert_eq!(s.list.sort.column, SortColumn::Name);
+        assert!(s.list.sort.descending, "the missing direction keeps its default");
     }
 
     #[test]
     fn roundtrip() {
         let s = Settings {
-            auto_check_updates: false,
-            skipped_version: Some("0.2.0".into()),
-            last_run_version: Some("0.1.0".into()),
-            show_free_space: true,
-            show_unknown: true,
-            treemap_disk_size: true,
-            show_partial_results: false,
-            theme: ThemePreference::Light,
-            sort: SortSettings {
-                column: SortColumn::Modified,
-                descending: false,
+            scan: ScanSettings {
+                excluded: vec!["$Recycle.Bin".into(), "*.tmp".into()],
+                skip_hidden_system: true,
+                follow_junctions: true,
+                cross_volumes: false,
+                thread_count: Some(4),
+                show_partial_results: false,
+            },
+            treemap: TreemapSettings {
+                show_free_space: true,
+                show_unknown: true,
+                disk_size: true,
+                palette: TreemapPalette::ColorBlind,
+                color_mode: TreemapColorMode::Age,
+                cushion: false,
+                cushion_strength: 0.5,
+                borders: true,
+                min_cell: 2.0,
+                show: false,
+            },
+            list: ListSettings {
+                size_unit: SizeUnit::Decimal,
+                percent_base: PercentBase::Total,
+                date_format: DateFormat::Relative,
+                sort: SortSettings {
+                    column: SortColumn::Modified,
+                    descending: false,
+                },
+                show_items: false,
+                show_files: true,
+                show_folders: true,
+                show_modified: false,
+                show_disk: true,
+            },
+            ops: OpSettings {
+                confirm_recycle: false,
+                confirm_permanent: true,
+                confirm_move: false,
+                default_delete: DeleteAction::Permanent,
+                last_move_dest: Some(r"C:\backup".into()),
+            },
+            startup: StartupSettings {
+                mode: StartupMode::Last,
+                last_path: Some(r"C:\Users".into()),
+            },
+            updates: UpdateSettings {
+                auto_check: false,
+                channel: UpdateChannel::Prerelease,
+                frequency: UpdateFrequency::Weekly,
+                last_check: Some(1_800_000_000),
+                skipped_version: Some("0.2.0".into()),
+                last_run_version: Some("0.1.0".into()),
+            },
+            appearance: AppearanceSettings {
+                theme: ThemePreference::Light,
+                ui_scale: 1.25,
+            },
+            integration: IntegrationSettings {
+                context_menu: false,
+                single_instance: true,
             },
             window: Some(WindowState {
                 x: 10.5,
@@ -240,11 +744,58 @@ mod tests {
                 main: vec![420., 500.],
                 top: vec![700., 330.],
             },
-            last_scan_path: Some(r"C:\Users".into()),
+            sort: SortSettings {
+                column: SortColumn::Modified,
+                descending: false,
+            },
         };
         let text = toml::to_string_pretty(&s).unwrap();
+        assert!(text.contains("[scan]"), "sections keep the file readable");
+        assert!(text.contains("[treemap]"));
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn legacy_toml_maps_flat_keys_into_sections() {
+        let toml_text = r#"
+            auto_check_updates = false
+            skipped_version = "0.2.0"
+            last_run_version = "0.1.0"
+            show_free_space = true
+            show_unknown = true
+            treemap_disk_size = true
+            show_partial_results = false
+            theme = "light"
+            last_scan_path = "C:\\Users"
+
+            [sort]
+            column = "modified"
+            descending = false
+        "#;
+        assert!(parse_current(toml_text).is_none());
+        let s = parse_legacy_toml(toml_text).unwrap();
+        assert!(!s.updates.auto_check);
+        assert_eq!(s.updates.skipped_version.as_deref(), Some("0.2.0"));
+        assert_eq!(s.updates.last_run_version.as_deref(), Some("0.1.0"));
+        assert!(s.treemap.show_free_space);
+        assert!(s.treemap.show_unknown);
+        assert!(s.treemap.disk_size);
+        assert!(!s.scan.show_partial_results);
+        assert_eq!(s.appearance.theme, ThemePreference::Light);
+        assert_eq!(s.list.sort.column, SortColumn::Modified);
+        assert_eq!(s.startup.last_path.as_deref(), Some("C:\\Users"));
+        // Untouched sections keep their defaults.
+        assert_eq!(s.ops, OpSettings::default());
+        assert_eq!(s.list.size_unit, SizeUnit::Binary);
+    }
+
+    #[test]
+    fn legacy_toml_keeps_old_defaults_for_missing_keys() {
+        let s = parse_legacy_toml("show_free_space = true\n").unwrap();
+        assert!(s.updates.auto_check, "auto-check used to default to on");
+        assert!(s.scan.show_partial_results);
+        assert_eq!(s.appearance.theme, ThemePreference::System);
     }
 
     #[test]
@@ -257,11 +808,11 @@ mod tests {
             "show_unknown": true,
             "treemap_disk_size": true
         }"#;
-        let s: Settings = serde_json::from_str(json).unwrap();
-        assert!(!s.auto_check_updates);
-        assert_eq!(s.skipped_version.as_deref(), Some("0.2.0"));
-        assert!(s.show_free_space);
-        assert_eq!(s.theme, ThemePreference::System);
-        assert_eq!(s.sort, SortSettings::default());
+        let s: Settings = serde_json::from_str::<LegacySettings>(json).map(Settings::from).unwrap();
+        assert!(!s.updates.auto_check);
+        assert_eq!(s.updates.skipped_version.as_deref(), Some("0.2.0"));
+        assert!(s.treemap.show_free_space);
+        assert_eq!(s.appearance.theme, ThemePreference::System);
+        assert_eq!(s.list.sort, SortSettings::default());
     }
 }

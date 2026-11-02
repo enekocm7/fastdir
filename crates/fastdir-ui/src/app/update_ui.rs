@@ -34,10 +34,14 @@ impl Render for DownloadView {
 
 impl FastDir {
     /// Runs once per launch: reports a finished update and kicks off the
-    /// automatic check (every launch, in the background).
+    /// automatic check when it is due under the configured frequency.
     pub(super) fn startup_update_tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current = updater::CURRENT_VERSION;
-        let previous = self.settings.last_run_version.replace(current.to_string());
+        let previous = self
+            .settings
+            .updates
+            .last_run_version
+            .replace(current.to_string());
         if previous.as_deref() != Some(current) {
             self.settings.save();
             if previous.as_deref().is_some_and(|prev| updater::is_newer(prev, current)) {
@@ -47,8 +51,26 @@ impl FastDir {
                 );
             }
         }
-        if self.settings.auto_check_updates {
+        if self.settings.updates.auto_check && self.update_check_due() {
             self.check_for_updates(false, window, cx);
+        }
+    }
+
+    /// Whether the automatic check is due under the configured frequency.
+    fn update_check_due(&self) -> bool {
+        match self.settings.updates.frequency {
+            UpdateFrequency::Start => true,
+            UpdateFrequency::Daily => self.hours_since_last_check() >= 24,
+            UpdateFrequency::Weekly => self.hours_since_last_check() >= 24 * 7,
+        }
+    }
+
+    fn hours_since_last_check(&self) -> i64 {
+        let now = unix_now();
+        match self.settings.updates.last_check {
+            Some(last) => now.saturating_sub(last).max(0) / 3600,
+            // Never checked: due.
+            None => i64::MAX,
         }
     }
 
@@ -59,10 +81,14 @@ impl FastDir {
             return;
         }
         self.checking = true;
+        // Any check (manual or automatic) counts for daily / weekly pacing.
+        self.settings.updates.last_check = Some(unix_now());
+        self.settings.save();
         cx.notify();
+        let channel = update_channel_of(self.settings.updates.channel);
         let job = cx
             .background_executor()
-            .spawn(async move { updater::fetch_latest() });
+            .spawn(async move { updater::fetch_channel(channel) });
         cx.spawn_in(window, async move |this, cx| {
             let result = job.await;
             this.update_in(cx, |this, window, cx| {
@@ -108,11 +134,11 @@ impl FastDir {
 
         let version = release.version.to_string();
         // A skip only applies to that exact version; a newer release clears it.
-        if self.settings.skipped_version.as_deref().is_some_and(|s| s != version) {
-            self.settings.skipped_version = None;
+        if self.settings.updates.skipped_version.as_deref().is_some_and(|s| s != version) {
+            self.settings.updates.skipped_version = None;
             self.settings.save();
         }
-        let skipped = self.settings.skipped_version.as_deref() == Some(version.as_str());
+        let skipped = self.settings.updates.skipped_version.as_deref() == Some(version.as_str());
         if skipped && !manual {
             return;
         }
@@ -197,7 +223,7 @@ impl FastDir {
     pub(super) fn skip_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(release) = self.available.take() else { return };
         let version = release.version.to_string();
-        self.settings.skipped_version = Some(version.clone());
+        self.settings.updates.skipped_version = Some(version.clone());
         self.settings.save();
         window.push_notification(
             Notification::info(format!("You won't be reminded about v{version} again.")).title("Version skipped"),
@@ -207,7 +233,7 @@ impl FastDir {
     }
 
     pub(super) fn toggle_auto_update_check(&mut self, cx: &mut Context<Self>) {
-        self.settings.auto_check_updates = !self.settings.auto_check_updates;
+        self.settings.updates.auto_check = !self.settings.updates.auto_check;
         self.settings.save();
         cx.notify();
     }
@@ -373,4 +399,12 @@ impl FastDir {
             }
         }
     }
+}
+
+/// Current time as a Unix timestamp, for update pacing.
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }

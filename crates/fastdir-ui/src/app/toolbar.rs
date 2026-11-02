@@ -15,6 +15,17 @@ impl FastDir {
         let multi = self.is_multi();
         let is_root = self.only_root();
         let drives = self.drives.clone();
+        let drive_labels: Vec<String> = drives
+            .iter()
+            .map(|d| {
+                format!(
+                    "{}   {} free of {}",
+                    d.title(),
+                    self.bytes(d.free),
+                    self.bytes(d.total)
+                )
+            })
+            .collect();
         let entity = cx.entity().downgrade();
         let update_entity = entity.clone();
         let focus = self.focus.clone();
@@ -40,15 +51,10 @@ impl FastDir {
                     .label("Scan drive")
                     .dropdown_caret(true)
                     .dropdown_menu(move |mut menu, _, _| {
-                        for d in &drives {
+                        for (d, label) in drives.iter().zip(drive_labels.iter()) {
                             let path = d.path.clone();
                             let entity = entity.clone();
-                            let label = format!(
-                                "{}   {} free of {}",
-                                d.title(),
-                                format::bytes(d.free),
-                                format::bytes(d.total)
-                            );
+                            let label = label.clone();
                             menu = menu.item(
                                 gpui_kit::component::menu::PopupMenuItem::new(label)
                                     .icon(IconName::HardDrive)
@@ -208,17 +214,19 @@ impl FastDir {
                 ),
             )
             .child(tool("more", IconName::Ellipsis, "More").dropdown_menu({
-                let auto = self.settings.auto_check_updates;
-                let show_free = self.settings.show_free_space;
-                let show_unknown = self.settings.show_unknown;
-                let treemap_disk = self.settings.treemap_disk_size;
-                let show_partial = self.settings.show_partial_results;
+                let auto = self.settings.updates.auto_check;
+                let show_free = self.settings.treemap.show_free_space;
+                let show_unknown = self.settings.treemap.show_unknown;
+                let treemap_disk = self.settings.treemap.disk_size;
+                let show_partial = self.settings.scan.show_partial_results;
+                let show_treemap = self.settings.treemap.show;
                 let entity = update_entity.clone();
                 move |menu, _, _| {
                     let (e0, e1, e2) = (entity.clone(), entity.clone(), entity.clone());
                     let (e3, e4) = (entity.clone(), entity.clone());
                     let e5 = entity.clone();
                     let e6 = entity.clone();
+                    let e7 = entity.clone();
                     menu.item(
                         gpui_kit::component::menu::PopupMenuItem::new("Settings…")
                             .icon(IconName::Settings)
@@ -286,6 +294,13 @@ impl FastDir {
                             e6.update(cx, |this, cx| this.toggle_partial_results(cx))
                                 .ok();
                         }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Show treemap in results")
+                            .checked(show_treemap)
+                            .on_click(move |_, _, cx| {
+                                e7.update(cx, |this, cx| this.toggle_treemap_visible(cx)).ok();
+                            }),
                     )
                     .separator()
                     .item(
@@ -380,11 +395,7 @@ impl FastDir {
         };
         let pct = (total > 0).then(|| (done as f64 / total as f64 * 100.0).min(100.0) as f32);
         let detail = if op.by_bytes {
-            format!(
-                "{} / {}",
-                format::bytes(bytes),
-                format::bytes(op.total_bytes)
-            )
+            format!("{} / {}", self.bytes(bytes), self.bytes(op.total_bytes))
         } else {
             format!(
                 "{} / {} items",

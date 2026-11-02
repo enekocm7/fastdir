@@ -75,6 +75,141 @@ impl LinkTracker {
     }
 }
 
+/// What to scan and with how many threads. Built by the UI from the
+/// persisted settings; the scanner itself never reads global state.
+///
+/// Field defaults preserve the historical behaviour (scan everything on one
+/// automatic pool, never follow junctions).
+#[derive(Clone, Debug, Default)]
+pub struct ScanOptions {
+    /// Folder/file names to skip. Each pattern is matched case-insensitively
+    /// against the entry's name (`*` and `?` wildcards), e.g. `$Recycle.Bin`.
+    /// The scan root itself is never excluded.
+    pub excluded_globs: Vec<String>,
+    /// Skip hidden and system entries (dot-files on Unix).
+    pub skip_hidden_system: bool,
+    /// Descend into junctions / symlinked folders. Off by default: following
+    /// them can double-count files and loop forever, so every entered folder
+    /// is remembered by its canonical path and only visited once.
+    pub follow_junctions: bool,
+    /// Descend into mount points on other volumes. Only relevant when
+    /// following junctions on Windows or for Unix mounts; on by default so a
+    /// scan covers the whole folder as it always has.
+    pub cross_volumes: bool,
+    /// Scan threads, or `None` for automatic (`cores * 2`, clamped 4..=64).
+    /// A fixed number keeps a slow HDD or network share responsive.
+    pub threads: Option<usize>,
+}
+
+impl ScanOptions {
+    /// `true` when the entry `name` matches one of the exclusion patterns.
+    pub fn is_excluded(&self, name: &str) -> bool {
+        self.excluded_globs
+            .iter()
+            .any(|p| matches_glob(p, name))
+    }
+}
+
+/// Case-insensitive `*` / `?` wildcard match of `pattern` against `name`.
+pub fn matches_glob(pattern: &str, name: &str) -> bool {
+    let p: Vec<char> = pattern.chars().flat_map(|c| c.to_lowercase()).collect();
+    let n: Vec<char> = name.chars().flat_map(|c| c.to_lowercase()).collect();
+    let (mut pi, mut ni, mut star, mut mark) = (0usize, 0usize, None, 0usize);
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            pi += 1;
+            mark = ni;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            mark += 1;
+            ni = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Identity of the volume `path` lives on, for the cross-volume check.
+#[cfg(windows)]
+fn volume_key(path: &Path) -> Option<String> {
+    Some(volume_root(path))
+}
+
+/// Identity of the volume `path` lives on, for the cross-volume check.
+#[cfg(not(windows))]
+fn volume_key(path: &Path) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::symlink_metadata(path)
+            .ok()
+            .map(|m| format!("dev:{}", m.dev()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Per-scan policy plus the loop protection for followed junctions.
+struct ScanContext<'a> {
+    options: &'a ScanOptions,
+    /// Canonical paths of folders already entered (only used when following).
+    visited: &'a Mutex<HashSet<PathBuf>>,
+    /// Volume of the scan root; sub-folders on other volumes are pruned
+    /// unless `cross_volumes` is set.
+    root_volume: Option<String>,
+}
+
+impl<'a> ScanContext<'a> {
+    fn for_scan(root: &Path, options: &'a ScanOptions, visited: &'a Mutex<HashSet<PathBuf>>) -> Self {
+        let canonical = std::fs::canonicalize(root).ok();
+        if let Some(ref c) = canonical {
+            visited.lock().insert(c.clone());
+        }
+        let root_volume = volume_key(canonical.as_deref().unwrap_or(root));
+        Self {
+            options,
+            visited,
+            root_volume,
+        }
+    }
+
+    fn same_volume(&self, path: &Path) -> bool {
+        match (volume_key(path), &self.root_volume) {
+            (Some(a), Some(b)) => a == *b,
+            // Unknowable (permissions, exotic FS): allow, the listing will
+            // fail gracefully if it really cannot be read.
+            _ => true,
+        }
+    }
+
+    /// Whether the junction / symlink `name` inside `parent` may be entered.
+    /// Records its target so a loop (A -> B -> A) is only visited once.
+    fn follow_dir(&self, parent: &Path, name: &str) -> bool {
+        let child = parent.join(name);
+        let Ok(canonical) = std::fs::canonicalize(&child) else {
+            return false;
+        };
+        if !canonical.is_dir() {
+            return false;
+        }
+        if !self.options.cross_volumes && !self.same_volume(&canonical) {
+            return false;
+        }
+        self.visited.lock().insert(canonical)
+    }
+}
+
 /// A pool sized for I/O: listing directories blocks in the kernel, so more
 /// threads than cores keeps the device queue full (especially on NVMe).
 fn pool() -> &'static rayon::ThreadPool {
@@ -92,11 +227,37 @@ fn pool() -> &'static rayon::ThreadPool {
     })
 }
 
+/// How many threads the automatic pool uses (also the `threads` default).
+pub fn default_thread_count() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    (cores * 2).clamp(4, 64)
+}
+
+/// Runs `f` on the automatic pool, or on a throwaway pool with `threads`
+/// when the user picked a fixed count (e.g. to keep a slow HDD responsive).
+fn with_threads<R: Send>(threads: Option<usize>, f: impl FnOnce() -> R + Send) -> R {
+    let mut f = Some(f);
+    match threads.map(|n| n.clamp(1, 64)) {
+        None => pool().install(f.take().expect("scan closure")),
+        Some(n) => match rayon::ThreadPoolBuilder::new()
+            .num_threads(n)
+            .thread_name(|i| format!("fastdir-scan-{i}"))
+            .stack_size(8 * 1024 * 1024)
+            .build()
+        {
+            Ok(pool) => pool.install(f.take().expect("scan closure")),
+            Err(_) => pool().install(f.take().expect("scan closure")),
+        },
+    }
+}
+
 /// Scan `root` (blocking). Call from a background thread.
-pub fn scan(root: PathBuf, progress: Arc<Progress>) -> ScanResult {
+pub fn scan(root: PathBuf, progress: Arc<Progress>, options: &ScanOptions) -> ScanResult {
     let start = Instant::now();
-    let tree = pool().install(|| {
-        let mut sub = scan_detached(&root, &root.to_string_lossy(), &progress);
+    let tree = with_threads(options.threads, || {
+        let mut sub = scan_detached(&root, &root.to_string_lossy(), &progress, options);
         sub.root_mut().set_expanded(true);
         Tree::new(sub, root.clone())
     });
@@ -117,20 +278,23 @@ pub fn scan_live(
     root: PathBuf,
     progress: Arc<Progress>,
     live: Arc<RwLock<Tree>>,
+    options: &ScanOptions,
 ) -> LiveScanResult {
     let start = Instant::now();
     let name = root.to_string_lossy();
-    pool().install(|| {
+    with_threads(options.threads, || {
         // One tracker across all top-level folders, so hard links are still
         // counted only once when their two names live in different folders.
         let links = LinkTracker::default();
+        let visited = Mutex::new(HashSet::new());
+        let ctx = ScanContext::for_scan(&root, options, &visited);
         let Listing { node, subdirs } = if progress.cancelled() {
             Listing {
                 node: DirBuilder::new(0),
                 subdirs: Vec::new(),
             }
         } else {
-            list_one(&root, 0, &progress, &links)
+            list_one(&root, 0, &progress, &links, &ctx)
         };
         let mut arena = Arena::default();
         let root_node = node.commit(&mut arena);
@@ -141,7 +305,7 @@ pub fn scan_live(
         subdirs.into_par_iter().for_each(|(child_name, modified)| {
             let child_path = root.join(&*child_name);
             let arena = Mutex::new(Arena::default());
-            let child = scan_dir(&child_path, modified, &progress, &links, &arena);
+            let child = scan_dir(&child_path, modified, &progress, &links, &arena, &ctx);
             let sub = Subtree::new(arena.into_inner(), &child_name, child);
             live.write().adopt(&[], sub);
         });
@@ -161,22 +325,26 @@ pub fn scan_live(
 
 /// Scan a single directory into a detached subtree (used after a move so the
 /// destination reflects reality).
-pub fn scan_subtree(path: &Path) -> Subtree {
+pub fn scan_subtree(path: &Path, options: &ScanOptions) -> Subtree {
     let progress = Progress::default();
     let name = path
         .file_name()
         .unwrap_or(path.as_os_str())
         .to_string_lossy();
-    pool().install(|| scan_detached(path, &name, &progress))
+    with_threads(options.threads, || {
+        scan_detached(path, &name, &progress, options)
+    })
 }
 
 /// Scan `path` into a new arena. The hard-link tracker only lives for the
 /// scan itself, so it is freed before the caller builds anything on top.
-fn scan_detached(path: &Path, name: &str, progress: &Progress) -> Subtree {
+fn scan_detached(path: &Path, name: &str, progress: &Progress, options: &ScanOptions) -> Subtree {
     let arena = Mutex::new(Arena::default());
     let root = {
         let links = LinkTracker::default();
-        scan_dir(path, 0, progress, &links, &arena)
+        let visited = Mutex::new(HashSet::new());
+        let ctx = ScanContext::for_scan(path, options, &visited);
+        scan_dir(path, 0, progress, &links, &arena, &ctx)
     };
     Subtree::new(arena.into_inner(), name, root)
 }
@@ -221,14 +389,23 @@ struct Listing {
 }
 
 /// List one directory's entries into a [`DirBuilder`] and collect its
-/// sub-directories for the caller to fan out.
-fn list_one(path: &Path, modified: i64, progress: &Progress, links: &LinkTracker) -> Listing {
+/// sub-directories for the caller to fan out. Applies the scan policy:
+/// excluded and hidden entries are dropped, and junctions are only descended
+/// into when the settings allow it (with loop and volume protection).
+fn list_one(
+    path: &Path,
+    modified: i64,
+    progress: &Progress,
+    links: &LinkTracker,
+    ctx: &ScanContext,
+) -> Listing {
     let mut node = DirBuilder::new(modified);
     if let Some(mut cur) = progress.current.try_lock() {
         cur.clear();
         cur.push_str(&path.to_string_lossy());
     }
 
+    let options = ctx.options;
     let mut subdirs: Vec<(Box<str>, i64)> = Vec::new();
     let mut files: u64 = 0;
     let mut bytes: u64 = 0;
@@ -239,7 +416,14 @@ fn list_one(path: &Path, modified: i64, progress: &Progress, links: &LinkTracker
             disk_size,
             modified,
             file_id,
+            hidden,
         } => {
+            if hidden && options.skip_hidden_system {
+                return;
+            }
+            if options.is_excluded(&name) {
+                return;
+            }
             files += 1;
             bytes += size;
             // A zero-length file shares no blocks, so its link count is
@@ -250,11 +434,44 @@ fn list_one(path: &Path, modified: i64, progress: &Progress, links: &LinkTracker
                 node.add_file(&name, size, disk_size, modified);
             }
         }
-        Entry::Dir { name, modified } => subdirs.push((name, modified)),
-        Entry::Link { name, modified } => {
-            // Junctions / symlinked dirs: list them but never follow (avoids
-            // cycles and double counting, same as WinDirStat).
-            node.add_empty_dir(&name, modified);
+        Entry::Dir {
+            name,
+            modified,
+            hidden,
+        } => {
+            if hidden && options.skip_hidden_system {
+                return;
+            }
+            if options.is_excluded(&name) {
+                return;
+            }
+            if !options.cross_volumes && !ctx.same_volume(&path.join(&*name)) {
+                // A mount point on another volume: list it but do not enter.
+                node.add_empty_dir(&name, modified);
+            } else {
+                subdirs.push((name, modified));
+            }
+        }
+        Entry::Link {
+            name,
+            modified,
+            hidden,
+        } => {
+            if hidden && options.skip_hidden_system {
+                return;
+            }
+            if options.is_excluded(&name) {
+                return;
+            }
+            // Junctions / symlinked dirs: list them but never follow unless
+            // the user opted in (with a warning about double counting). Even
+            // then each target is entered at most once, so a loop (A -> B ->
+            // A) terminates instead of scanning forever.
+            if options.follow_junctions && ctx.follow_dir(path, &name) {
+                subdirs.push((name, modified));
+            } else {
+                node.add_empty_dir(&name, modified);
+            }
         }
     });
     if !ok {
@@ -278,18 +495,19 @@ fn scan_dir(
     progress: &Progress,
     links: &LinkTracker,
     arena: &Mutex<Arena>,
+    ctx: &ScanContext,
 ) -> Node {
     if progress.cancelled() {
         return DirBuilder::new(modified).commit(&mut arena.lock());
     }
-    let Listing { mut node, subdirs } = list_one(path, modified, progress, links);
+    let Listing { mut node, subdirs } = list_one(path, modified, progress, links, ctx);
 
     if !subdirs.is_empty() {
         let children: Vec<(Box<str>, Node)> = subdirs
             .into_par_iter()
             .map(|(name, modified)| {
                 let child_path = path.join(&*name);
-                let child = scan_dir(&child_path, modified, progress, links, arena);
+                let child = scan_dir(&child_path, modified, progress, links, arena, ctx);
                 (name, child)
             })
             .collect();
@@ -310,14 +528,20 @@ enum Entry {
         modified: i64,
         /// Unique per file (shared by hard links), or 0 when unknown.
         file_id: u64,
+        /// Hidden or system (Windows attributes, dot-file on Unix).
+        hidden: bool,
     },
     Dir {
         name: Box<str>,
         modified: i64,
+        /// Hidden or system (Windows attributes, dot-file on Unix).
+        hidden: bool,
     },
     Link {
         name: Box<str>,
         modified: i64,
+        /// Hidden or system (Windows attributes, dot-file on Unix).
+        hidden: bool,
     },
 }
 
@@ -440,11 +664,12 @@ fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
 fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
-        GetFileInformationByHandleEx, OPEN_EXISTING,
+        CreateFileW, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FILE_ATTRIBUTE_SYSTEM,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
+        OPEN_EXISTING,
     };
 
     let wide = wide_z(path);
@@ -508,11 +733,20 @@ fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
                 let name: Box<str> = String::from_utf16_lossy(name_w).into_boxed_str();
                 let modified = filetime_i64_to_unix(info.LastWriteTime);
                 let attrs = info.FileAttributes;
+                let hidden = attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0;
                 if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
                     if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                        f(Entry::Link { name, modified });
+                        f(Entry::Link {
+                            name,
+                            modified,
+                            hidden,
+                        });
                     } else {
-                        f(Entry::Dir { name, modified });
+                        f(Entry::Dir {
+                            name,
+                            modified,
+                            hidden,
+                        });
                     }
                 } else {
                     let size = info.EndOfFile.max(0) as u64;
@@ -540,6 +774,7 @@ fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
                         disk_size,
                         modified,
                         file_id: info.FileId as u64,
+                        hidden,
                     });
                 }
             }
@@ -556,9 +791,10 @@ fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
 fn list_dir_find(path: &Path, mut f: impl FnMut(Entry)) -> bool {
     use windows_sys::Win32::Foundation::{FILETIME, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_ATTRIBUTE_SPARSE_FILE, FIND_FIRST_EX_LARGE_FETCH, FindClose, FindExInfoBasic,
-        FindExSearchNameMatch, FindFirstFileExW, FindNextFileW, WIN32_FIND_DATAW,
+        FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FILE_ATTRIBUTE_SYSTEM,
+        FIND_FIRST_EX_LARGE_FETCH, FindClose, FindExInfoBasic, FindExSearchNameMatch,
+        FindFirstFileExW, FindNextFileW, WIN32_FIND_DATAW,
     };
 
     let mut wide = wide_extended(path);
@@ -599,11 +835,20 @@ fn list_dir_find(path: &Path, mut f: impl FnMut(Entry)) -> bool {
                 let name: Box<str> = String::from_utf16_lossy(name_w).into_boxed_str();
                 let modified = filetime_to_unix(data.ftLastWriteTime);
                 let attrs = data.dwFileAttributes;
+                let hidden = attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0;
                 if attrs & FILE_ATTRIBUTE_DIRECTORY != 0 {
                     if attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                        f(Entry::Link { name, modified });
+                        f(Entry::Link {
+                            name,
+                            modified,
+                            hidden,
+                        });
                     } else {
-                        f(Entry::Dir { name, modified });
+                        f(Entry::Dir {
+                            name,
+                            modified,
+                            hidden,
+                        });
                     }
                 } else {
                     let size = ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
@@ -620,6 +865,7 @@ fn list_dir_find(path: &Path, mut f: impl FnMut(Entry)) -> bool {
                         disk_size,
                         modified,
                         file_id: 0,
+                        hidden,
                     });
                 }
             }
@@ -663,10 +909,19 @@ fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
         };
         #[cfg(not(unix))]
         let (disk_size, file_id) = (size, 0);
+        let hidden = name.starts_with('.');
         if ft.is_symlink() {
-            f(Entry::Link { name, modified });
+            f(Entry::Link {
+                name,
+                modified,
+                hidden,
+            });
         } else if ft.is_dir() {
-            f(Entry::Dir { name, modified });
+            f(Entry::Dir {
+                name,
+                modified,
+                hidden,
+            });
         } else {
             f(Entry::File {
                 name,
@@ -674,6 +929,7 @@ fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
                 disk_size,
                 modified,
                 file_id,
+                hidden,
             });
         }
     }
@@ -703,7 +959,7 @@ mod tests {
         std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
         std::fs::write(dir.join("sub/empty.dat"), b"").unwrap();
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()));
+        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
         assert!(!result.cancelled);
         assert_eq!(result.tree.root().files, 3);
         assert_eq!(result.tree.root().dirs, 1);
@@ -723,7 +979,7 @@ mod tests {
         std::fs::write(dir.join("a.txt"), b"hello").unwrap();
         std::fs::write(dir.join("empty.dat"), b"").unwrap();
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()));
+        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
         let a = result.tree.find(&dir.join("a.txt")).unwrap();
         let a = result.tree.get(&a).unwrap();
         assert_eq!(a.size, 5);
@@ -763,7 +1019,7 @@ mod tests {
             return;
         }
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()));
+        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
         let tree = &result.tree;
         assert_eq!(tree.root().files, 2);
         assert_eq!(tree.root().size, 4096);
@@ -783,7 +1039,7 @@ mod tests {
     fn scan_subtree_returns_a_detached_node() {
         let dir = temp_dir();
         std::fs::write(dir.join("one.txt"), b"1234").unwrap();
-        let sub = scan_subtree(&dir);
+        let sub = scan_subtree(&dir, &ScanOptions::default());
         let node = sub.root();
         assert!(node.is_dir());
         assert_eq!(node.files, 1);
@@ -802,7 +1058,7 @@ mod tests {
         std::fs::write(dir.join("two/b.bin"), vec![0u8; 11]).unwrap();
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
-        let result = scan_live(dir.clone(), Arc::new(Progress::default()), live.clone());
+        let result = scan_live(dir.clone(), Arc::new(Progress::default()), live.clone(), &ScanOptions::default());
         assert!(!result.cancelled);
         let tree = live.read();
         assert_eq!(tree.root().files, 3);
@@ -834,7 +1090,7 @@ mod tests {
         }
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
-        scan_live(dir.clone(), Arc::new(Progress::default()), live.clone());
+        scan_live(dir.clone(), Arc::new(Progress::default()), live.clone(), &ScanOptions::default());
         let tree = live.read();
         assert_eq!(tree.root().files, 2);
         assert_eq!(tree.root().size, 4096);
@@ -856,7 +1112,7 @@ mod tests {
         std::fs::write(dir.join("a.txt"), b"hello").unwrap();
         let progress = Arc::new(Progress::default());
         progress.cancel.store(true, Ordering::Relaxed);
-        let result = scan(dir.clone(), progress);
+        let result = scan(dir.clone(), progress, &ScanOptions::default());
         assert!(result.cancelled);
         assert_eq!(result.tree.root().files, 0);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -865,7 +1121,119 @@ mod tests {
     #[test]
     fn missing_directory_is_marked_as_an_error() {
         let dir = temp_dir().join("does-not-exist");
-        let result = scan(dir, Arc::new(Progress::default()));
+        let result = scan(dir, Arc::new(Progress::default()), &ScanOptions::default());
         assert!(result.tree.root().error());
+    }
+
+    #[test]
+    fn glob_matching_is_case_insensitive_with_wildcards() {
+        assert!(matches_glob("$Recycle.Bin", "$recycle.bin"));
+        assert!(matches_glob("*.tmp", "cache.TMP"));
+        assert!(matches_glob("node_*", "node_modules"));
+        assert!(matches_glob("node_?", "node_X"));
+        assert!(!matches_glob("node_?", "node_"));
+        assert!(!matches_glob("node_?", "node_modules"));
+        assert!(matches_glob("*", "anything at all"));
+        assert!(!matches_glob("*.git", ".gits"));
+        assert!(matches_glob("System*", "system volume information"));
+        assert!(!matches_glob("abc", "abcd"));
+    }
+
+    #[test]
+    fn excluded_names_are_skipped_everywhere() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("keep.txt"), b"12345").unwrap();
+        std::fs::create_dir(dir.join("node_modules")).unwrap();
+        std::fs::write(dir.join("node_modules/skip.bin"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.join("scratch.tmp"), vec![0u8; 7]).unwrap();
+
+        let options = ScanOptions {
+            excluded_globs: vec!["node_modules".into(), "*.tmp".into()],
+            ..ScanOptions::default()
+        };
+        let result = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        assert_eq!(result.tree.root().files, 1);
+        assert_eq!(result.tree.root().size, 5);
+        assert!(result.tree.find(&dir.join("keep.txt")).is_some());
+        assert!(result.tree.find(&dir.join("node_modules")).is_none());
+        assert!(result.tree.find(&dir.join("scratch.tmp")).is_none());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn hidden_files_are_skipped_only_when_asked() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("visible.txt"), b"1234").unwrap();
+        std::fs::write(dir.join(".hidden"), b"12").unwrap();
+        #[cfg(windows)]
+        {
+            // A dot-prefix is not hidden on Windows; set the attribute.
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::SetFileAttributesW;
+            let mut wide: Vec<u16> =
+                dir.join(".hidden").as_os_str().encode_wide().collect();
+            wide.push(0);
+            unsafe {
+                SetFileAttributesW(wide.as_ptr(), 0x2);
+            }
+        }
+
+        let plain = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        assert_eq!(plain.tree.root().files, 2);
+
+        let options = ScanOptions {
+            skip_hidden_system: true,
+            ..ScanOptions::default()
+        };
+        let hidden = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        assert_eq!(hidden.tree.root().files, 1);
+        assert!(hidden.tree.find(&dir.join("visible.txt")).is_some());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn followed_symlinks_are_entered_once_and_never_loop() {
+        let dir = temp_dir();
+        std::fs::create_dir(dir.join("real")).unwrap();
+        std::fs::write(dir.join("real/a.bin"), vec![0u8; 32]).unwrap();
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("alias")).unwrap();
+        // A loop back to the scan root must terminate.
+        std::os::unix::fs::symlink(&dir, dir.join("real/back")).unwrap();
+
+        // Default: links are listed but never followed.
+        let plain = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        assert_eq!(plain.tree.root().size, 32);
+
+        let options = ScanOptions {
+            follow_junctions: true,
+            ..ScanOptions::default()
+        };
+        let followed = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        // Entered exactly once through the alias; the loop back to the root
+        // is recognised as already visited.
+        assert_eq!(followed.tree.root().size, 64);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn fixed_thread_count_still_scans_everything() {
+        let dir = temp_dir();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/a.bin"), vec![0u8; 9]).unwrap();
+
+        let options = ScanOptions {
+            threads: Some(2),
+            ..ScanOptions::default()
+        };
+        let result = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        assert_eq!(result.tree.root().files, 1);
+        assert_eq!(result.tree.root().size, 9);
+        assert_eq!(default_thread_count().clamp(1, 64), default_thread_count());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

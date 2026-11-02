@@ -4,6 +4,7 @@
 use fastdir_settings::{Settings, ThemePreference};
 use gpui_kit::component::{Theme, ThemeMode, TitleBar};
 use gpui_kit::*;
+use std::path::PathBuf;
 
 pub mod app;
 pub mod treemap_view;
@@ -16,8 +17,19 @@ pub fn run() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
-            let settings = Settings::load();
-            let mode = match settings.theme {
+            let mut settings = Settings::load();
+            #[cfg(windows)]
+            {
+                let actual = !matches!(
+                    fastdir_core::integration::context_menu_state(),
+                    fastdir_core::integration::ContextMenuState::Absent
+                );
+                if settings.integration.context_menu != actual {
+                    settings.integration.context_menu = actual;
+                    settings.save();
+                }
+            }
+            let mode = match settings.appearance.theme {
                 ThemePreference::Light => ThemeMode::Light,
                 ThemePreference::Dark => ThemeMode::Dark,
                 ThemePreference::System => ThemeMode::from(cx.window_appearance()),
@@ -31,11 +43,49 @@ pub fn run() {
                 window_min_size: Some(size(px(900.), px(600.))),
                 ..TitleBar::window_options()
             };
+            let initial_path = cli_scan_path();
+            let primary_listener = if settings.integration.single_instance {
+                match fastdir_core::integration::try_claim(
+                    fastdir_core::integration::SINGLE_INSTANCE_PORT,
+                ) {
+                    fastdir_core::integration::Claim::Primary(listener) => Some(listener),
+                    fastdir_core::integration::Claim::Unavailable => {
+                        // Another FastDir owns the port: hand it the folder and get out of the way.
+                        // If forwarding fails (a stranger holds the port), degrade to a normal start.
+                        if fastdir_core::integration::forward_open_request(
+                            fastdir_core::integration::SINGLE_INSTANCE_PORT,
+                            initial_path.as_deref(),
+                        )
+                        .is_ok()
+                        {
+                            std::process::exit(0);
+                        }
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("FastDir");
-                cx.new(|cx| app::FastDir::new(settings, window, cx))
+                window.set_rem_size(px(16.0 * settings.appearance.ui_scale.clamp(0.5, 2.0)));
+                let mut primary_listener = primary_listener;
+                let listener = primary_listener.take();
+                cx.new(|cx| app::FastDir::new(settings, initial_path, listener, window, cx))
             })
             .expect("failed to open window");
             cx.activate(true);
         });
+}
+
+/// `fastdir <path>` argument, when it points at a directory.
+fn cli_scan_path() -> Option<PathBuf> {
+    std::env::args_os().nth(1).and_then(|arg| {
+        let mut arg = arg.to_string_lossy().trim().trim_matches('"').to_string();
+        if arg.ends_with(':') {
+            arg.push(std::path::MAIN_SEPARATOR);
+        }
+        let path = PathBuf::from(arg);
+        path.is_dir().then_some(path)
+    })
 }

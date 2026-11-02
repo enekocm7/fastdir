@@ -5,10 +5,15 @@ use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::format;
 use fastdir_core::fsops;
+use fastdir_core::integration;
 use fastdir_core::model::{NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
-use fastdir_settings::{Settings, SortColumn as SortKey, ThemePreference, WindowState};
-use fastdir_treemap as treemap;
+use fastdir_settings::{
+    DateFormat, DeleteAction, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
+    StartupMode, ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel,
+    UpdateFrequency, WindowState,
+};
+use fastdir_treemap::{self as treemap, ColorMode, Palette, RenderOptions};
 use fastdir_updater::{self as updater, Release};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Disableable as _;
@@ -31,10 +36,12 @@ use gpui_kit::*;
 use parking_lot::RwLock;
 use std::cell::Cell;
 use std::collections::BTreeSet;
+use std::net::TcpListener;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 actions!(
@@ -134,6 +141,46 @@ const DEPTH_COLORS: [u32; 8] = [
     0x3b82f6, 0xef4444, 0x22c55e, 0xeab308, 0xa855f7, 0x06b6d4, 0xf97316, 0xec4899,
 ];
 
+/// Map the persisted treemap enums to the renderer's types.
+fn palette_of(p: TreemapPalette) -> Palette {
+    match p {
+        TreemapPalette::Default => Palette::Default,
+        TreemapPalette::ColorBlind => Palette::ColorBlind,
+        TreemapPalette::Mono => Palette::Mono,
+    }
+}
+
+fn color_mode_of(m: TreemapColorMode) -> ColorMode {
+    match m {
+        TreemapColorMode::Extension => ColorMode::Extension,
+        TreemapColorMode::Age => ColorMode::Age,
+    }
+}
+
+fn treemap_render_options(settings: &Settings) -> RenderOptions {
+    let t = &settings.treemap;
+    RenderOptions {
+        highlight: None,
+        show_free: t.show_free_space,
+        show_unknown: t.show_unknown,
+        use_disk: t.disk_size,
+        palette: palette_of(t.palette),
+        color_mode: color_mode_of(t.color_mode),
+        cushion: t.cushion,
+        cushion_strength: t.cushion_strength.clamp(0.0, 2.0),
+        borders: t.borders,
+        min_cell: t.min_cell.clamp(0.5, 16.0),
+        now: RenderOptions::default().now,
+    }
+}
+
+/// Map the updater channel setting to the updater crate's channel.
+fn update_channel_of(channel: UpdateChannel) -> fastdir_updater::Channel {
+    match channel {
+        UpdateChannel::Stable => fastdir_updater::Channel::Stable,
+        UpdateChannel::Prerelease => fastdir_updater::Channel::Prerelease,
+    }
+}
 /// What a click does to the selection.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ClickMode {
@@ -203,6 +250,9 @@ pub struct FastDir {
     focus: FocusHandle,
     drives: Vec<Drive>,
     phase: Phase,
+    /// Whether the home screen lists drives (off for the "open nothing"
+    /// startup mode until the user goes home or starts a scan).
+    home_drives: bool,
     tree: Option<Arc<RwLock<Tree>>>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
@@ -243,14 +293,29 @@ pub struct FastDir {
     _ticker: Option<Task<()>>,
     _update_ticker: Option<Task<()>>,
     _op_ticker: Option<Task<()>>,
+    single_instance_rx: Option<mpsc::Receiver<Option<PathBuf>>>,
+    _single_instance_task: Option<Task<()>>,
 }
 
 impl FastDir {
-    pub fn new(settings: Settings, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (show_free, show_unknown) = (settings.show_free_space, settings.show_unknown);
-        let use_disk_size = settings.treemap_disk_size;
-        let sort = (settings.sort.column, settings.sort.descending);
-        let treemap = cx.new(|_| TreemapView::with_options(show_free, show_unknown, use_disk_size));
+    pub fn new(
+        settings: Settings,
+        initial_path: Option<PathBuf>,
+        primary_listener: Option<TcpListener>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let sort = {
+            let s = settings.effective_sort();
+            (s.column, s.descending)
+        };
+        window.set_rem_size(px(16.0 * settings.appearance.ui_scale.clamp(0.5, 2.0)));
+        let decimal_sizes = settings.list.size_unit == SizeUnit::Decimal;
+        let render_opts = treemap_render_options(&settings);
+        let treemap = cx.new(|_| TreemapView::new());
+        treemap.update(cx, |t, cx| {
+            t.set_render(&render_opts, decimal_sizes, cx);
+        });
         let main_split = cx.new(|_| ResizableState::default());
         let top_split = cx.new(|_| ResizableState::default());
         let sub = cx.subscribe_in(
@@ -280,19 +345,21 @@ impl FastDir {
         );
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        // `fastdir <path>` starts scanning right away.
-        if let Some(arg) = std::env::args_os().nth(1) {
-            // Explorer passes drives as `"C:\"`, which arrives as `C:"`.
-            let mut arg = arg.to_string_lossy().trim().trim_matches('"').to_string();
-            if arg.ends_with(':') {
-                arg.push(std::path::MAIN_SEPARATOR);
-            }
-            let path = PathBuf::from(arg);
-            if path.is_dir() {
-                cx.defer_in(window, move |this: &mut Self, window, cx| {
-                    this.start_scan(path, window, cx)
-                });
-            }
+        // `fastdir <path>` starts scanning right away; otherwise the startup
+        // mode decides: re-scan the last path, or open the drive overview.
+        let startup_path = initial_path.or_else(|| {
+            (settings.startup.mode == StartupMode::Last)
+                .then(|| settings.startup.last_path.clone())
+                .flatten()
+                .map(PathBuf::from)
+                .filter(|p| p.is_dir())
+        });
+        // "Open nothing" shows a blank home until the user scans or goes home.
+        let home_drives = startup_path.is_some() || settings.startup.mode != StartupMode::Empty;
+        if let Some(path) = startup_path {
+            cx.defer_in(window, move |this: &mut Self, window, cx| {
+                this.start_scan(path, window, cx)
+            });
         }
         cx.defer_in(window, |this: &mut Self, window, cx| {
             this.startup_update_tasks(window, cx)
@@ -300,10 +367,16 @@ impl FastDir {
         cx.defer_in(window, |this: &mut Self, window, cx| {
             this.install_window_handlers(window, cx)
         });
-        Self {
+        let single_instance_rx = primary_listener.map(|listener| {
+            let (tx, rx) = mpsc::channel();
+            integration::serve_requests(listener, tx);
+            rx
+        });
+        let mut this = Self {
             focus,
             drives: drives::list(),
             phase: Phase::Home,
+            home_drives,
             tree: None,
             scan_root: None,
             last_scan: None,
@@ -333,7 +406,37 @@ impl FastDir {
             _ticker: None,
             _update_ticker: None,
             _op_ticker: None,
+            single_instance_rx,
+            _single_instance_task: None,
+        };
+        if this.single_instance_rx.is_some() {
+            this._single_instance_task = Some(cx.spawn_in(window, async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(250))
+                        .await;
+                    let request: Option<Option<PathBuf>> = this
+                        .update(cx, |this, _| {
+                            this.single_instance_rx
+                                .as_ref()
+                                .and_then(|rx| rx.try_recv().ok())
+                        })
+                        .ok()
+                        .flatten();
+                    let Some(path) = request.flatten() else {
+                        continue;
+                    };
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    this.update_in(cx, |this, window, cx| {
+                        this.start_scan(path, window, cx)
+                    })
+                    .ok();
+                }
+            }));
         }
+        this
     }
 
     /// Whether the cursor is on a drive pseudo-item (`<Free space>`/`<Unknown>`).
@@ -350,10 +453,9 @@ impl FastDir {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings.show_free_space = !self.settings.show_free_space;
+        self.settings.treemap.show_free_space = !self.settings.treemap.show_free_space;
         self.settings.save();
-        let show = self.settings.show_free_space;
-        self.treemap.update(cx, |t, cx| t.set_show_free(show, cx));
+        self.refresh_treemap_options(cx);
         cx.notify();
     }
 
@@ -363,19 +465,24 @@ impl FastDir {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings.show_unknown = !self.settings.show_unknown;
+        self.settings.treemap.show_unknown = !self.settings.treemap.show_unknown;
         self.settings.save();
-        let show = self.settings.show_unknown;
-        self.treemap
-            .update(cx, |t, cx| t.set_show_unknown(show, cx));
+        self.refresh_treemap_options(cx);
+        cx.notify();
+    }
+
+    /// Toggle the list-only layout (hides the treemap panel).
+    pub(super) fn toggle_treemap_visible(&mut self, cx: &mut Context<Self>) {
+        self.settings.treemap.show = !self.settings.treemap.show;
+        self.settings.save();
         cx.notify();
     }
 
     /// Show or hide finished folders while a scan is still running.
     pub(super) fn toggle_partial_results(&mut self, cx: &mut Context<Self>) {
-        self.settings.show_partial_results = !self.settings.show_partial_results;
+        self.settings.scan.show_partial_results = !self.settings.scan.show_partial_results;
         self.settings.save();
-        let show = self.settings.show_partial_results;
+        let show = self.settings.scan.show_partial_results;
         let scanning = matches!(self.phase, Phase::Scanning { .. });
         if scanning {
             // The tree has been filling in all along; make the view catch up
@@ -394,19 +501,100 @@ impl FastDir {
 
     /// Switch the treemap between logical size and size on disk.
     pub(super) fn toggle_treemap_disk_size(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.settings.treemap_disk_size = !self.settings.treemap_disk_size;
+        self.settings.treemap.disk_size = !self.settings.treemap.disk_size;
         self.settings.save();
-        let use_disk = self.settings.treemap_disk_size;
-        self.treemap
-            .update(cx, |t, cx| t.set_use_disk_size(use_disk, cx));
+        self.refresh_treemap_options(cx);
         cx.notify();
     }
 
-    pub(super) fn render_ready(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The scanner policy built from `[scan]` settings. Passed into
+    /// `fastdir-core` on every scan rather than read globally.
+    pub(super) fn scan_options(&self) -> scanner::ScanOptions {
+        let s = &self.settings.scan;
+        scanner::ScanOptions {
+            excluded_globs: s.excluded.clone(),
+            skip_hidden_system: s.skip_hidden_system,
+            follow_junctions: s.follow_junctions,
+            cross_volumes: s.cross_volumes,
+            threads: s.thread_count.map(|n| (n as usize).clamp(1, 64)),
+        }
+    }
+
+    /// Push all `[treemap]` settings (and the size-unit flag used for hover
+    /// labels) into the treemap view and redraw it.
+    pub(super) fn refresh_treemap_options(&mut self, cx: &mut Context<Self>) {
+        let opts = treemap_render_options(&self.settings);
+        let decimal = self.decimal_sizes();
+        self.treemap.update(cx, |t, cx| {
+            t.set_render(&opts, decimal, cx);
+            t.invalidate(cx);
+        });
+    }
+
+    pub(super) fn decimal_sizes(&self) -> bool {
+        self.settings.list.size_unit == SizeUnit::Decimal
+    }
+
+    /// Size formatted with the configured unit system.
+    pub(super) fn bytes(&self, n: u64) -> String {
+        format::bytes_with(n, self.decimal_sizes())
+    }
+
+    /// Timestamp formatted with the configured date style.
+    pub(super) fn date(&self, unix: i64) -> String {
+        format::date_with(
+            unix,
+            self.settings.list.date_format == DateFormat::Relative,
+        )
+    }
+
+    /// Subtree share: of the parent folder, or of the whole scan.
+    pub(super) fn percent_of(&self, tree: &Tree, path: &NodePath, node: &Node) -> String {
+        let whole = if self.settings.list.percent_base == PercentBase::Total {
+            tree.root().size
+        } else if path.is_empty() {
+            node.size
+        } else {
+            tree.get(&path[..path.len() - 1])
+                .map(|p| p.size)
+                .unwrap_or(node.size)
+        };
+        format::percent(node.size, whole)
+    }
+
+    pub(super) fn render_ready(&self, cx: &mut Context<Self>) -> AnyElement {
         let entity = cx.entity().downgrade();
         let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
         let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
-
+        let lists = h_resizable("top-split")
+            .with_state(&self.top_split)
+            .on_resize({
+                let entity = entity.clone();
+                move |state, _, cx| {
+                    let sizes =
+                        state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
+                    entity
+                        .update(cx, |this, _| {
+                            this.remember_split(Split::Top, sizes)
+                        })
+                        .ok();
+                }
+            })
+            .child(
+                resizable_panel()
+                    .size_range(px(400.)..Pixels::MAX)
+                    .child(self.render_list(cx)),
+            )
+            .child(
+                resizable_panel()
+                    .size(ext_width)
+                    .size_range(px(200.)..px(700.))
+                    .child(self.render_ext_list(cx)),
+            );
+        // List-only layout for small screens or very large scans.
+        if !self.settings.treemap.show {
+            return div().size_full().child(lists).into_any_element();
+        }
         v_resizable("main-split")
             .with_state(&self.main_split)
             .on_resize({
@@ -422,33 +610,7 @@ impl FastDir {
                 resizable_panel()
                     .size(main_height)
                     .size_range(px(120.)..Pixels::MAX)
-                    .child(
-                        h_resizable("top-split")
-                            .with_state(&self.top_split)
-                            .on_resize({
-                                let entity = entity.clone();
-                                move |state, _, cx| {
-                                    let sizes =
-                                        state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
-                                    entity
-                                        .update(cx, |this, _| {
-                                            this.remember_split(Split::Top, sizes)
-                                        })
-                                        .ok();
-                                }
-                            })
-                            .child(
-                                resizable_panel()
-                                    .size_range(px(400.)..Pixels::MAX)
-                                    .child(self.render_list(cx)),
-                            )
-                            .child(
-                                resizable_panel()
-                                    .size(ext_width)
-                                    .size_range(px(200.)..px(700.))
-                                    .child(self.render_ext_list(cx)),
-                            ),
-                    ),
+                    .child(lists),
             )
             .child(resizable_panel().size_range(px(80.)..Pixels::MAX).child({
                 let entity = cx.entity();
@@ -458,6 +620,7 @@ impl FastDir {
                     .child(self.treemap.clone())
                     .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
             }))
+            .into_any_element()
     }
 
     /// Remember where the user dragged a divider.
@@ -506,7 +669,7 @@ impl FastDir {
             window.defer(cx, move |window, cx| {
                 entity
                     .update(cx, |this, cx| {
-                        if this.settings.theme == ThemePreference::System {
+                        if this.settings.appearance.theme == ThemePreference::System {
                             this.apply_theme(window, cx);
                         }
                     })
@@ -521,7 +684,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings.theme = theme;
+        self.settings.appearance.theme = theme;
         self.settings.save();
         self.apply_theme(window, cx);
         cx.notify();
@@ -529,13 +692,22 @@ impl FastDir {
 
     /// Apply the saved preference; `System` reads the current Windows mode.
     pub(super) fn apply_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mode = match self.settings.theme {
+        let mode = match self.settings.appearance.theme {
             ThemePreference::Light => ThemeMode::Light,
             ThemePreference::Dark => ThemeMode::Dark,
             ThemePreference::System => ThemeMode::from(window.appearance()),
         };
         Theme::change(mode, Some(window), cx);
         apply_accent(cx);
+        window.refresh();
+    }
+
+    pub(super) fn ui_scale(&self) -> f32 {
+        self.settings.appearance.ui_scale.clamp(0.5, 2.0)
+    }
+
+    pub(super) fn apply_ui_scale(&mut self, window: &mut Window) {
+        window.set_rem_size(px(16.0 * self.ui_scale()));
         window.refresh();
     }
 }
@@ -593,7 +765,7 @@ use std::rc::Rc;
 impl Render for FastDir {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let live = matches!(self.phase, Phase::Scanning { .. })
-            && self.settings.show_partial_results
+            && self.settings.scan.show_partial_results
             && self.tree.is_some();
         let body = match self.phase {
             Phase::Home => self.render_home(cx).into_any_element(),

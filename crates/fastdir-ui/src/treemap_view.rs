@@ -4,7 +4,7 @@
 
 use fastdir_core::format;
 use fastdir_core::model::{Node, NodePath, Tree};
-use fastdir_treemap as treemap;
+use fastdir_treemap::{self as treemap, ColorMode, Palette, RenderOptions};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
@@ -55,6 +55,61 @@ struct Key {
     show_free: bool,
     show_unknown: bool,
     use_disk_size: bool,
+    palette: Palette,
+    color_mode: ColorMode,
+    cushion: bool,
+    cushion_strength: u32,
+    borders: bool,
+    min_cell: u32,
+}
+
+impl Key {
+    /// Floats are stored as bits so the key stays `Eq` (no NaN is ever stored).
+    fn new(
+        generation: u64,
+        w: u32,
+        h: u32,
+        dark: bool,
+        highlight: Option<u16>,
+        zoom: u64,
+        opts: RenderOptions,
+    ) -> Self {
+        Self {
+            generation,
+            w,
+            h,
+            dark,
+            highlight,
+            zoom,
+            show_free: opts.show_free,
+            show_unknown: opts.show_unknown,
+            use_disk_size: opts.use_disk,
+            palette: opts.palette,
+            color_mode: opts.color_mode,
+            cushion: opts.cushion,
+            cushion_strength: opts.cushion_strength.to_bits(),
+            borders: opts.borders,
+            min_cell: opts.min_cell.to_bits(),
+        }
+    }
+
+    /// The render options this key was built from (`highlight` included).
+    /// `now` is refreshed so age colours never go stale.
+    fn opts(&self) -> RenderOptions {
+        RenderOptions {
+            highlight: self.highlight,
+            show_free: self.show_free,
+            show_unknown: self.show_unknown,
+            use_disk: self.use_disk_size,
+            palette: self.palette,
+            color_mode: self.color_mode,
+            cushion: self.cushion,
+            cushion_strength: f32::from_bits(self.cushion_strength),
+            borders: self.borders,
+            min_cell: f32::from_bits(self.min_cell),
+            now: RenderOptions::default().now,
+        }
+    }
 }
 
 pub struct TreemapView {
@@ -79,6 +134,14 @@ pub struct TreemapView {
     show_free: bool,
     show_unknown: bool,
     use_disk_size: bool,
+    palette: Palette,
+    color_mode: ColorMode,
+    cushion: bool,
+    cushion_strength: f32,
+    borders: bool,
+    min_cell: f32,
+    /// Format hover sizes with decimal (SI) units instead of binary ones.
+    decimal_sizes: bool,
     /// The tree is still being scanned, so previews are throttled.
     partial: bool,
     last_render: Option<Instant>,
@@ -107,39 +170,53 @@ impl TreemapView {
             show_free: false,
             show_unknown: false,
             use_disk_size: false,
+            palette: Palette::Default,
+            color_mode: ColorMode::Extension,
+            cushion: true,
+            cushion_strength: 1.0,
+            borders: false,
+            min_cell: 1.0,
+            decimal_sizes: false,
             partial: false,
             last_render: None,
             _task: None,
         }
     }
 
-    pub fn with_options(show_free: bool, show_unknown: bool, use_disk_size: bool) -> Self {
-        let mut v = Self::new();
-        v.show_free = show_free;
-        v.show_unknown = show_unknown;
-        v.use_disk_size = use_disk_size;
-        v
-    }
-
-    pub fn set_show_free(&mut self, show: bool, cx: &mut Context<Self>) {
-        if self.show_free != show {
-            self.show_free = show;
+    /// Push all `[treemap]` display settings at once (`highlight` is managed
+    /// separately through [`Self::set_highlight`]). Anything that changed
+    /// redraws the image.
+    pub fn set_render(&mut self, opts: &RenderOptions, decimal_sizes: bool, cx: &mut Context<Self>) {
+        let mut changed = false;
+        changed |= set_if_diff(&mut self.show_free, opts.show_free);
+        changed |= set_if_diff(&mut self.show_unknown, opts.show_unknown);
+        changed |= set_if_diff(&mut self.use_disk_size, opts.use_disk);
+        changed |= set_if_diff(&mut self.palette, opts.palette);
+        changed |= set_if_diff(&mut self.color_mode, opts.color_mode);
+        changed |= set_if_diff(&mut self.cushion, opts.cushion);
+        changed |= set_if_diff(&mut self.cushion_strength, opts.cushion_strength);
+        changed |= set_if_diff(&mut self.borders, opts.borders);
+        changed |= set_if_diff(&mut self.min_cell, opts.min_cell);
+        changed |= set_if_diff(&mut self.decimal_sizes, decimal_sizes);
+        if changed {
             cx.notify();
         }
     }
 
-    pub fn set_show_unknown(&mut self, show: bool, cx: &mut Context<Self>) {
-        if self.show_unknown != show {
-            self.show_unknown = show;
-            cx.notify();
-        }
-    }
-
-    /// Size cells by allocated bytes (`true`) or logical bytes (`false`).
-    pub fn set_use_disk_size(&mut self, use_disk: bool, cx: &mut Context<Self>) {
-        if self.use_disk_size != use_disk {
-            self.use_disk_size = use_disk;
-            cx.notify();
+    /// The full render options for the current view state.
+    fn render_opts(&self) -> RenderOptions {
+        RenderOptions {
+            highlight: self.highlight,
+            show_free: self.show_free,
+            show_unknown: self.show_unknown,
+            use_disk: self.use_disk_size,
+            palette: self.palette,
+            color_mode: self.color_mode,
+            cushion: self.cushion,
+            cushion_strength: self.cushion_strength,
+            borders: self.borders,
+            min_cell: self.min_cell,
+            now: RenderOptions::default().now,
         }
     }
 
@@ -306,17 +383,7 @@ impl TreemapView {
                 .spawn(async move {
                     let t = tree.read();
                     let root = t.get(&zoom).unwrap_or(t.root());
-                    treemap::render(
-                        &t,
-                        root,
-                        key.w,
-                        key.h,
-                        background,
-                        key.highlight,
-                        key.show_free,
-                        key.show_unknown,
-                        key.use_disk_size,
-                    )
+                    treemap::render(&t, root, key.w, key.h, background, &key.opts())
                 })
                 .await;
             let Some(img) = RgbaImage::from_raw(key.w, key.h, buf) else {
@@ -353,17 +420,7 @@ impl TreemapView {
         let tree = self.tree.as_ref()?.read();
         let (w, h, x, y) = self.device_point(position);
         let root = tree.get(&self.zoom)?;
-        let rel = treemap::hit_test(
-            &tree,
-            root,
-            w,
-            h,
-            x,
-            y,
-            self.show_free,
-            self.show_unknown,
-            self.use_disk_size,
-        )?;
+        let rel = treemap::hit_test(&tree, root, w, h, x, y, &self.render_opts())?;
         let mut path = self.zoom.clone();
         path.extend(rel);
         Some(path)
@@ -405,10 +462,24 @@ impl TreemapView {
             } else {
                 ""
             };
-            let label = format!("{}  —  {}{link}", full.display(), format::bytes(size));
+            let label = format!(
+                "{}  —  {}{link}",
+                full.display(),
+                format::bytes_with(size, self.decimal_sizes)
+            );
             Some((p, label.into()))
         });
         cx.notify();
+    }
+}
+
+/// Assign when different; reports whether anything changed.
+fn set_if_diff<T: PartialEq>(slot: &mut T, value: T) -> bool {
+    if *slot == value {
+        false
+    } else {
+        *slot = value;
+        true
     }
 }
 
@@ -430,9 +501,8 @@ impl Render for TreemapView {
         let zoom = self.zoom_gen;
         let zoom_path = self.zoom.clone();
         let has_tree = self.tree.is_some();
-        let show_free = self.show_free;
-        let show_unknown = self.show_unknown;
-        let use_disk_size = self.use_disk_size;
+        let render_opts = self.render_opts();
+        let paint_opts = render_opts;
         let _ = window;
 
         let canvas = canvas(
@@ -443,17 +513,7 @@ impl Render for TreemapView {
                 let w = (f32::from(bounds.size.width) * scale).round() as u32;
                 let h = (f32::from(bounds.size.height) * scale).round() as u32;
                 if has_tree && w >= 4 && h >= 4 {
-                    let key = Key {
-                        generation,
-                        w,
-                        h,
-                        dark,
-                        highlight,
-                        zoom,
-                        show_free,
-                        show_unknown,
-                        use_disk_size,
-                    };
+                    let key = Key::new(generation, w, h, dark, highlight, zoom, render_opts);
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
                             entity.update(cx, |this, cx| this.request(key, cx)).ok();
@@ -483,16 +543,7 @@ impl Render for TreemapView {
                     let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else {
                         continue;
                     };
-                    let Some(r) = treemap::rect_of(
-                        &t,
-                        root,
-                        w,
-                        h,
-                        rel,
-                        show_free,
-                        show_unknown,
-                        use_disk_size,
-                    ) else {
+                    let Some(r) = treemap::rect_of(&t, root, w, h, rel, &paint_opts) else {
                         continue;
                     };
                     let origin = bounds.origin;

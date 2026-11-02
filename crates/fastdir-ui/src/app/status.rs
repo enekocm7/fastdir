@@ -39,7 +39,7 @@ impl FastDir {
                 format!(
                     "{} items selected  ·  {}",
                     format::count(self.marked.len() as u64),
-                    format::bytes(size)
+                    self.bytes(size)
                 )
                 .into()
             }
@@ -51,7 +51,7 @@ impl FastDir {
                         .as_ref()
                         .and_then(|t| t.read().get(&p).map(|n| n.size))
                         .unwrap_or(0);
-                    format!("{}  ·  {}", fs.display(), format::bytes(size))
+                    format!("{}  ·  {}", fs.display(), self.bytes(size))
                 })
                 .unwrap_or_default()
                 .into(),
@@ -72,21 +72,21 @@ impl FastDir {
                             "{} files · {} folders · {} scanned of {} used ({} on disk, {} free, {} unknown)",
                             format::count(t.root().files as u64),
                             format::count(t.root().dirs as u64),
-                            format::bytes(scanned),
-                            format::bytes(used),
-                            format::bytes(disk),
-                            format::bytes(free),
-                            format::bytes(unknown),
+                            self.bytes(scanned),
+                            self.bytes(used),
+                            self.bytes(disk),
+                            self.bytes(free),
+                            self.bytes(unknown),
                         )
                     } else {
                         format!(
                             "{} files · {} folders · {} scanned of {} used ({} on disk, {} free)",
                             format::count(t.root().files as u64),
                             format::count(t.root().dirs as u64),
-                            format::bytes(scanned),
-                            format::bytes(used),
-                            format::bytes(disk),
-                            format::bytes(free),
+                            self.bytes(scanned),
+                            self.bytes(used),
+                            self.bytes(disk),
+                            self.bytes(free),
                         )
                     }
                 } else {
@@ -98,10 +98,10 @@ impl FastDir {
                         "{} files · {} folders · {} ({} on disk){}",
                         format::count(t.root().files as u64),
                         format::count(t.root().dirs as u64),
-                        format::bytes(t.root().size),
-                        format::bytes(t.root().disk_size),
+                        self.bytes(t.root().size),
+                        self.bytes(t.root().disk_size),
                         drive
-                            .map(|d| format!(" · {} free", format::bytes(d.free)))
+                            .map(|d| format!(" · {} free", self.bytes(d.free)))
                             .unwrap_or_default(),
                     )
                 };
