@@ -19,7 +19,7 @@ impl FastDir {
                 multi || special,
             )
             .menu_with_icon_and_disabled(
-                "Show in Explorer",
+                platform::reveal_label(),
                 IconName::FolderOpen,
                 Box::new(RevealItem),
                 multi || special,
@@ -59,7 +59,7 @@ impl FastDir {
             )
             .separator()
             .menu_with_icon_and_disabled(
-                "Move to Recycle Bin",
+                format!("Move to {}", platform::trash_name()),
                 IconName::Recycle,
                 Box::new(TrashItem),
                 no_ops,

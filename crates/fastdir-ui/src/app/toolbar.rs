@@ -32,10 +32,6 @@ impl FastDir {
         let focus = self.focus.clone();
         let busy = self.is_busy();
 
-        let tool = |id: &'static str, icon: IconName, tip: &'static str| {
-            Button::new(id).ghost().small().icon(icon).tooltip(tip)
-        };
-
         h_flex()
             .h(px(42.))
             .flex_shrink_0()
@@ -82,14 +78,22 @@ impl FastDir {
                     }),
             )
             .child(
-                tool("open", IconName::FolderSearch, "Scan a folder… (Ctrl+O)")
-                    .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
+                tool(
+                    "open",
+                    IconName::FolderSearch,
+                    platform::tip("Scan a folder…", "O"),
+                )
+                .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
             )
             .child(Separator::vertical().h(px(20.)).mx_1())
             .child(
-                tool("rescan", IconName::RefreshCw, "Rescan everything (Ctrl+R)")
-                    .disabled(self.scan_root.is_none() || scanning)
-                    .on_click(cx.listener(|this, _, w, cx| this.rescan(&Rescan, w, cx))),
+                tool(
+                    "rescan",
+                    IconName::RefreshCw,
+                    platform::tip("Rescan everything", "R"),
+                )
+                .disabled(self.scan_root.is_none() || scanning)
+                .on_click(cx.listener(|this, _, w, cx| this.rescan(&Rescan, w, cx))),
             )
             .child(
                 tool("stop", IconName::CircleStop, "Stop scanning (Esc)")
@@ -103,11 +107,13 @@ impl FastDir {
                     .on_click(cx.listener(|this, _, w, cx| this.go_parent(&GoParent, w, cx))),
             )
             .child(
-                tool("reveal", IconName::FolderOpen, "Show in Explorer (Ctrl+E)")
-                    .disabled(!has_sel || multi || special)
-                    .on_click(
-                        cx.listener(|this, _, w, cx| this.reveal_selected(&RevealItem, w, cx)),
-                    ),
+                tool(
+                    "reveal",
+                    IconName::FolderOpen,
+                    format!("{} ({}+E)", platform::reveal_label(), platform::mod_key()),
+                )
+                .disabled(!has_sel || multi || special)
+                .on_click(cx.listener(|this, _, w, cx| this.reveal_selected(&RevealItem, w, cx))),
             )
             .child(
                 tool(
@@ -125,14 +131,22 @@ impl FastDir {
                     .on_click(cx.listener(|this, _, w, cx| this.rename_item(&RenameItem, w, cx))),
             )
             .child(
-                tool("move", IconName::FolderInput, "Move to… (Ctrl+M)")
-                    .disabled(!has_sel || is_root || busy || special)
-                    .on_click(cx.listener(|this, _, w, cx| this.move_item(&MoveItem, w, cx))),
+                tool(
+                    "move",
+                    IconName::FolderInput,
+                    platform::tip("Move to…", "M"),
+                )
+                .disabled(!has_sel || is_root || busy || special)
+                .on_click(cx.listener(|this, _, w, cx| this.move_item(&MoveItem, w, cx))),
             )
             .child(
-                tool("trash", IconName::Recycle, "Move to Recycle Bin (Del)")
-                    .disabled(!has_sel || is_root || busy || special)
-                    .on_click(cx.listener(|this, _, w, cx| this.trash_item(&TrashItem, w, cx))),
+                tool(
+                    "trash",
+                    IconName::Recycle,
+                    format!("Move to {} (Del)", platform::trash_name()),
+                )
+                .disabled(!has_sel || is_root || busy || special)
+                .on_click(cx.listener(|this, _, w, cx| this.trash_item(&TrashItem, w, cx))),
             )
             .child(
                 Button::new("delete")
@@ -212,9 +226,12 @@ impl FastDir {
                 )
             })
             .child(
-                tool("settings", IconName::Settings, "Settings (Ctrl+,)").on_click(
-                    cx.listener(|this, _, w, cx| this.open_settings(&OpenSettings, w, cx)),
-                ),
+                tool(
+                    "settings",
+                    IconName::Settings,
+                    platform::tip("Settings", ","),
+                )
+                .on_click(cx.listener(|this, _, w, cx| this.open_settings(&OpenSettings, w, cx))),
             )
             .child(tool("more", IconName::Ellipsis, "More").dropdown_menu({
                 let auto = self.settings.updates.auto_check;
@@ -302,7 +319,8 @@ impl FastDir {
                         gpui_kit::component::menu::PopupMenuItem::new("Show treemap in results")
                             .checked(show_treemap)
                             .on_click(move |_, _, cx| {
-                                e7.update(cx, |this, cx| this.toggle_treemap_visible(cx)).ok();
+                                e7.update(cx, |this, cx| this.toggle_treemap_visible(cx))
+                                    .ok();
                             }),
                     )
                     .separator()
@@ -323,7 +341,7 @@ impl FastDir {
                     } else {
                         IconName::Moon
                     },
-                    "Toggle light / dark (Ctrl+T)",
+                    platform::tip("Toggle light / dark", "T"),
                 )
                 .on_click(cx.listener(|this, _, w, cx| this.toggle_theme(&ToggleTheme, w, cx))),
             )
@@ -472,4 +490,10 @@ impl FastDir {
             ),
         )
     }
+}
+
+/// Toolbar icon button with a tooltip. The tip accepts static text and
+/// platform-composed strings alike.
+fn tool(id: &'static str, icon: IconName, tip: impl Into<SharedString>) -> Button {
+    Button::new(id).ghost().small().icon(icon).tooltip(tip)
 }

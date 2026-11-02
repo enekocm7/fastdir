@@ -78,8 +78,8 @@ impl LinkTracker {
 /// What to scan and with how many threads. Built by the UI from the
 /// persisted settings; the scanner itself never reads global state.
 ///
-/// Field defaults preserve the historical behaviour (scan everything on one
-/// automatic pool, never follow junctions).
+/// Field defaults preserve the historical behaviour (scan on one automatic
+/// pool, never follow junctions, stay on the starting volume).
 #[derive(Clone, Debug, Default)]
 pub struct ScanOptions {
     /// Folder/file names to skip. Each pattern is matched case-insensitively
@@ -92,9 +92,10 @@ pub struct ScanOptions {
     /// them can double-count files and loop forever, so every entered folder
     /// is remembered by its canonical path and only visited once.
     pub follow_junctions: bool,
-    /// Descend into mount points on other volumes. Only relevant when
-    /// following junctions on Windows or for Unix mounts; on by default so a
-    /// scan covers the whole folder as it always has.
+    /// Descend into mount points on other volumes. Off by default, so a scan
+    /// stays on the volume it started on; a mount point on another volume is
+    /// listed but not entered. Only relevant when following junctions on
+    /// Windows or for Unix mounts.
     pub cross_volumes: bool,
     /// Scan threads, or `None` for automatic (`cores * 2`, clamped 4..=64).
     /// A fixed number keeps a slow HDD or network share responsive.
@@ -104,9 +105,7 @@ pub struct ScanOptions {
 impl ScanOptions {
     /// `true` when the entry `name` matches one of the exclusion patterns.
     pub fn is_excluded(&self, name: &str) -> bool {
-        self.excluded_globs
-            .iter()
-            .any(|p| matches_glob(p, name))
+        self.excluded_globs.iter().any(|p| matches_glob(p, name))
     }
 }
 
@@ -171,7 +170,11 @@ struct ScanContext<'a> {
 }
 
 impl<'a> ScanContext<'a> {
-    fn for_scan(root: &Path, options: &'a ScanOptions, visited: &'a Mutex<HashSet<PathBuf>>) -> Self {
+    fn for_scan(
+        root: &Path,
+        options: &'a ScanOptions,
+        visited: &'a Mutex<HashSet<PathBuf>>,
+    ) -> Self {
         let canonical = std::fs::canonicalize(root).ok();
         if let Some(ref c) = canonical {
             visited.lock().insert(c.clone());
@@ -959,7 +962,11 @@ mod tests {
         std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
         std::fs::write(dir.join("sub/empty.dat"), b"").unwrap();
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         assert!(!result.cancelled);
         assert_eq!(result.tree.root().files, 3);
         assert_eq!(result.tree.root().dirs, 1);
@@ -979,7 +986,11 @@ mod tests {
         std::fs::write(dir.join("a.txt"), b"hello").unwrap();
         std::fs::write(dir.join("empty.dat"), b"").unwrap();
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         let a = result.tree.find(&dir.join("a.txt")).unwrap();
         let a = result.tree.get(&a).unwrap();
         assert_eq!(a.size, 5);
@@ -1019,7 +1030,11 @@ mod tests {
             return;
         }
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         let tree = &result.tree;
         assert_eq!(tree.root().files, 2);
         assert_eq!(tree.root().size, 4096);
@@ -1058,7 +1073,12 @@ mod tests {
         std::fs::write(dir.join("two/b.bin"), vec![0u8; 11]).unwrap();
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
-        let result = scan_live(dir.clone(), Arc::new(Progress::default()), live.clone(), &ScanOptions::default());
+        let result = scan_live(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            live.clone(),
+            &ScanOptions::default(),
+        );
         assert!(!result.cancelled);
         let tree = live.read();
         assert_eq!(tree.root().files, 3);
@@ -1090,7 +1110,12 @@ mod tests {
         }
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
-        scan_live(dir.clone(), Arc::new(Progress::default()), live.clone(), &ScanOptions::default());
+        scan_live(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            live.clone(),
+            &ScanOptions::default(),
+        );
         let tree = live.read();
         assert_eq!(tree.root().files, 2);
         assert_eq!(tree.root().size, 4096);
@@ -1171,15 +1196,18 @@ mod tests {
             // A dot-prefix is not hidden on Windows; set the attribute.
             use std::os::windows::ffi::OsStrExt;
             use windows_sys::Win32::Storage::FileSystem::SetFileAttributesW;
-            let mut wide: Vec<u16> =
-                dir.join(".hidden").as_os_str().encode_wide().collect();
+            let mut wide: Vec<u16> = dir.join(".hidden").as_os_str().encode_wide().collect();
             wide.push(0);
             unsafe {
                 SetFileAttributesW(wide.as_ptr(), 0x2);
             }
         }
 
-        let plain = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let plain = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         assert_eq!(plain.tree.root().files, 2);
 
         let options = ScanOptions {
@@ -1204,7 +1232,11 @@ mod tests {
         std::os::unix::fs::symlink(&dir, dir.join("real/back")).unwrap();
 
         // Default: links are listed but never followed.
-        let plain = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let plain = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         assert_eq!(plain.tree.root().size, 32);
 
         let options = ScanOptions {

@@ -4,9 +4,8 @@
 use super::*;
 use fastdir_core::integration;
 use fastdir_settings::{
-    DateFormat, DeleteAction, PercentBase, SizeUnit, SortSettings, StartupMode,
-    ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency,
-    config_path,
+    DateFormat, DeleteAction, PercentBase, SizeUnit, SortSettings, StartupMode, ThemePreference,
+    TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency, config_path,
 };
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -202,7 +201,7 @@ impl Render for SettingsView {
                             )
                             .child(
                                 div().text_xs().text_color(muted).child(
-                                    "System follows the Windows light / dark setting.",
+                                    "System follows the OS light / dark setting.",
                                 ),
                             )
                             .child(
@@ -211,7 +210,7 @@ impl Render for SettingsView {
                                     .w_full()
                                     .child(div().text_xs().child("Interface scale"))
                                     .child(caption(
-                                        "Percent of normal size (50-200). Separate from Windows DPI."
+                                        "Percent of normal size (50-200). Separate from OS display scaling."
                                             .to_string(),
                                     ))
                                     .child(
@@ -1078,9 +1077,12 @@ impl Render for SettingsView {
                                     .w_full()
                                     .gap_4()
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .child("Confirm moving to the Recycle Bin"),
+                                        div().text_xs().child(
+                                            format!(
+                                                "Confirm moving to the {}",
+                                                platform::trash_name()
+                                            ),
+                                        ),
                                     )
                                     .child(
                                         Switch::new("settings-confirm-recycle")
@@ -1592,13 +1594,10 @@ impl FastDir {
             "{:.0}",
             self.settings.appearance.ui_scale.clamp(0.5, 2.0) * 100.0
         );
-        let excluded_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(excluded_text));
+        let excluded_input = cx.new(|cx| InputState::new(window, cx).default_value(excluded_text));
         let thread_input = cx.new(|cx| InputState::new(window, cx).default_value(thread_text));
-        let cushion_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(cushion_text));
-        let min_cell_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(min_cell_text));
+        let cushion_input = cx.new(|cx| InputState::new(window, cx).default_value(cushion_text));
+        let min_cell_input = cx.new(|cx| InputState::new(window, cx).default_value(min_cell_text));
         let scale_input = cx.new(|cx| InputState::new(window, cx).default_value(scale_text));
         let owner = cx.entity();
         let view = cx.new(|cx| {

@@ -125,11 +125,7 @@ impl FastDir {
                     format::count(items)
                 )
             } else {
-                format!(
-                    "the file \"{}\" ({})",
-                    t.fs.display(),
-                    self.bytes(t.size)
-                )
+                format!("the file \"{}\" ({})", t.fs.display(), self.bytes(t.size))
             }
         } else {
             let folders = targets.iter().filter(|t| t.is_dir).count();
@@ -144,27 +140,27 @@ impl FastDir {
         let description: SharedString = if permanent {
             format!("Permanently delete {what}? This cannot be undone.").into()
         } else {
-            format!("Move {what} to the Recycle Bin?").into()
+            format!("Move {what} to the {}?", platform::trash_name()).into()
         };
-        let title = if permanent {
-            "Delete permanently"
+        let title: SharedString = if permanent {
+            "Delete permanently".into()
         } else {
-            "Move to Recycle Bin"
+            format!("Move to {}", platform::trash_name()).into()
         };
         let entity = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let entity = entity.clone();
             let targets = targets.clone();
             alert
-                .title(title)
+                .title(title.clone())
                 .description(description.clone())
                 .confirm()
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(if permanent {
-                            "Delete"
+                            "Delete".to_string()
                         } else {
-                            "Move to Recycle Bin"
+                            format!("Move to {}", platform::trash_name())
                         })
                         .ok_variant(ButtonVariant::Danger)
                         .cancel_text("Cancel"),
@@ -191,9 +187,13 @@ impl FastDir {
         let total = targets.len();
         let label = match targets.as_slice() {
             [one] if permanent => format!("Deleting {}", one.fs.display()),
-            [one] => format!("Recycling {}", one.fs.display()),
+            [one] => format!(
+                "Moving {} to the {}",
+                one.fs.display(),
+                platform::trash_name()
+            ),
             _ if permanent => format!("Deleting {total} items"),
-            _ => format!("Recycling {total} items"),
+            _ => format!("Moving {total} items to the {}", platform::trash_name()),
         };
         let progress = self.begin_op(
             label,
@@ -253,10 +253,10 @@ impl FastDir {
                 } else {
                     cx.notify();
                 }
-                let verb = if permanent {
-                    "Deleted"
+                let verb: SharedString = if permanent {
+                    "Deleted".into()
                 } else {
-                    "Moved to the Recycle Bin:"
+                    format!("Moved to the {}:", platform::trash_name()).into()
                 };
                 if cancelled {
                     let msg = if done.is_empty() {

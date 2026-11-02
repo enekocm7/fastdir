@@ -92,3 +92,125 @@ jobs:
           name: FastDir ${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: dist/*
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies
+        run: |
+          # Verified GPUI build inputs on Ubuntu 24.04 (gpui-kit install
+          # guide); libasound2-dev is only needed by the `speech` feature.
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev \
+            libwayland-dev libwebkit2gtk-4.1-dev libxkbcommon-x11-dev \
+            libx11-xcb-dev libssl-dev libzstd-dev libasound2-dev \
+            vulkan-validationlayers libvulkan1
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            # The workspace keeps a single version in [workspace.package].
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.name == "fastdir") | .version')
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package tarball
+        shell: bash
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          mkdir -p staging dist
+          cp target/release/fastdir staging/FastDir
+          cp README.md staging/
+          tar -czf "dist/FastDir-$v-linux-x64.tar.gz" -C staging .
+          (cd dist && sha256sum ./* > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastDir-${{ steps.version.outputs.version }}-linux-x64
+          path: dist/*
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FastDir ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: dist/*
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            # The workspace keeps a single version in [workspace.package].
+            version=$(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.name == "fastdir") | .version')
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package tarball and dmg
+        shell: bash
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          mkdir -p staging dist dmg-root
+          cp target/release/fastdir staging/FastDir
+          cp README.md staging/
+          tar -czf "dist/FastDir-$v-macos-arm64.tar.gz" -C staging .
+          cp staging/FastDir dmg-root/FastDir
+          cp README.md dmg-root/
+          hdiutil create -volname "FastDir $v" -srcfolder dmg-root \
+            -ov -format UDZO "dist/FastDir-$v-macos-arm64.dmg"
+          (cd dist && shasum -a 256 ./* > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastDir-${{ steps.version.outputs.version }}-macos-arm64
+          path: dist/*
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FastDir ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: dist/*

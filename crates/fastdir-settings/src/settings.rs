@@ -1,4 +1,5 @@
-//! Small persisted config (`%APPDATA%\FastDir\config.toml`).
+//! Small persisted config (`%APPDATA%\FastDir\config.toml` on Windows,
+//! `~/.config/FastDir/config.toml` elsewhere).
 //!
 //! Everything the app remembers between launches lives here, grouped into
 //! sections so the file stays readable as it grows: what to scan, how the
@@ -200,7 +201,8 @@ pub struct ScanSettings {
     /// Descend into junctions / symlinked folders. Off by default: following
     /// them can double-count files, and loops are only entered once.
     pub follow_junctions: bool,
-    /// Descend into mount points on other volumes.
+    /// Descend into mount points on other volumes. Off by default, so a scan
+    /// stays on the volume it started on.
     pub cross_volumes: bool,
     /// Scan threads, or `None` for automatic. A fixed number keeps a slow
     /// HDD or network share responsive.
@@ -215,7 +217,7 @@ impl Default for ScanSettings {
             excluded: Vec::new(),
             skip_hidden_system: false,
             follow_junctions: false,
-            cross_volumes: true,
+            cross_volumes: false,
             thread_count: None,
             show_partial_results: true,
         }
@@ -468,16 +470,36 @@ impl Default for Settings {
     }
 }
 
-/// The config file currently in use.
+/// The config file currently in use: `%APPDATA%\FastDir\config.toml` on
+/// Windows, `$XDG_CONFIG_HOME/FastDir/config.toml` (or
+/// `~/.config/FastDir/config.toml`) elsewhere.
 pub fn config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("FastDir").join("config.toml"))
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("APPDATA")?;
+        Some(PathBuf::from(base).join("FastDir").join("config.toml"))
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME") {
+            if !dir.is_empty() {
+                return Some(PathBuf::from(dir).join("FastDir").join("config.toml"));
+            }
+        }
+        let home = std::env::var_os("HOME")?;
+        Some(
+            PathBuf::from(home)
+                .join(".config")
+                .join("FastDir")
+                .join("config.toml"),
+        )
+    }
 }
 
-/// Where versions before the TOML config stored their updater settings.
+/// Where versions before the TOML config stored their updater settings:
+/// `settings.json` next to the current config file.
 fn legacy_path() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("FastDir").join("settings.json"))
+    config_path().map(|p| p.with_file_name("settings.json"))
 }
 
 /// The flat keys written before settings were grouped into sections.
@@ -598,9 +620,7 @@ impl Settings {
     /// current format on first load.
     pub fn load() -> Self {
         if let Some(text) = config_path().and_then(|p| std::fs::read_to_string(p).ok()) {
-            if let Some(settings) =
-                parse_current(&text).or_else(|| parse_legacy_toml(&text))
-            {
+            if let Some(settings) = parse_current(&text).or_else(|| parse_legacy_toml(&text)) {
                 return settings;
             }
         }
@@ -648,7 +668,7 @@ mod tests {
         assert!(!s.treemap.show_unknown);
         assert!(!s.treemap.disk_size);
         assert!(s.scan.show_partial_results);
-        assert!(s.scan.cross_volumes);
+        assert!(!s.scan.cross_volumes);
         assert_eq!(s.appearance.ui_scale, 1.0);
         assert!(s.integration.context_menu);
         assert!(!s.integration.single_instance);
@@ -680,7 +700,10 @@ mod tests {
         .unwrap();
         assert_eq!(s.appearance.theme, ThemePreference::Dark);
         assert_eq!(s.list.sort.column, SortColumn::Name);
-        assert!(s.list.sort.descending, "the missing direction keeps its default");
+        assert!(
+            s.list.sort.descending,
+            "the missing direction keeps its default"
+        );
     }
 
     #[test]
@@ -823,7 +846,9 @@ mod tests {
             "show_unknown": true,
             "treemap_disk_size": true
         }"#;
-        let s: Settings = serde_json::from_str::<LegacySettings>(json).map(Settings::from).unwrap();
+        let s: Settings = serde_json::from_str::<LegacySettings>(json)
+            .map(Settings::from)
+            .unwrap();
         assert!(!s.updates.auto_check);
         assert_eq!(s.updates.skipped_version.as_deref(), Some("0.2.0"));
         assert!(s.treemap.show_free_space);
