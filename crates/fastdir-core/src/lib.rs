@@ -6,6 +6,7 @@
 
 pub mod drives;
 pub mod elevate;
+pub mod export;
 pub mod filter;
 pub mod format;
 pub mod fsops;

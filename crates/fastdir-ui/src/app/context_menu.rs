@@ -59,6 +59,13 @@ impl FastDir {
             )
             .separator()
             .menu_with_icon_and_disabled(
+                "Export results…",
+                IconName::Download,
+                Box::new(ExportResults),
+                self.tree.is_none(),
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
                 format!("Move to {}", platform::trash_name()),
                 IconName::Recycle,
                 Box::new(TrashItem),
