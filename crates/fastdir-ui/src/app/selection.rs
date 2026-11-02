@@ -103,6 +103,11 @@ impl FastDir {
         }
     }
 
+    /// A file operation (refresh, delete, move) is running.
+    pub(super) fn is_busy(&self) -> bool {
+        self.busy.is_some() || self.op.is_some()
+    }
+
     /// More than one item is selected.
     pub(super) fn is_multi(&self) -> bool {
         self.marked.len() > 1
@@ -128,6 +133,7 @@ impl FastDir {
                 fs,
                 is_dir: node.is_dir(),
                 size: node.size,
+                items: if node.is_dir() { node.items() + 1 } else { 1 },
                 path,
             });
         }

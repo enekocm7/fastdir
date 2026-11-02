@@ -322,7 +322,7 @@ impl FastDir {
         };
 
         let version = release.version.to_string();
-        if matches!(self.phase, Phase::Scanning { .. }) || self.busy.is_some() {
+        if matches!(self.phase, Phase::Scanning { .. }) || self.is_busy() {
             let entity = cx.entity().downgrade();
             window.open_alert_dialog(cx, move |alert, _, _| {
                 let entity = entity.clone();

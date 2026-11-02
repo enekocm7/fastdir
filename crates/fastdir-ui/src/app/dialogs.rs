@@ -79,7 +79,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy.is_some() {
+        if self.is_busy() {
             return;
         }
         let targets = self.targets();
@@ -136,11 +136,10 @@ impl FastDir {
         } else {
             "Move to Recycle Bin"
         };
-        let paths: Vec<PathBuf> = targets.into_iter().map(|t| t.fs).collect();
         let entity = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let entity = entity.clone();
-            let paths = paths.clone();
+            let targets = targets.clone();
             alert
                 .title(title)
                 .description(description.clone())
@@ -156,9 +155,11 @@ impl FastDir {
                         .cancel_text("Cancel"),
                 )
                 .on_ok(move |_, window, cx| {
-                    let paths = paths.clone();
+                    let targets = targets.clone();
                     entity
-                        .update(cx, |this, cx| this.run_delete(paths, permanent, window, cx))
+                        .update(cx, |this, cx| {
+                            this.run_delete(targets, permanent, window, cx)
+                        })
                         .ok();
                     true
                 })
@@ -167,74 +168,182 @@ impl FastDir {
 
     pub(super) fn run_delete(
         &mut self,
-        paths: Vec<PathBuf>,
+        targets: Vec<Target>,
         permanent: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let total = paths.len();
-        self.busy = Some(
-            match paths.as_slice() {
-                [one] => format!("Deleting {}…", one.display()),
-                _ => format!("Deleting {total} items…"),
-            }
-            .into(),
+        let total = targets.len();
+        let label = match targets.as_slice() {
+            [one] if permanent => format!("Deleting {}", one.fs.display()),
+            [one] => format!("Recycling {}", one.fs.display()),
+            _ if permanent => format!("Deleting {total} items"),
+            _ => format!("Recycling {total} items"),
+        };
+        let progress = self.begin_op(
+            label,
+            targets.iter().map(|t| t.items).sum(),
+            targets.iter().map(|t| t.size).sum(),
+            false,
+            cx,
         );
-        cx.notify();
         let job = cx.background_executor().spawn(async move {
-            paths
-                .into_iter()
-                .map(|p| {
-                    let res = fsops::delete(&p, permanent);
-                    (p, res)
-                })
-                .collect::<Vec<_>>()
+            let (mut items, mut bytes) = (0, 0);
+            let mut out = Vec::with_capacity(targets.len());
+            for t in targets {
+                let report = fsops::delete_tracked(&t.fs, permanent, &progress);
+                items += t.items;
+                bytes += t.size;
+                progress.reach(items, bytes);
+                let gone = std::fs::symlink_metadata(&t.fs).is_err();
+                // Part of the folder may be gone: re-measure what is left.
+                let rest = (!gone && permanent && t.is_dir && !report.complete())
+                    .then(|| scanner::scan_subtree(&t.fs));
+                out.push(DeleteOutcome {
+                    path: t.fs,
+                    gone,
+                    rest,
+                    report,
+                });
+            }
+            out
         });
         cx.spawn_in(window, async move |this, cx| {
             let results = job.await;
             this.update_in(cx, |this, window, cx| {
-                this.busy = None;
+                let cancelled = this.end_op();
                 let mut select = None;
                 let mut done = Vec::new();
-                let mut failed = Vec::new();
-                for (path, res) in results {
-                    match res {
-                        Ok(()) => {
-                            // The last removal leaves the final, valid path.
-                            if let Some(parent) = this.remove_from_tree(&path) {
-                                select = Some(parent);
-                            }
-                            done.push(path);
+                let mut failed: Vec<(PathBuf, String)> = Vec::new();
+                let mut changed = false;
+                for r in results {
+                    if r.gone {
+                        // The last removal leaves the final, valid path.
+                        if let Some(parent) = this.remove_from_tree(&r.path) {
+                            select = Some(parent);
                         }
-                        Err(e) => failed.push((path, e)),
+                        done.push(r.path);
+                        changed = true;
+                    } else if let Some(node) = r.rest {
+                        if let Some(p) = this.splice_subtree(&r.path, node) {
+                            select = Some(p);
+                        }
+                        changed = true;
                     }
+                    failed.extend(r.report.failed);
                 }
-                if done.is_empty() {
-                    cx.notify();
-                } else {
+                if changed {
                     this.tree_changed(select, cx);
+                } else {
+                    cx.notify();
+                }
+                let verb = if permanent {
+                    "Deleted"
+                } else {
+                    "Moved to the Recycle Bin:"
+                };
+                if cancelled {
+                    let msg = if done.is_empty() {
+                        "Nothing was fully deleted. Anything already removed is gone from the list."
+                            .to_string()
+                    } else {
+                        format!("{verb} {} of {total} items before cancelling.", done.len())
+                    };
+                    window.push_notification(
+                        Notification::warning(msg).title("Delete cancelled"),
+                        cx,
+                    );
+                } else if !done.is_empty() {
                     let msg = match done.as_slice() {
-                        [one] => format!("Deleted {}", one.display()),
-                        _ => format!("Deleted {} items", done.len()),
+                        [one] => format!("{verb} {}", one.display()),
+                        _ => format!("{verb} {} items", done.len()),
                     };
                     window.push_notification(Notification::success(msg), cx);
                 }
-                if let Some((first, err)) = failed.first() {
-                    let msg = if total == 1 {
-                        format!("Could not delete {}: {err}", first.display())
+                if !failed.is_empty() {
+                    let title = if failed.len() == 1 {
+                        "Could not delete 1 item".to_string()
                     } else {
                         format!(
-                            "Could not delete {} of {total} items. {}: {err}",
-                            failed.len(),
-                            first.display()
+                            "Could not delete {} items",
+                            format::count(failed.len() as u64)
                         )
                     };
-                    window.push_notification(Notification::error(msg).title("Delete failed"), cx);
+                    window.push_notification(
+                        Notification::error(failure_list(&failed)).title(title),
+                        cx,
+                    );
                 }
             })
             .ok();
         })
         .detach();
+    }
+
+    /// Show the progress bar for a delete / move and keep it repainting.
+    fn begin_op(
+        &mut self,
+        label: String,
+        total_items: u64,
+        total_bytes: u64,
+        by_bytes: bool,
+        cx: &mut Context<Self>,
+    ) -> Arc<fsops::OpProgress> {
+        let progress = Arc::new(fsops::OpProgress::default());
+        self.op = Some(FileOp {
+            label: label.into(),
+            progress: progress.clone(),
+            total_items,
+            total_bytes,
+            by_bytes,
+        });
+        self._op_ticker = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let running = this
+                    .update(cx, |this, cx| {
+                        cx.notify();
+                        this.op.is_some()
+                    })
+                    .unwrap_or(false);
+                if !running {
+                    break;
+                }
+            }
+        }));
+        cx.notify();
+        progress
+    }
+
+    /// Clear the running operation. Returns whether it was cancelled.
+    fn end_op(&mut self) -> bool {
+        self._op_ticker = None;
+        self.op.take().is_some_and(|op| op.progress.is_cancelled())
+    }
+
+    pub(super) fn cancel_op(&mut self, cx: &mut Context<Self>) {
+        if let Some(op) = &self.op {
+            op.progress.cancel();
+            cx.notify();
+        }
+    }
+
+    /// Replace the node for the folder `fs` with a freshly scanned `node`.
+    /// Returns the folder's new path.
+    pub(super) fn splice_subtree(
+        &mut self,
+        fs: &std::path::Path,
+        mut node: Node,
+    ) -> Option<NodePath> {
+        let tree = self.tree.as_ref()?;
+        let mut t = tree.write();
+        let path = t.find(fs)?;
+        let parent: NodePath = path[..path.len().checked_sub(1)?].to_vec();
+        node.expanded = t.get(&path).is_some_and(|n| n.expanded);
+        t.remove(&path)?;
+        t.insert(&parent, node)
     }
 
     /// Remove the node for `fs` (if present). Returns the parent's new path.
@@ -253,7 +362,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy.is_some() || self.is_multi() {
+        if self.is_busy() || self.is_multi() {
             return;
         }
         let Some((path, fs, _)) = self.selected_fs_path() else {
@@ -380,15 +489,14 @@ impl FastDir {
     }
 
     pub(super) fn move_item(&mut self, _: &MoveItem, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy.is_some() {
+        if self.is_busy() {
             return;
         }
         let targets = self.targets();
         if targets.is_empty() || targets.iter().any(|t| t.path.is_empty()) {
             return;
         }
-        let total_size: u64 = targets.iter().map(|t| t.size).sum();
-        let srcs: Vec<PathBuf> = targets.into_iter().map(|t| t.fs).collect();
+        let srcs = targets;
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -407,7 +515,7 @@ impl FastDir {
                     // Picking the folder was the confirmation.
                     this.run_move(srcs, dest_dir, window, cx);
                 } else {
-                    this.confirm_move(srcs, total_size, dest_dir, window, cx);
+                    this.confirm_move(srcs, dest_dir, window, cx);
                 }
             })
             .ok();
@@ -418,8 +526,7 @@ impl FastDir {
     /// One confirmation for a whole multi-selection, showing its total size.
     pub(super) fn confirm_move(
         &mut self,
-        srcs: Vec<PathBuf>,
-        total_size: u64,
+        srcs: Vec<Target>,
         dest_dir: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -427,7 +534,7 @@ impl FastDir {
         let description: SharedString = format!(
             "Move {} selected items ({}) to \"{}\"?",
             srcs.len(),
-            format::bytes(total_size),
+            format::bytes(srcs.iter().map(|t| t.size).sum()),
             dest_dir.display()
         )
         .into();
@@ -457,92 +564,131 @@ impl FastDir {
 
     pub(super) fn run_move(
         &mut self,
-        srcs: Vec<PathBuf>,
+        srcs: Vec<Target>,
         dest_dir: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let total = srcs.len();
-        self.busy = Some(
-            match srcs.as_slice() {
-                [one] => format!("Moving {} → {}…", one.display(), dest_dir.display()),
-                _ => format!("Moving {total} items → {}…", dest_dir.display()),
-            }
-            .into(),
+        let label = match srcs.as_slice() {
+            [one] => format!("Moving {} → {}", one.fs.display(), dest_dir.display()),
+            _ => format!("Moving {total} items → {}", dest_dir.display()),
+        };
+        let progress = self.begin_op(
+            label,
+            srcs.iter().map(|t| t.items).sum(),
+            srcs.iter().map(|t| t.size).sum(),
+            true,
+            cx,
         );
-        cx.notify();
         let dest = dest_dir.clone();
         let job = cx.background_executor().spawn(async move {
-            srcs.into_iter()
-                .map(|src| {
-                    let res = fsops::move_into(&src, &dest).map(|dest| {
-                        // Measure what arrived so the destination's size is right.
-                        let meta = std::fs::symlink_metadata(&dest).ok();
-                        let node = if meta.as_ref().is_some_and(|m| m.is_dir()) {
-                            scanner::scan_subtree(&dest)
-                        } else {
-                            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                            let modified = meta
-                                .and_then(|m| m.modified().ok())
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs() as i64)
-                                .unwrap_or(0);
-                            let name = dest.file_name().unwrap().to_string_lossy();
-                            Node::file(name.into(), size, modified)
-                        };
-                        (dest, node)
-                    });
-                    (src, res)
-                })
-                .collect::<Vec<_>>()
+            let (mut items, mut bytes) = (0, 0);
+            let mut out = Vec::with_capacity(srcs.len());
+            for src in srcs {
+                if progress.is_cancelled() {
+                    break;
+                }
+                let res = fsops::move_into_tracked(&src.fs, &dest, &progress).map(|moved| {
+                    // Measure what arrived so the destination's size is right.
+                    let node = measure(&moved.dest);
+                    // Whatever could not be removed from the source stays there.
+                    let rest = (!moved.leftover.is_empty()
+                        && src.is_dir
+                        && std::fs::symlink_metadata(&src.fs).is_ok())
+                    .then(|| scanner::scan_subtree(&src.fs));
+                    MoveOutcome {
+                        dest: moved.dest,
+                        node,
+                        leftover: moved.leftover,
+                        rest,
+                    }
+                });
+                items += src.items;
+                bytes += src.size;
+                progress.reach(items, bytes);
+                out.push((src.fs, res));
+            }
+            out
         });
         cx.spawn_in(window, async move |this, cx| {
             let results = job.await;
             this.update_in(cx, |this, window, cx| {
-                this.busy = None;
+                let cancelled = this.end_op();
                 let mut select = None;
                 let mut moved = Vec::new();
-                let mut failed = Vec::new();
+                let mut failed: Vec<(PathBuf, String)> = Vec::new();
+                let mut leftover: Vec<(PathBuf, String)> = Vec::new();
                 for (src, res) in results {
                     match res {
-                        Ok((dest, node)) => {
-                            let mut sel = this.remove_from_tree(&src);
+                        Ok(m) => {
+                            let mut sel = match m.rest {
+                                Some(rest) => this.splice_subtree(&src, rest),
+                                None => this.remove_from_tree(&src),
+                            };
                             if let Some(tree) = &this.tree {
                                 let mut t = tree.write();
                                 if let Some(dir) = t.find(&dest_dir) {
-                                    sel = t.insert(&dir, node);
+                                    sel = t.insert(&dir, m.node);
                                 }
                             }
                             if sel.is_some() {
                                 select = sel;
                             }
-                            this.treemap.update(cx, |t, _| t.path_moved(&src, &dest));
-                            moved.push(dest);
+                            if m.leftover.is_empty() {
+                                this.treemap.update(cx, |t, _| t.path_moved(&src, &m.dest));
+                            }
+                            leftover.extend(m.leftover);
+                            moved.push(m.dest);
                         }
-                        Err(e) => failed.push((src, e)),
+                        Err(fsops::MoveError::Cancelled) => {}
+                        Err(fsops::MoveError::Failed(e)) => failed.push((src, e)),
                     }
                 }
                 if moved.is_empty() {
                     cx.notify();
                 } else {
                     this.tree_changed(select, cx);
+                }
+                if cancelled {
+                    let msg = if moved.is_empty() {
+                        "Nothing was moved. Any partial copy was removed.".to_string()
+                    } else {
+                        format!(
+                            "Moved {} of {total} items to {} before cancelling. \
+                             Any partial copy was removed.",
+                            moved.len(),
+                            dest_dir.display()
+                        )
+                    };
+                    window
+                        .push_notification(Notification::warning(msg).title("Move cancelled"), cx);
+                } else if !moved.is_empty() {
                     let msg = match moved.as_slice() {
                         [one] => format!("Moved to {}", one.display()),
                         _ => format!("Moved {} items to {}", moved.len(), dest_dir.display()),
                     };
                     window.push_notification(Notification::success(msg), cx);
                 }
-                if let Some((first, err)) = failed.first() {
+                if !failed.is_empty() {
                     let msg = if total == 1 {
-                        err.clone()
+                        failed[0].1.clone()
                     } else {
-                        format!(
-                            "Could not move {} of {total} items. {}: {err}",
-                            failed.len(),
-                            first.display()
-                        )
+                        failure_list(&failed)
                     };
-                    window.push_notification(Notification::error(msg).title("Move failed"), cx);
+                    let title = if total == 1 {
+                        "Move failed".to_string()
+                    } else {
+                        format!("Could not move {} of {total} items", failed.len())
+                    };
+                    window.push_notification(Notification::error(msg).title(title), cx);
+                }
+                if !leftover.is_empty() {
+                    window.push_notification(
+                        Notification::error(failure_list(&leftover))
+                            .title("Copied, but some originals could not be removed"),
+                        cx,
+                    );
                 }
             })
             .ok();
@@ -557,7 +703,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy.is_some() || self.is_multi() {
+        if self.is_busy() || self.is_multi() {
             return;
         }
         let Some((path, fs, is_dir)) = self.selected_fs_path() else {
@@ -611,4 +757,59 @@ impl FastDir {
         window.refresh();
         cx.notify();
     }
+}
+
+/// What a delete did to one selected item.
+struct DeleteOutcome {
+    path: PathBuf,
+    /// The item no longer exists.
+    gone: bool,
+    /// A fresh scan of what is left of a partly deleted folder.
+    rest: Option<Node>,
+    report: fsops::DeleteReport,
+}
+
+/// One item that reached its destination.
+struct MoveOutcome {
+    dest: PathBuf,
+    node: Node,
+    leftover: Vec<(PathBuf, String)>,
+    /// A fresh scan of the source folder if parts of it could not be removed.
+    rest: Option<Node>,
+}
+
+/// A detached node for a freshly moved file or folder.
+fn measure(path: &std::path::Path) -> Node {
+    let meta = std::fs::symlink_metadata(path).ok();
+    if meta.as_ref().is_some_and(|m| m.is_dir()) {
+        return scanner::scan_subtree(path);
+    }
+    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified = meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    Node::file(name.into(), size, modified)
+}
+
+/// The first few failed paths with their reasons, one per line.
+fn failure_list(failed: &[(PathBuf, String)]) -> String {
+    const SHOWN: usize = 5;
+    let mut lines: Vec<String> = failed
+        .iter()
+        .take(SHOWN)
+        .map(|(p, e)| format!("{}: {e}", p.display()))
+        .collect();
+    if failed.len() > SHOWN {
+        lines.push(format!(
+            "…and {} more",
+            format::count((failed.len() - SHOWN) as u64)
+        ));
+    }
+    lines.join("\n")
 }

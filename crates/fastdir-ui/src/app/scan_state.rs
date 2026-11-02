@@ -132,7 +132,9 @@ impl FastDir {
         } else {
             false
         };
-        // Esc also drops the treemap highlight.
+        // Esc also cancels a running delete / move...
+        self.cancel_op(cx);
+        // ...and drops the treemap highlight.
         self.set_selected_ext(None, cx);
         if scanning {
             cx.notify();
