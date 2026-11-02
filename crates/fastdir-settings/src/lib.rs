@@ -1,4 +1,4 @@
-//! Persisted FastDir settings (`%APPDATA%\FastDir\settings.json`).
+//! Persisted FastDir settings (`%APPDATA%\FastDir\config.toml`).
 
 mod settings;
 

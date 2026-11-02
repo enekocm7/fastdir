@@ -748,15 +748,12 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mode = if cx.theme().mode.is_dark() {
-            ThemeMode::Light
+        let theme = if cx.theme().mode.is_dark() {
+            ThemePreference::Light
         } else {
-            ThemeMode::Dark
+            ThemePreference::Dark
         };
-        Theme::change(mode, Some(window), cx);
-        apply_accent(cx);
-        window.refresh();
-        cx.notify();
+        self.set_theme_preference(theme, window, cx);
     }
 }
 

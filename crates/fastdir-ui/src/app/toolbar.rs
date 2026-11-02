@@ -202,6 +202,11 @@ impl FastDir {
                         }),
                 )
             })
+            .child(
+                tool("settings", IconName::Settings, "Settings (Ctrl+,)").on_click(
+                    cx.listener(|this, _, w, cx| this.open_settings(&OpenSettings, w, cx)),
+                ),
+            )
             .child(tool("more", IconName::Ellipsis, "More").dropdown_menu({
                 let auto = self.settings.auto_check_updates;
                 let show_free = self.settings.show_free_space;
@@ -210,11 +215,22 @@ impl FastDir {
                 let show_partial = self.settings.show_partial_results;
                 let entity = update_entity.clone();
                 move |menu, _, _| {
-                    let (e1, e2) = (entity.clone(), entity.clone());
+                    let (e0, e1, e2) = (entity.clone(), entity.clone(), entity.clone());
                     let (e3, e4) = (entity.clone(), entity.clone());
                     let e5 = entity.clone();
                     let e6 = entity.clone();
                     menu.item(
+                        gpui_kit::component::menu::PopupMenuItem::new("Settings…")
+                            .icon(IconName::Settings)
+                            .on_click(move |_, window, cx| {
+                                e0.update(cx, |this, cx| {
+                                    this.open_settings(&OpenSettings, window, cx)
+                                })
+                                .ok();
+                            }),
+                    )
+                    .separator()
+                    .item(
                         gpui_kit::component::menu::PopupMenuItem::new("Check for updates")
                             .icon(IconName::RefreshCw)
                             .on_click(move |_, window, cx| {
