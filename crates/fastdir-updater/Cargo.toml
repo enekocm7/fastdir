@@ -1,0 +1,14 @@
+[package]
+name = "fastdir-updater"
+version.workspace = true
+edition.workspace = true
+description = "GitHub release check, verified download and self-update for FastDir"
+repository.workspace = true
+
+[dependencies]
+ureq.workspace = true
+semver.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+zip.workspace = true

@@ -391,3 +391,127 @@ impl Tree {
         self.insert(&path[..path.len() - 1], node)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_tree() -> Tree {
+        let mut root = Node::dir("root".into(), 100);
+        let mut sub = Node::dir("sub".into(), 50);
+        sub.children.push(Node::file("a.txt".into(), 5, 5));
+        sub.children.push(Node::file("b.bin".into(), 15, 6));
+        sub.finalize();
+        root.children.push(sub);
+        root.children.push(Node::file("c.txt".into(), 30, 7));
+        root.finalize();
+        Tree::new(root, PathBuf::from("/root"))
+    }
+
+    #[test]
+    fn extension_parsing() {
+        assert_eq!(extension_of("movie.MP4").as_deref(), Some(".mp4"));
+        assert_eq!(extension_of("archive.tar.gz").as_deref(), Some(".gz"));
+        assert_eq!(extension_of("no-extension"), None);
+        assert_eq!(extension_of(".gitignore"), None);
+        assert_eq!(extension_of("trailing."), None);
+        assert_eq!(extension_of("with space.txt"), Some(".txt".into()));
+        assert_eq!(extension_of("name.a b"), None);
+        assert_eq!(extension_of("name.verylongextension"), None);
+    }
+
+    #[test]
+    fn finalize_aggregates_children_largest_first() {
+        let tree = sample_tree();
+        assert_eq!(tree.root.size, 50);
+        assert_eq!(tree.root.files, 3);
+        assert_eq!(tree.root.dirs, 1);
+        assert_eq!(tree.root.children.len(), 2);
+        assert_eq!(&*tree.root.children[0].name, "c.txt");
+        assert_eq!(&*tree.root.children[1].name, "sub");
+        assert_eq!(tree.root.children[1].size, 20);
+    }
+
+    #[test]
+    fn extension_stats_are_ranked_and_stamped() {
+        let tree = sample_tree();
+        assert_eq!(tree.exts.len(), 2);
+        assert_eq!(&*tree.exts[0].name, ".txt");
+        assert_eq!(tree.exts[0].bytes, 35);
+        assert_eq!(tree.exts[0].files, 2);
+        assert_eq!(&*tree.exts[1].name, ".bin");
+        assert_eq!(tree.exts[1].bytes, 15);
+
+        let txt = tree.find(Path::new("/root/c.txt")).unwrap();
+        assert_eq!(tree.get(&txt).unwrap().ext, 0);
+        let bin = tree.find(Path::new("/root/sub/b.bin")).unwrap();
+        assert_eq!(tree.get(&bin).unwrap().ext, 1);
+    }
+
+    #[test]
+    fn get_and_fs_path_round_trip() {
+        let tree = sample_tree();
+        let path = tree.find(Path::new("/root/sub/a.txt")).unwrap();
+        assert_eq!(tree.get(&path).unwrap().name.as_ref(), "a.txt");
+        assert_eq!(
+            tree.fs_path(&path).unwrap(),
+            PathBuf::from("/root/sub/a.txt")
+        );
+        assert_eq!(tree.get(&[99]).map(|_| ()), None);
+    }
+
+    #[test]
+    fn find_is_case_insensitive_on_windows_paths() {
+        let tree = sample_tree();
+        assert!(tree.find(Path::new("/root/SUB/A.TXT")).is_some());
+    }
+
+    #[test]
+    fn remove_updates_aggregates_and_generation() {
+        let mut tree = sample_tree();
+        let before = tree.generation;
+        let path = tree.find(Path::new("/root/sub")).unwrap();
+        let removed = tree.remove(&path).unwrap();
+        assert_eq!(removed.size, 20);
+        assert_eq!(tree.root.size, 30);
+        assert_eq!(tree.root.files, 1);
+        assert_eq!(tree.root.dirs, 0);
+        assert!(tree.generation > before);
+        assert_eq!(tree.find(Path::new("/root/sub")), None);
+        assert_eq!(
+            tree.exts.iter().find(|e| &*e.name == ".bin").unwrap().bytes,
+            0
+        );
+    }
+
+    #[test]
+    fn insert_adds_new_extension() {
+        let mut tree = sample_tree();
+        let node = Node::file("d.log".into(), 100, 8);
+        let path = tree.insert(&[], node).unwrap();
+        assert_eq!(tree.get(&path).unwrap().name.as_ref(), "d.log");
+        assert_eq!(tree.root.size, 150);
+        assert_eq!(tree.root.children[0].name.as_ref(), "d.log");
+        let log = tree.exts.iter().find(|e| &*e.name == ".log").unwrap();
+        assert_eq!(log.bytes, 100);
+        assert_eq!(log.files, 1);
+    }
+
+    #[test]
+    fn rename_moves_the_node_and_keeps_its_contents() {
+        let mut tree = sample_tree();
+        let path = tree.find(Path::new("/root/sub")).unwrap();
+        let new_path = tree.rename(&path, "renamed").unwrap();
+        assert_eq!(tree.get(&new_path).unwrap().name.as_ref(), "renamed");
+        assert!(tree.find(Path::new("/root/renamed/a.txt")).is_some());
+        assert_eq!(tree.find(Path::new("/root/sub")), None);
+        assert_eq!(tree.root.size, 50);
+    }
+
+    #[test]
+    fn dominant_ext_descends_to_the_largest_file() {
+        let tree = sample_tree();
+        let sub = tree.find(Path::new("/root/sub")).unwrap();
+        assert_eq!(tree.get(&sub).unwrap().dominant_ext(), 1); // .bin
+    }
+}

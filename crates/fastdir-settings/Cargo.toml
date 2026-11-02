@@ -1,0 +1,10 @@
+[package]
+name = "fastdir-settings"
+version.workspace = true
+edition.workspace = true
+description = "Persisted FastDir settings"
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

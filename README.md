@@ -109,6 +109,29 @@ The application icon is generated at build time: `build.rs` rasterizes
 [`assets/logo.svg`](assets/logo.svg) into a multi-size `.ico` and embeds it
 in the executable.
 
+### Project layout
+
+FastDir is a Cargo workspace. The root crate is a thin binary; all reusable
+logic lives in focused sub-crates so it can be built and tested without GPUI:
+
+| Crate | Contents |
+|---|---|
+| `fastdir` (root) | `src/main.rs`, `build.rs` (icon / resource embedding) |
+| `crates/fastdir-core` | Tree model, parallel scanner, drives, file-system ops, formatting |
+| `crates/fastdir-treemap` | Squarified cushion layout, hit-testing and CPU rendering |
+| `crates/fastdir-updater` | Release check, verified download and self-update |
+| `crates/fastdir-settings` | Persisted settings |
+| `crates/fastdir-ui` | GPUI window, list/treemap panels, dialogs and menus |
+
+Dependency direction is `ui -> treemap -> core`, `ui -> updater` and
+`ui -> settings`. Only `fastdir-ui` depends on GPUI.
+
+Run the GUI-free test suite with:
+
+```sh
+cargo test -p fastdir-core -p fastdir-treemap -p fastdir-updater -p fastdir-settings
+```
+
 ### Building the installer locally
 
 Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then:

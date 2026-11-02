@@ -1,0 +1,16 @@
+[package]
+name = "fastdir-ui"
+version.workspace = true
+edition.workspace = true
+description = "GPUI user interface for FastDir"
+repository.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+fastdir-core.workspace = true
+fastdir-treemap.workspace = true
+fastdir-updater.workspace = true
+fastdir-settings.workspace = true
+image.workspace = true
+smallvec.workspace = true
+parking_lot.workspace = true

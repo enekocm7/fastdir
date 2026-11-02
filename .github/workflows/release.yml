@@ -33,7 +33,9 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq "tag") {
             $version = $env:GITHUB_REF_NAME.TrimStart("v")
           } else {
-            $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+            # The workspace keeps a single version in [workspace.package].
+            $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+            $version = ($meta.packages | Where-Object { $_.name -eq "fastdir" }).version
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"

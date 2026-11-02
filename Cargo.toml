@@ -1,30 +1,63 @@
-[package]
-name = "fastdir"
+[workspace]
+resolver = "3"
+members = [
+    "crates/fastdir-core",
+    "crates/fastdir-treemap",
+    "crates/fastdir-updater",
+    "crates/fastdir-settings",
+    "crates/fastdir-ui",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "Blazing fast disk usage analyzer with a WinDirStat-style treemap"
 repository = "https://github.com/enekocm7/fastdir"
 
-[dependencies]
+[workspace.dependencies]
+# GUI
 gpui-kit = { version = "0.8.1", features = ["gpui-fast"] }
+# Core scanning / tree
 rayon = "1.12"
 parking_lot = "0.12"
-image = { version = "0.25", default-features = false }
 smallvec = "1.13"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 trash = "5"
+# Treemap image
+image = { version = "0.25", default-features = false }
+# Updater
 ureq = "3"
 semver = "1.0.28"
 sha2 = "0.11.1"
 serde_json = "1.0.154"
 serde = { version = "1.0.229", features = ["derive"] }
 zip = { version = "9.2.2", default-features = false, features = ["deflate"] }
-
-[target.'cfg(windows)'.dependencies]
+# Windows APIs
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
 ] }
+# Workspace crates
+fastdir-core = { path = "crates/fastdir-core" }
+fastdir-treemap = { path = "crates/fastdir-treemap" }
+fastdir-updater = { path = "crates/fastdir-updater" }
+fastdir-settings = { path = "crates/fastdir-settings" }
+fastdir-ui = { path = "crates/fastdir-ui" }
+
+[package]
+name = "fastdir"
+version.workspace = true
+edition.workspace = true
+description = "Blazing fast disk usage analyzer with a WinDirStat-style treemap"
+repository.workspace = true
+build = "build.rs"
+
+[dependencies]
+fastdir-ui.workspace = true
+fastdir-updater.workspace = true
+
+[build-dependencies]
+resvg = { version = "0.45", default-features = false, features = [] }
+embed-resource = "3"
 
 [profile.release]
 opt-level = 3
@@ -33,10 +66,23 @@ codegen-units = 1
 debug = false
 panic = "abort"
 
-# Dependencies (gpui is huge) build with parallel codegen; only our own
-# crate pays for codegen-units = 1. Much faster cold builds in CI.
+# Dependencies (gpui is huge) build with parallel codegen; the crates we own
+# keep codegen-units = 1 (explicit overrides below).
 [profile.release.package."*"]
 codegen-units = 16
+
+[profile.release.package.fastdir]
+codegen-units = 1
+[profile.release.package.fastdir-core]
+codegen-units = 1
+[profile.release.package.fastdir-treemap]
+codegen-units = 1
+[profile.release.package.fastdir-updater]
+codegen-units = 1
+[profile.release.package.fastdir-settings]
+codegen-units = 1
+[profile.release.package.fastdir-ui]
+codegen-units = 1
 
 # Keep debug builds usable: the scanner and treemap renderer are hot loops.
 [profile.dev.package."*"]
@@ -45,6 +91,7 @@ opt-level = 2
 [profile.dev]
 opt-level = 1
 
-[build-dependencies]
-resvg = { version = "0.45", default-features = false, features = [] }
-embed-resource = "3"
+[profile.dev.package.fastdir-core]
+opt-level = 2
+[profile.dev.package.fastdir-treemap]
+opt-level = 2
