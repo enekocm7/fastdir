@@ -75,7 +75,7 @@ impl FastDir {
         cx: &mut Context<Self>,
     ) {
         let ScanResult {
-            tree,
+            mut tree,
             elapsed,
             cancelled,
         } = result;
@@ -85,8 +85,14 @@ impl FastDir {
             if cancelled { " (incomplete)" } else { "" }
         );
         window.set_window_title(&title);
+        // Drive scans get `<Free space>` and `<Unknown>` pseudo-items so the
+        // picture is complete (scanned vs used). Volume figures are from the
+        // drive list taken when the scan started.
+        if let Some(drive) = self.drives.iter().find(|d| d.path == tree.root_path) {
+            tree.attach_volume_info(drive.total, drive.free);
+        }
         let files = tree.root.files;
-        let size = tree.root.size;
+        let size = tree.scanned_bytes();
         let tree = Arc::new(RwLock::new(tree));
         self.tree = Some(tree.clone());
         self.last_scan = Some((elapsed, cancelled));

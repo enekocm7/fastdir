@@ -157,7 +157,12 @@ impl FastDir {
             let has_children = is_dir && !node.children.is_empty();
             let depth = row.depth as f32;
             let bar_color = rgb(DEPTH_COLORS[row.depth as usize % DEPTH_COLORS.len()]);
-            let icon = if !is_dir {
+            let icon = if node.is_special() {
+                let (r, g, b) = treemap::node_color(node);
+                Icon::new(IconName::HardDrive)
+                    .xsmall()
+                    .text_color(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32))
+            } else if !is_dir {
                 let (r, g, b) = treemap::ext_color(node.ext);
                 Icon::new(IconName::File)
                     .xsmall()

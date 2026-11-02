@@ -66,6 +66,8 @@ actions!(
         ToggleTheme,
         ZoomIn,
         ZoomOut,
+        ToggleFreeSpace,
+        ToggleUnknown,
     ]
 );
 
@@ -109,6 +111,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-t", ToggleTheme, Some(CONTEXT)),
         KeyBinding::new("z", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
+        KeyBinding::new("f6", ToggleFreeSpace, Some(CONTEXT)),
+        KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
     ]);
 }
 
@@ -242,7 +246,9 @@ pub struct FastDir {
 
 impl FastDir {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let treemap = cx.new(|_| TreemapView::new());
+        let settings = Settings::load();
+        let (show_free, show_unknown) = (settings.show_free_space, settings.show_unknown);
+        let treemap = cx.new(|_| TreemapView::with_options(show_free, show_unknown));
         let sub = cx.subscribe_in(
             &treemap,
             window,
@@ -306,7 +312,7 @@ impl FastDir {
             treemap,
             busy: None,
             op: None,
-            settings: Settings::load(),
+            settings,
             available: None,
             checking: false,
             updating: false,
@@ -317,6 +323,41 @@ impl FastDir {
             _update_ticker: None,
             _op_ticker: None,
         }
+    }
+
+    /// Whether the cursor is on a drive pseudo-item (`<Free space>`/`<Unknown>`).
+    pub(super) fn selected_is_special(&self) -> bool {
+        let (Some(tree), Some(path)) = (&self.tree, self.selected_path()) else {
+            return false;
+        };
+        tree.read().get(&path).is_some_and(|n| n.is_special())
+    }
+
+    pub(super) fn toggle_free_space(
+        &mut self,
+        _: &ToggleFreeSpace,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.show_free_space = !self.settings.show_free_space;
+        self.settings.save();
+        let show = self.settings.show_free_space;
+        self.treemap.update(cx, |t, cx| t.set_show_free(show, cx));
+        cx.notify();
+    }
+
+    pub(super) fn toggle_unknown(
+        &mut self,
+        _: &ToggleUnknown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.show_unknown = !self.settings.show_unknown;
+        self.settings.save();
+        let show = self.settings.show_unknown;
+        self.treemap
+            .update(cx, |t, cx| t.set_show_unknown(show, cx));
+        cx.notify();
     }
 
     pub(super) fn render_ready(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -394,6 +435,8 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::toggle_theme))
             .on_action(cx.listener(Self::zoom_in))
             .on_action(cx.listener(Self::zoom_out))
+            .on_action(cx.listener(Self::toggle_free_space))
+            .on_action(cx.listener(Self::toggle_unknown))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))
