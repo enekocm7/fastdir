@@ -184,7 +184,7 @@ impl FastDir {
             let mut t = tree.write();
             for depth in 0..path.len() {
                 if let Some(n) = t.get_mut(&path[..depth]) {
-                    n.expanded = true;
+                    n.set_expanded(true);
                 }
             }
         }
@@ -202,7 +202,7 @@ impl FastDir {
                 let mut t = tree.write();
                 for depth in 0..p.len() {
                     if let Some(n) = t.get_mut(&p[..depth]) {
-                        n.expanded = true;
+                        n.set_expanded(true);
                     }
                 }
             }
@@ -331,6 +331,6 @@ impl FastDir {
         let (Some(tree), Some(row)) = (&self.tree, self.rows.get(ix)) else {
             return false;
         };
-        tree.read().get(&row.path).is_some_and(|n| n.expanded)
+        tree.read().get(&row.path).is_some_and(|n| n.expanded())
     }
 }

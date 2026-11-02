@@ -335,13 +335,14 @@ impl FastDir {
     pub(super) fn splice_subtree(
         &mut self,
         fs: &std::path::Path,
-        mut node: Node,
+        mut node: Subtree,
     ) -> Option<NodePath> {
         let tree = self.tree.as_ref()?;
         let mut t = tree.write();
         let path = t.find(fs)?;
         let parent: NodePath = path[..path.len().checked_sub(1)?].to_vec();
-        node.expanded = t.get(&path).is_some_and(|n| n.expanded);
+        node.root_mut()
+            .set_expanded(t.get(&path).is_some_and(|n| n.expanded()));
         t.remove(&path)?;
         t.insert(&parent, node)
     }
@@ -726,7 +727,7 @@ impl FastDir {
             let mut node = job.await;
             this.update_in(cx, |this, _, cx| {
                 this.busy = None;
-                node.expanded = true;
+                node.root_mut().set_expanded(true);
                 let select = this.tree.as_ref().and_then(|tree| {
                     let mut t = tree.write();
                     let path = t.find(&fs)?;
@@ -765,21 +766,21 @@ struct DeleteOutcome {
     /// The item no longer exists.
     gone: bool,
     /// A fresh scan of what is left of a partly deleted folder.
-    rest: Option<Node>,
+    rest: Option<Subtree>,
     report: fsops::DeleteReport,
 }
 
 /// One item that reached its destination.
 struct MoveOutcome {
     dest: PathBuf,
-    node: Node,
+    node: Subtree,
     leftover: Vec<(PathBuf, String)>,
     /// A fresh scan of the source folder if parts of it could not be removed.
-    rest: Option<Node>,
+    rest: Option<Subtree>,
 }
 
 /// A detached node for a freshly moved file or folder.
-fn measure(path: &std::path::Path) -> Node {
+fn measure(path: &std::path::Path) -> Subtree {
     let meta = std::fs::symlink_metadata(path).ok();
     if meta.as_ref().is_some_and(|m| m.is_dir()) {
         return scanner::scan_subtree(path);
@@ -795,7 +796,7 @@ fn measure(path: &std::path::Path) -> Node {
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_default();
-    Node::file_on_disk(name.into(), size, disk_size, modified)
+    Subtree::file_on_disk(&name, size, disk_size, modified)
 }
 
 /// The first few failed paths with their reasons, one per line.

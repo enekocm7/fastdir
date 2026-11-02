@@ -49,8 +49,8 @@ impl FastDir {
                     if unknown > 0 {
                         format!(
                             "{} files · {} folders · {} scanned of {} used ({} on disk, {} free, {} unknown)",
-                            format::count(t.root.files as u64),
-                            format::count(t.root.dirs as u64),
+                            format::count(t.root().files as u64),
+                            format::count(t.root().dirs as u64),
                             format::bytes(scanned),
                             format::bytes(used),
                             format::bytes(disk),
@@ -60,8 +60,8 @@ impl FastDir {
                     } else {
                         format!(
                             "{} files · {} folders · {} scanned of {} used ({} on disk, {} free)",
-                            format::count(t.root.files as u64),
-                            format::count(t.root.dirs as u64),
+                            format::count(t.root().files as u64),
+                            format::count(t.root().dirs as u64),
                             format::bytes(scanned),
                             format::bytes(used),
                             format::bytes(disk),
@@ -75,10 +75,10 @@ impl FastDir {
                         .find(|d| t.root_path.starts_with(&d.path));
                     format!(
                         "{} files · {} folders · {} ({} on disk){}",
-                        format::count(t.root.files as u64),
-                        format::count(t.root.dirs as u64),
-                        format::bytes(t.root.size),
-                        format::bytes(t.root.disk_size),
+                        format::count(t.root().files as u64),
+                        format::count(t.root().dirs as u64),
+                        format::bytes(t.root().size),
+                        format::bytes(t.root().disk_size),
                         drive
                             .map(|d| format!(" · {} free", format::bytes(d.free)))
                             .unwrap_or_default(),

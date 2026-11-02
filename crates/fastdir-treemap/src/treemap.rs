@@ -9,7 +9,7 @@
 //! and highlighting re-run the layout only along a single path instead of
 //! keeping millions of rectangles in memory.
 
-use fastdir_core::model::{NO_EXT, Node, NodeKind, NodePath};
+use fastdir_core::model::{NO_EXT, Node, NodeKind, NodePath, Tree};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -120,7 +120,7 @@ pub fn ext_color(ext: u16) -> (u8, u8, u8) {
 /// Display colour for a node: pseudo-items get their WinDirStat colours,
 // otherwise the extension colour.
 pub fn node_color(node: &Node) -> (u8, u8, u8) {
-    match node.kind {
+    match node.kind() {
         NodeKind::FreeSpace => FREE_SPACE_COLOR,
         NodeKind::Unknown => UNKNOWN_COLOR,
         _ => ext_color(node.ext),
@@ -249,7 +249,7 @@ fn node_size(node: &Node, use_disk: bool) -> u64 {
 /// Whether `node` is laid out given the pseudo-item flags.
 #[inline]
 fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
-    match node.kind {
+    match node.kind() {
         NodeKind::FreeSpace => show_free,
         NodeKind::Unknown => show_unknown,
         _ => true,
@@ -258,10 +258,9 @@ fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
 
 #[inline]
 fn has_hidden_special(children: &[Node], show_free: bool, show_unknown: bool) -> bool {
-    children.iter().any(|c| {
-        matches!(c.kind, NodeKind::FreeSpace | NodeKind::Unknown)
-            && !is_visible(c, show_free, show_unknown)
-    })
+    children
+        .iter()
+        .any(|c| c.is_special() && !is_visible(c, show_free, show_unknown))
 }
 
 /// Squarify `sizes` (already sorted descending, all > 0) into `rc`. `sizes[i]`
@@ -369,9 +368,9 @@ fn squarify_sizes(
 /// their allocated (on-disk) bytes instead of their logical bytes. The
 /// callback still gets the original child indices.
 ///
-/// Children are stored sorted by logical size (as [`Node::finalize`] keeps
-/// them), which [`squarify`] relies on. Disk-size order can differ, so that
-/// path re-sorts the visible children.
+/// Children are stored sorted by logical size (as [`Tree`] keeps them), which
+/// [`squarify`] relies on. Disk-size order can differ, so that path re-sorts
+/// the visible children.
 fn squarify_filtered(
     children: &[Node],
     total: u64,
@@ -493,6 +492,7 @@ fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light
 
 #[allow(clippy::too_many_arguments)]
 fn draw(
+    tree: &Tree,
     node: &Node,
     rc: Rect,
     surface: Surface,
@@ -515,10 +515,11 @@ fn draw(
     }
     // Stop subdividing once a cell is under a pixel in either direction.
     let size = node_size(node, use_disk);
+    let children = tree.children(node);
     let subdivide =
-        node.is_dir() && size > 0 && !node.children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
+        node.is_dir() && size > 0 && !children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
     if !subdivide {
-        let ext = node.dominant_ext();
+        let ext = tree.dominant_ext(node);
         let mut color = shade_node(node);
         if highlight.is_some_and(|hl| hl != ext) {
             color = dim_color(color);
@@ -527,10 +528,10 @@ fn draw(
         return;
     }
     let h_child = h * SCALE;
-    if depth < 4 && node.children.len() > 1 {
-        let mut cells = Vec::with_capacity(node.children.len().min(4096));
+    if depth < 4 && children.len() > 1 {
+        let mut cells = Vec::with_capacity(children.len().min(4096));
         squarify_filtered(
-            &node.children,
+            children,
             size,
             rc,
             show_free,
@@ -540,7 +541,8 @@ fn draw(
         );
         cells.par_iter().with_min_len(8).for_each(|&(i, r)| {
             draw(
-                &node.children[i],
+                tree,
+                &children[i],
                 r,
                 surface,
                 h_child,
@@ -556,7 +558,7 @@ fn draw(
         });
     } else {
         squarify_filtered(
-            &node.children,
+            children,
             size,
             rc,
             show_free,
@@ -564,7 +566,8 @@ fn draw(
             use_disk,
             |i, r| {
                 draw(
-                    &node.children[i],
+                    tree,
+                    &children[i],
                     r,
                     surface,
                     h_child,
@@ -582,14 +585,15 @@ fn draw(
     }
 }
 
-/// Render the subtree under `root` (the scan root, or the zoomed-in folder)
-/// into a `w`×`h` BGRA buffer. When `highlight` is `Some(ext)`, leaves of that
+/// Render the subtree under `root` (the scan root, or the zoomed-in folder
+/// of `tree`) into a `w`×`h` BGRA buffer. When `highlight` is `Some(ext)`, leaves of that
 /// extension stay in full colour and everything else is dimmed. Drive
 /// pseudo-items are only laid out when `show_free` / `show_unknown` are set
 /// (both off by default, like WinDirStat). `use_disk` sizes cells by their
 /// allocated bytes instead of their logical bytes.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
+    tree: &Tree,
     root: &Node,
     w: u32,
     h: u32,
@@ -625,6 +629,7 @@ pub fn render(
         y1: h as f64,
     };
     draw(
+        tree,
         root,
         rc,
         Surface([0.0; 4]),
@@ -642,10 +647,11 @@ pub fn render(
 }
 
 /// The node under pixel (`x`, `y`), descending as far as the layout goes.
-/// The returned path is relative to `root`. Hidden pseudo-items are never
+/// The returned path is relative to `root`, a node of `tree`. Hidden pseudo-items are never
 /// returned.
 #[allow(clippy::too_many_arguments)]
 pub fn hit_test(
+    tree: &Tree,
     root: &Node,
     w: f64,
     h: f64,
@@ -667,12 +673,13 @@ pub fn hit_test(
     let mut node = root;
     let mut path = Vec::new();
     loop {
-        if !node.is_dir() || node.children.is_empty() || rc.w() < 1.0 || rc.h() < 1.0 {
+        let children = tree.children(node);
+        if !node.is_dir() || children.is_empty() || rc.w() < 1.0 || rc.h() < 1.0 {
             return Some(path);
         }
         let mut found = None;
         squarify_filtered(
-            &node.children,
+            children,
             node_size(node, use_disk),
             rc,
             show_free,
@@ -686,15 +693,16 @@ pub fn hit_test(
         );
         let (i, r) = found?;
         path.push(i as u32);
-        node = &node.children[i];
+        node = &children[i];
         rc = r;
     }
 }
 
-/// The rectangle of the node at `path` (relative to `root`), if it is laid
-/// out at this size. Returns `None` for hidden pseudo-items.
+/// The rectangle of the node at `path` (relative to `root`, a node of
+/// `tree`), if it is laid out at this size. Returns `None` for hidden pseudo-items.
 #[allow(clippy::too_many_arguments)]
 pub fn rect_of(
+    tree: &Tree,
     root: &Node,
     w: f64,
     h: f64,
@@ -714,15 +722,16 @@ pub fn rect_of(
         if rc.w() < 1.0 || rc.h() < 1.0 {
             return Some(rc);
         }
+        let children = tree.children(node);
         // Hidden pseudo-items have no rectangle.
-        if let Some(next) = node.children.get(want as usize)
+        if let Some(next) = children.get(want as usize)
             && !is_visible(next, show_free, show_unknown)
         {
             return None;
         }
         let mut found = None;
         squarify_filtered(
-            &node.children,
+            children,
             node_size(node, use_disk),
             rc,
             show_free,
@@ -735,7 +744,7 @@ pub fn rect_of(
             },
         );
         rc = found?;
-        node = node.children.get(want as usize)?;
+        node = children.get(want as usize)?;
     }
     Some(rc)
 }
@@ -743,22 +752,31 @@ pub fn rect_of(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fastdir_core::model::{Arena, DirBuilder, Subtree};
+    use std::path::PathBuf;
 
-    fn file(name: &str, size: u64) -> Node {
-        Node::file(name.into(), size, 0)
+    /// A one-level tree of files with the given `(name, size, disk_size)`.
+    fn files_tree(files: &[(&str, u64, u64)]) -> Tree {
+        let mut arena = Arena::default();
+        let mut root = DirBuilder::new(0);
+        for &(name, size, disk) in files {
+            root.add_file(name, size, disk, 0);
+        }
+        let root = root.commit(&mut arena);
+        Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
     }
 
-    fn two_file_root() -> Node {
-        let mut root = Node::dir("root".into(), 0);
-        root.children.push(file("large.bin", 6));
-        root.children.push(file("small.txt", 4));
-        root.finalize();
-        root
+    fn two_file_root() -> Tree {
+        files_tree(&[("large.bin", 6, 6), ("small.txt", 4, 4)])
+    }
+
+    fn children_of(tree: &Tree) -> &[Node] {
+        tree.children(tree.root())
     }
 
     #[test]
     fn squarify_tiles_the_whole_rect_without_gaps() {
-        let children = vec![file("a", 6), file("b", 3), file("c", 1)];
+        let tree = files_tree(&[("a", 6, 6), ("b", 3, 3), ("c", 1, 1)]);
         let rc = Rect {
             x0: 0.0,
             y0: 0.0,
@@ -766,7 +784,7 @@ mod tests {
             y1: 80.0,
         };
         let mut cells = Vec::new();
-        squarify(&children, 10, rc, |i, r| cells.push((i, r)));
+        squarify(children_of(&tree), 10, rc, |i, r| cells.push((i, r)));
 
         assert_eq!(cells.len(), 3);
         let area: f64 = cells.iter().map(|(_, r)| r.w() * r.h()).sum();
@@ -779,7 +797,7 @@ mod tests {
 
     #[test]
     fn squarify_ignores_zero_sized_children() {
-        let children = vec![file("a", 5), file("b", 5), file("empty", 0)];
+        let tree = files_tree(&[("a", 5, 5), ("b", 5, 5), ("empty", 0, 0)]);
         let rc = Rect {
             x0: 0.0,
             y0: 0.0,
@@ -787,7 +805,7 @@ mod tests {
             y1: 10.0,
         };
         let mut cells = Vec::new();
-        squarify(&children, 10, rc, |i, r| cells.push((i, r)));
+        squarify(children_of(&tree), 10, rc, |i, r| cells.push((i, r)));
         assert_eq!(
             cells.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
             vec![0, 1]
@@ -796,46 +814,51 @@ mod tests {
 
     #[test]
     fn rect_of_and_hit_test_agree() {
-        let root = two_file_root();
-        let r = rect_of(&root, 100.0, 100.0, &[0], false, false, false).unwrap();
+        let tree = two_file_root();
+        let root = tree.root();
+        let r = rect_of(&tree, root, 100.0, 100.0, &[0], false, false, false).unwrap();
         let (x, y) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
         assert_eq!(
-            hit_test(&root, 100.0, 100.0, x, y, false, false, false),
+            hit_test(&tree, root, 100.0, 100.0, x, y, false, false, false),
             Some(vec![0])
         );
 
         assert_eq!(
-            hit_test(&root, 100.0, 100.0, -1.0, 0.0, false, false, false),
+            hit_test(&tree, root, 100.0, 100.0, -1.0, 0.0, false, false, false),
             None
         );
         assert_eq!(
-            rect_of(&root, 100.0, 100.0, &[99], false, false, false),
+            rect_of(&tree, root, 100.0, 100.0, &[99], false, false, false),
             None
         );
     }
 
     #[test]
     fn disk_mode_sizes_cells_by_allocated_bytes() {
-        let mut root = Node::dir("root".into(), 0);
         // Logical order: compressed (100) then small (10).
-        root.children
-            .push(Node::file_on_disk("compressed.bin".into(), 100, 512, 0));
-        root.children
-            .push(Node::file_on_disk("small.bin".into(), 10, 8192, 0));
-        root.finalize();
-        let compressed = root
-            .children
-            .iter()
-            .position(|n| &*n.name == "compressed.bin")
-            .unwrap() as u32;
-        let small = root
-            .children
-            .iter()
-            .position(|n| &*n.name == "small.bin")
-            .unwrap() as u32;
+        let tree = files_tree(&[("compressed.bin", 100, 512), ("small.bin", 10, 8192)]);
+        let root = tree.root();
+        let position = |name: &str| {
+            children_of(&tree)
+                .iter()
+                .position(|n| tree.name(n) == name)
+                .unwrap() as u32
+        };
+        let compressed = position("compressed.bin");
+        let small = position("small.bin");
 
-        let logical = rect_of(&root, 100.0, 100.0, &[compressed], false, false, false).unwrap();
-        let disk = rect_of(&root, 100.0, 100.0, &[small], false, false, true).unwrap();
+        let logical = rect_of(
+            &tree,
+            root,
+            100.0,
+            100.0,
+            &[compressed],
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        let disk = rect_of(&tree, root, 100.0, 100.0, &[small], false, false, true).unwrap();
         assert!(
             disk.w() * disk.h() > logical.w() * logical.h(),
             "disk-sized small file should be the larger cell"
@@ -852,32 +875,53 @@ mod tests {
 
     #[test]
     fn pseudo_item_colours_match_windirstat() {
-        assert_eq!(node_color(&Node::free_space(1)), FREE_SPACE_COLOR);
-        assert_eq!(node_color(&Node::unknown(1)), UNKNOWN_COLOR);
-        assert_eq!(node_color(&file("a.txt", 1)), OTHER);
+        let mut tree = files_tree(&[("a.txt", 1, 1)]);
+        tree.attach_volume_info(100, 50);
+        let colour = |kind: NodeKind| {
+            node_color(
+                children_of(&tree)
+                    .iter()
+                    .find(|n| n.kind() == kind)
+                    .unwrap(),
+            )
+        };
+        assert_eq!(colour(NodeKind::FreeSpace), FREE_SPACE_COLOR);
+        assert_eq!(colour(NodeKind::Unknown), UNKNOWN_COLOR);
+        assert_eq!(colour(NodeKind::File), ext_color(0));
+        assert_eq!(node_color(Subtree::file("x", 1, 0).root()), OTHER);
     }
 
     #[test]
     fn render_writes_an_opaque_bgra_buffer() {
-        let root = two_file_root();
-        let buf = render(&root, 16, 16, [24, 24, 27], None, false, false, false);
+        let tree = two_file_root();
+        let buf = render(
+            &tree,
+            tree.root(),
+            16,
+            16,
+            [24, 24, 27],
+            None,
+            false,
+            false,
+            false,
+        );
         assert_eq!(buf.len(), 16 * 16 * 4);
         assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
     }
 
     #[test]
     fn hidden_pseudo_items_are_skipped() {
-        let mut root = Node::dir("root".into(), 0);
-        root.children.push(file("real", 50));
-        root.children.push(Node::free_space(30));
-        root.children.push(Node::unknown(20));
-        root.finalize();
+        let mut tree = files_tree(&[("real", 50, 50)]);
+        // scanned 50, used 70 -> unknown 20, free 30.
+        tree.attach_volume_info(100, 30);
+        let root = tree.root();
         assert_eq!(root.size, 100);
+        assert_eq!(tree.name(&children_of(&tree)[0]), "real");
 
         // Hidden: only the real file is laid out over the whole rect.
         let mut cells = Vec::new();
         squarify_filtered(
-            &root.children,
+            children_of(&tree),
             root.size,
             test_rect(),
             false,
@@ -892,7 +936,7 @@ mod tests {
         // Shown: all three take part.
         let mut cells = Vec::new();
         squarify_filtered(
-            &root.children,
+            children_of(&tree),
             root.size,
             test_rect(),
             true,
@@ -903,11 +947,14 @@ mod tests {
         assert_eq!(cells.len(), 3);
 
         // hit_test never returns hidden pseudo-items.
-        let hit = hit_test(&root, 100.0, 80.0, 50.0, 40.0, false, false, false).unwrap();
+        let hit = hit_test(&tree, root, 100.0, 80.0, 50.0, 40.0, false, false, false).unwrap();
         assert_eq!(hit, vec![0]);
         // rect_of returns None for hidden pseudo-items.
-        assert_eq!(rect_of(&root, 100.0, 80.0, &[1], false, false, false), None);
-        assert!(rect_of(&root, 100.0, 80.0, &[1], true, false, false).is_some());
+        assert_eq!(
+            rect_of(&tree, root, 100.0, 80.0, &[1], false, false, false),
+            None
+        );
+        assert!(rect_of(&tree, root, 100.0, 80.0, &[1], true, false, false).is_some());
     }
 
     fn test_rect() -> Rect {

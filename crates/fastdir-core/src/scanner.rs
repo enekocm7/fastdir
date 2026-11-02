@@ -7,7 +7,7 @@
 //! level, which returns name, size, attributes and timestamps for a whole
 //! batch of entries in one kernel call — no per-file `stat`.
 
-use crate::model::{Node, Tree};
+use crate::model::{Arena, DirBuilder, Node, Subtree, Tree};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -89,12 +89,10 @@ fn pool() -> &'static rayon::ThreadPool {
 /// Scan `root` (blocking). Call from a background thread.
 pub fn scan(root: PathBuf, progress: Arc<Progress>) -> ScanResult {
     let start = Instant::now();
-    let links = LinkTracker::default();
     let tree = pool().install(|| {
-        let name: Box<str> = root.to_string_lossy().into();
-        let mut node = scan_dir(&root, name, 0, &progress, &links);
-        node.expanded = true;
-        Tree::new(node, root.clone())
+        let mut sub = scan_detached(&root, &root.to_string_lossy(), &progress);
+        sub.root_mut().set_expanded(true);
+        Tree::new(sub, root.clone())
     });
     ScanResult {
         tree,
@@ -103,16 +101,26 @@ pub fn scan(root: PathBuf, progress: Arc<Progress>) -> ScanResult {
     }
 }
 
-/// Scan a single directory into a detached node (used after a move so the
+/// Scan a single directory into a detached subtree (used after a move so the
 /// destination reflects reality).
-pub fn scan_subtree(path: &Path) -> Node {
+pub fn scan_subtree(path: &Path) -> Subtree {
     let progress = Progress::default();
-    let name: Box<str> = path
+    let name = path
         .file_name()
-        .map(|n| n.to_string_lossy().into())
-        .unwrap_or_else(|| path.to_string_lossy().into());
-    let links = LinkTracker::default();
-    pool().install(|| scan_dir(path, name, 0, &progress, &links))
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy();
+    pool().install(|| scan_detached(path, &name, &progress))
+}
+
+/// Scan `path` into a new arena. The hard-link tracker only lives for the
+/// scan itself, so it is freed before the caller builds anything on top.
+fn scan_detached(path: &Path, name: &str, progress: &Progress) -> Subtree {
+    let arena = Mutex::new(Arena::default());
+    let root = {
+        let links = LinkTracker::default();
+        scan_dir(path, 0, progress, &links, &arena)
+    };
+    Subtree::new(arena.into_inner(), name, root)
 }
 
 /// Allocated size of a single file (compressed/sparse aware where the OS
@@ -148,16 +156,19 @@ pub fn allocated_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
+/// Scan one directory (and, in parallel, everything below it). Each
+/// directory's children are stored in `arena` as soon as they are final.
+/// Returns the directory's node; its parent supplies the name.
 fn scan_dir(
     path: &Path,
-    name: Box<str>,
     modified: i64,
     progress: &Progress,
     links: &LinkTracker,
+    arena: &Mutex<Arena>,
 ) -> Node {
-    let mut node = Node::dir(name, modified);
+    let mut node = DirBuilder::new(modified);
     if progress.cancelled() {
-        return node;
+        return node.commit(&mut arena.lock());
     }
     if let Some(mut cur) = progress.current.try_lock() {
         cur.clear();
@@ -180,21 +191,20 @@ fn scan_dir(
             // A zero-length file shares no blocks, so its link count is
             // irrelevant; skip it to keep the tracker small.
             if size > 0 && links.is_duplicate(file_id) {
-                node.children.push(Node::hard_link(name, modified));
+                node.add_hard_link(&name, modified);
             } else {
-                node.children
-                    .push(Node::file_on_disk(name, size, disk_size, modified));
+                node.add_file(&name, size, disk_size, modified);
             }
         }
         Entry::Dir { name, modified } => subdirs.push((name, modified)),
         Entry::Link { name, modified } => {
             // Junctions / symlinked dirs: list them but never follow (avoids
             // cycles and double counting, same as WinDirStat).
-            node.children.push(Node::dir(name, modified));
+            node.add_empty_dir(&name, modified);
         }
     });
     if !ok {
-        node.error = true;
+        node.set_error();
         progress.errors.fetch_add(1, Ordering::Relaxed);
     }
     progress.files.fetch_add(files, Ordering::Relaxed);
@@ -204,18 +214,21 @@ fn scan_dir(
         .fetch_add(subdirs.len() as u64, Ordering::Relaxed);
 
     if !subdirs.is_empty() {
-        let children: Vec<Node> = subdirs
+        let children: Vec<(Box<str>, Node)> = subdirs
             .into_par_iter()
             .map(|(name, modified)| {
                 let child_path = path.join(&*name);
-                scan_dir(&child_path, name, modified, progress, links)
+                let child = scan_dir(&child_path, modified, progress, links, arena);
+                (name, child)
             })
             .collect();
-        node.children.extend(children);
+        for (name, child) in children {
+            node.add_dir(&name, child);
+        }
     }
-    node.children.shrink_to_fit();
-    node.finalize();
-    node
+    // Sort outside the lock; only the copy into the arena is serialised.
+    node.finish();
+    node.commit(&mut arena.lock())
 }
 
 enum Entry {
@@ -621,9 +634,10 @@ mod tests {
 
         let result = scan(dir.clone(), Arc::new(Progress::default()));
         assert!(!result.cancelled);
-        assert_eq!(result.tree.root.files, 3);
-        assert_eq!(result.tree.root.dirs, 1);
-        assert_eq!(result.tree.root.size, 15);
+        assert_eq!(result.tree.root().files, 3);
+        assert_eq!(result.tree.root().dirs, 1);
+        assert_eq!(result.tree.root().size, 15);
+        assert!(result.tree.root().expanded());
         assert!(result.tree.find(&dir.join("sub/b.bin")).is_some());
 
         let sub = result.tree.find(&dir.join("sub")).unwrap();
@@ -679,14 +693,13 @@ mod tests {
         }
 
         let result = scan(dir.clone(), Arc::new(Progress::default()));
-        assert_eq!(result.tree.root.files, 2);
-        assert_eq!(result.tree.root.size, 4096);
-        let links: Vec<_> = result
-            .tree
-            .root
-            .children
+        let tree = &result.tree;
+        assert_eq!(tree.root().files, 2);
+        assert_eq!(tree.root().size, 4096);
+        let links: Vec<_> = tree
+            .children(tree.root())
             .iter()
-            .filter(|n| n.hard_link)
+            .filter(|n| n.hard_link())
             .collect();
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].size, 0);
@@ -699,10 +712,12 @@ mod tests {
     fn scan_subtree_returns_a_detached_node() {
         let dir = temp_dir();
         std::fs::write(dir.join("one.txt"), b"1234").unwrap();
-        let node = scan_subtree(&dir);
+        let sub = scan_subtree(&dir);
+        let node = sub.root();
         assert!(node.is_dir());
         assert_eq!(node.files, 1);
         assert_eq!(node.size, 4);
+        assert_eq!(sub.name(&sub.children(node)[0]), "one.txt");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -714,7 +729,7 @@ mod tests {
         progress.cancel.store(true, Ordering::Relaxed);
         let result = scan(dir.clone(), progress);
         assert!(result.cancelled);
-        assert_eq!(result.tree.root.files, 0);
+        assert_eq!(result.tree.root().files, 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -722,6 +737,6 @@ mod tests {
     fn missing_directory_is_marked_as_an_error() {
         let dir = temp_dir().join("does-not-exist");
         let result = scan(dir, Arc::new(Progress::default()));
-        assert!(result.tree.root.error);
+        assert!(result.tree.root().error());
     }
 }

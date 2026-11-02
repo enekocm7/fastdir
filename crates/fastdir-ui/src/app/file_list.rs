@@ -3,27 +3,27 @@
 use super::*;
 
 impl FastDir {
-    pub(super) fn child_order(node: &Node, sort: (SortKey, bool)) -> Vec<u32> {
-        let mut idx: Vec<u32> = (0..node.children.len() as u32).collect();
+    pub(super) fn child_order(tree: &Tree, node: &Node, sort: (SortKey, bool)) -> Vec<u32> {
+        let c = tree.children(node);
+        let mut idx: Vec<u32> = (0..c.len() as u32).collect();
         let (key, desc) = sort;
         if key == SortKey::Size && desc {
             return idx; // children are stored in this order
         }
-        let c = &node.children;
         idx.sort_by(|&a, &b| {
             let (a, b) = (&c[a as usize], &c[b as usize]);
             let ord = match key {
-                SortKey::Name => b
-                    .is_dir()
-                    .cmp(&a.is_dir())
-                    .reverse()
-                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                SortKey::Name => b.is_dir().cmp(&a.is_dir()).reverse().then_with(|| {
+                    tree.name(a)
+                        .to_lowercase()
+                        .cmp(&tree.name(b).to_lowercase())
+                }),
                 SortKey::Size => a.size.cmp(&b.size),
                 SortKey::Disk => a.disk_size.cmp(&b.disk_size),
                 SortKey::Items => a.items().cmp(&b.items()),
                 SortKey::Files => a.files.cmp(&b.files),
                 SortKey::Dirs => a.dirs.cmp(&b.dirs),
-                SortKey::Modified => a.modified.cmp(&b.modified),
+                SortKey::Modified => a.modified().cmp(&b.modified()),
             };
             if desc { ord.reverse() } else { ord }
         });
@@ -42,6 +42,7 @@ impl FastDir {
         };
         let tree = tree.read();
         fn walk(
+            tree: &Tree,
             node: &Node,
             path: &mut NodePath,
             depth: u16,
@@ -52,16 +53,17 @@ impl FastDir {
                 path: path.clone(),
                 depth,
             });
-            if node.expanded && node.is_dir() {
-                for i in FastDir::child_order(node, sort) {
+            if node.expanded() && node.is_dir() {
+                let children = tree.children(node);
+                for i in FastDir::child_order(tree, node, sort) {
                     path.push(i);
-                    walk(&node.children[i as usize], path, depth + 1, rows, sort);
+                    walk(tree, &children[i as usize], path, depth + 1, rows, sort);
                     path.pop();
                 }
             }
         }
         let mut path = Vec::new();
-        walk(&tree.root, &mut path, 0, &mut self.rows, self.sort);
+        walk(&tree, tree.root(), &mut path, 0, &mut self.rows, self.sort);
         self.ext_rows = (0..tree.exts.len() as u16)
             .filter(|&i| tree.exts[i as usize].files > 0)
             .collect();
@@ -85,10 +87,10 @@ impl FastDir {
             let Some(n) = t.get_mut(&row.path) else {
                 return;
             };
-            if !n.is_dir() || n.children.is_empty() {
+            if !n.is_dir() || !n.has_children() {
                 return;
             }
-            n.expanded = expanded.unwrap_or(!n.expanded);
+            n.set_expanded(expanded.unwrap_or(!n.expanded()));
         }
         self.selected = Some(ix);
         self.rebuild_rows();
@@ -119,7 +121,7 @@ impl FastDir {
         };
         let tree = tree.read();
         let theme = cx.theme();
-        let total = tree.root.size.max(1);
+        let total = tree.root().size.max(1);
         let selected = self.selected;
         let fg = theme.foreground;
         let muted = theme.muted_foreground;
@@ -155,7 +157,7 @@ impl FastDir {
                 self.marked.contains(&row.path)
             };
             let is_dir = node.is_dir();
-            let has_children = is_dir && !node.children.is_empty();
+            let has_children = is_dir && node.has_children();
             let depth = row.depth as f32;
             let bar_color = rgb(DEPTH_COLORS[row.depth as usize % DEPTH_COLORS.len()]);
             let icon = if node.is_special() {
@@ -170,7 +172,7 @@ impl FastDir {
                     .text_color(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32))
             } else if row.path.is_empty() {
                 Icon::new(IconName::HardDrive).xsmall().text_color(muted)
-            } else if node.expanded {
+            } else if node.expanded() {
                 Icon::new(IconName::FolderOpen)
                     .xsmall()
                     .text_color(rgb(0xe0b04a))
@@ -190,7 +192,7 @@ impl FastDir {
                 .when(has_children, |d| {
                     d.hover(|s| s.bg(track))
                         .child(
-                            Icon::new(if node.expanded {
+                            Icon::new(if node.expanded() {
                                 IconName::ChevronDown
                             } else {
                                 IconName::ChevronRight
@@ -217,7 +219,7 @@ impl FastDir {
                     .whitespace_nowrap()
                     .child(s)
             };
-            let name_color = if node.error { danger } else { fg };
+            let name_color = if node.error() { danger } else { fg };
             let el = h_flex()
                 .id(("row", ix))
                 .h(px(ROW_H))
@@ -267,9 +269,9 @@ impl FastDir {
                                 .text_ellipsis()
                                 .text_color(name_color)
                                 .when(is_dir, |d| d.font_weight(FontWeight::MEDIUM))
-                                .child(SharedString::from(node.name.to_string())),
+                                .child(SharedString::from(tree.name(node).to_string())),
                         )
-                        .when(node.hard_link, |d| {
+                        .when(node.hard_link(), |d| {
                             d.child(div().flex_shrink_0().text_color(muted).child("hard link"))
                         }),
                 )
@@ -320,7 +322,7 @@ impl FastDir {
                     )
                     .text_color(muted),
                 )
-                .child(num(COL_DATE, format::date(node.modified)).text_color(muted));
+                .child(num(COL_DATE, format::date(node.modified())).text_color(muted));
             let _ = total;
             out.push(el.into_any_element());
         }
@@ -499,7 +501,7 @@ impl FastDir {
         };
         let tree = tree.read();
         let theme = cx.theme();
-        let total = tree.root.size.max(1);
+        let total = tree.root().size.max(1);
         let muted = theme.muted_foreground;
         let even = theme.list_even;
         let active = theme.list_active;
