@@ -175,7 +175,11 @@ pub fn squarify(children: &[Node], total: u64, rc: Rect, mut f: impl FnMut(usize
             let thickness = new_sum * area_per_byte / side;
             let ratio = |sz: f64| {
                 let len = sz * area_per_byte / thickness;
-                if len > thickness { len / thickness } else { thickness / len }
+                if len > thickness {
+                    len / thickness
+                } else {
+                    thickness / len
+                }
             };
             let new_worst = ratio(max_size).max(ratio(s));
             if end > start && new_worst > worst {
@@ -236,6 +240,12 @@ pub fn squarify(children: &[Node], total: u64, rc: Rect, mut f: impl FnMut(usize
     }
 }
 
+/// The metric used to size a cell: logical bytes or allocated bytes.
+#[inline]
+fn node_size(node: &Node, use_disk: bool) -> u64 {
+    if use_disk { node.disk_size } else { node.size }
+}
+
 /// Whether `node` is laid out given the pseudo-item flags.
 #[inline]
 fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
@@ -290,7 +300,11 @@ fn squarify_sizes(
             let thickness = new_sum * area_per_byte / side;
             let ratio = |sz: f64| {
                 let len = sz * area_per_byte / thickness;
-                if len > thickness { len / thickness } else { thickness / len }
+                if len > thickness {
+                    len / thickness
+                } else {
+                    thickness / len
+                }
             };
             let new_worst = ratio(max_size).max(ratio(s));
             if end > start && new_worst > worst {
@@ -351,36 +365,44 @@ fn squarify_sizes(
     }
 }
 
-/// Like [`squarify`], but skips hidden pseudo-items. The callback still gets
-/// the original child indices. Children are assumed sorted by size, largest
-/// first (as [`Node::finalize`] keeps them).
+/// Like [`squarify`], but skips hidden pseudo-items and can size cells by
+/// their allocated (on-disk) bytes instead of their logical bytes. The
+/// callback still gets the original child indices.
+///
+/// Children are stored sorted by logical size (as [`Node::finalize`] keeps
+/// them), which [`squarify`] relies on. Disk-size order can differ, so that
+/// path re-sorts the visible children.
 fn squarify_filtered(
     children: &[Node],
     total: u64,
     rc: Rect,
     show_free: bool,
     show_unknown: bool,
+    use_disk: bool,
     f: impl FnMut(usize, Rect),
 ) {
-    if !has_hidden_special(children, show_free, show_unknown) {
+    if !use_disk && !has_hidden_special(children, show_free, show_unknown) {
         squarify(children, total, rc, f);
         return;
     }
-    let mut sizes = Vec::with_capacity(children.len());
-    let mut indices = Vec::with_capacity(children.len());
-    let mut visible_total = 0u64;
-    for (i, c) in children.iter().enumerate() {
-        if c.size == 0 {
-            break;
-        }
-        if !is_visible(c, show_free, show_unknown) {
-            continue;
-        }
-        sizes.push(c.size);
-        indices.push(i);
-        visible_total += c.size;
+
+    let mut entries: Vec<(u64, usize)> = children
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| is_visible(c, show_free, show_unknown))
+        .map(|(i, c)| (node_size(c, use_disk), i))
+        .filter(|&(size, _)| size > 0)
+        .collect();
+    if entries.is_empty() {
+        return;
     }
-    squarify_sizes(&sizes, &indices, visible_total, rc, f);
+    if use_disk {
+        entries.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    }
+    let total: u64 = entries.iter().map(|&(size, _)| size).sum();
+    let sizes: Vec<u64> = entries.iter().map(|&(size, _)| size).collect();
+    let indices: Vec<usize> = entries.iter().map(|&(_, i)| i).collect();
+    squarify_sizes(&sizes, &indices, total, rc, f);
 }
 
 #[derive(Clone, Copy)]
@@ -443,7 +465,8 @@ fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light
         let row = unsafe { t.ptr.add((iy * t.w + x0) * 4) };
         for (k, ix) in (x0..x1).enumerate() {
             let nx = -(2.0 * s0 * (ix as f64 + 0.5) + s2);
-            let mut cosa = (nx * light.lx + ny * light.ly + light.lz) / (nx * nx + ny * ny + 1.0).sqrt();
+            let mut cosa =
+                (nx * light.lx + ny * light.ly + light.lz) / (nx * nx + ny * ny + 1.0).sqrt();
             if cosa > 1.0 {
                 cosa = 1.0;
             }
@@ -468,6 +491,7 @@ fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw(
     node: &Node,
     rc: Rect,
@@ -480,6 +504,7 @@ fn draw(
     highlight: Option<u16>,
     show_free: bool,
     show_unknown: bool,
+    use_disk: bool,
 ) {
     if rc.w() <= 0.0 || rc.h() <= 0.0 {
         return;
@@ -489,7 +514,9 @@ fn draw(
         surface.add_ridge(&rc, h);
     }
     // Stop subdividing once a cell is under a pixel in either direction.
-    let subdivide = node.is_dir() && node.size > 0 && !node.children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
+    let size = node_size(node, use_disk);
+    let subdivide =
+        node.is_dir() && size > 0 && !node.children.is_empty() && rc.w() >= 1.0 && rc.h() >= 1.0;
     if !subdivide {
         let ext = node.dominant_ext();
         let mut color = shade_node(node);
@@ -504,10 +531,11 @@ fn draw(
         let mut cells = Vec::with_capacity(node.children.len().min(4096));
         squarify_filtered(
             &node.children,
-            node.size,
+            size,
             rc,
             show_free,
             show_unknown,
+            use_disk,
             |i, r| cells.push((i, r)),
         );
         cells.par_iter().with_min_len(8).for_each(|&(i, r)| {
@@ -523,15 +551,17 @@ fn draw(
                 highlight,
                 show_free,
                 show_unknown,
+                use_disk,
             );
         });
     } else {
         squarify_filtered(
             &node.children,
-            node.size,
+            size,
             rc,
             show_free,
             show_unknown,
+            use_disk,
             |i, r| {
                 draw(
                     &node.children[i],
@@ -545,6 +575,7 @@ fn draw(
                     highlight,
                     show_free,
                     show_unknown,
+                    use_disk,
                 );
             },
         );
@@ -555,7 +586,9 @@ fn draw(
 /// into a `w`×`h` BGRA buffer. When `highlight` is `Some(ext)`, leaves of that
 /// extension stay in full colour and everything else is dimmed. Drive
 /// pseudo-items are only laid out when `show_free` / `show_unknown` are set
-/// (both off by default, like WinDirStat).
+/// (both off by default, like WinDirStat). `use_disk` sizes cells by their
+/// allocated bytes instead of their logical bytes.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     root: &Node,
     w: u32,
@@ -564,6 +597,7 @@ pub fn render(
     highlight: Option<u16>,
     show_free: bool,
     show_unknown: bool,
+    use_disk: bool,
 ) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let mut buf = vec![0u8; w * h * 4];
@@ -602,6 +636,7 @@ pub fn render(
         highlight,
         show_free,
         show_unknown,
+        use_disk,
     );
     buf
 }
@@ -609,6 +644,7 @@ pub fn render(
 /// The node under pixel (`x`, `y`), descending as far as the layout goes.
 /// The returned path is relative to `root`. Hidden pseudo-items are never
 /// returned.
+#[allow(clippy::too_many_arguments)]
 pub fn hit_test(
     root: &Node,
     w: f64,
@@ -617,6 +653,7 @@ pub fn hit_test(
     y: f64,
     show_free: bool,
     show_unknown: bool,
+    use_disk: bool,
 ) -> Option<NodePath> {
     let mut rc = Rect {
         x0: 0.0,
@@ -636,10 +673,11 @@ pub fn hit_test(
         let mut found = None;
         squarify_filtered(
             &node.children,
-            node.size,
+            node_size(node, use_disk),
             rc,
             show_free,
             show_unknown,
+            use_disk,
             |i, r| {
                 if found.is_none() && r.contains(x, y) {
                     found = Some((i, r));
@@ -655,6 +693,7 @@ pub fn hit_test(
 
 /// The rectangle of the node at `path` (relative to `root`), if it is laid
 /// out at this size. Returns `None` for hidden pseudo-items.
+#[allow(clippy::too_many_arguments)]
 pub fn rect_of(
     root: &Node,
     w: f64,
@@ -662,6 +701,7 @@ pub fn rect_of(
     path: &[u32],
     show_free: bool,
     show_unknown: bool,
+    use_disk: bool,
 ) -> Option<Rect> {
     let mut rc = Rect {
         x0: 0.0,
@@ -683,10 +723,11 @@ pub fn rect_of(
         let mut found = None;
         squarify_filtered(
             &node.children,
-            node.size,
+            node_size(node, use_disk),
             rc,
             show_free,
             show_unknown,
+            use_disk,
             |i, r| {
                 if i == want as usize {
                     found = Some(r);
@@ -756,15 +797,49 @@ mod tests {
     #[test]
     fn rect_of_and_hit_test_agree() {
         let root = two_file_root();
-        let r = rect_of(&root, 100.0, 100.0, &[0], false, false).unwrap();
+        let r = rect_of(&root, 100.0, 100.0, &[0], false, false, false).unwrap();
         let (x, y) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
         assert_eq!(
-            hit_test(&root, 100.0, 100.0, x, y, false, false),
+            hit_test(&root, 100.0, 100.0, x, y, false, false, false),
             Some(vec![0])
         );
 
-        assert_eq!(hit_test(&root, 100.0, 100.0, -1.0, 0.0, false, false), None);
-        assert_eq!(rect_of(&root, 100.0, 100.0, &[99], false, false), None);
+        assert_eq!(
+            hit_test(&root, 100.0, 100.0, -1.0, 0.0, false, false, false),
+            None
+        );
+        assert_eq!(
+            rect_of(&root, 100.0, 100.0, &[99], false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn disk_mode_sizes_cells_by_allocated_bytes() {
+        let mut root = Node::dir("root".into(), 0);
+        // Logical order: compressed (100) then small (10).
+        root.children
+            .push(Node::file_on_disk("compressed.bin".into(), 100, 512, 0));
+        root.children
+            .push(Node::file_on_disk("small.bin".into(), 10, 8192, 0));
+        root.finalize();
+        let compressed = root
+            .children
+            .iter()
+            .position(|n| &*n.name == "compressed.bin")
+            .unwrap() as u32;
+        let small = root
+            .children
+            .iter()
+            .position(|n| &*n.name == "small.bin")
+            .unwrap() as u32;
+
+        let logical = rect_of(&root, 100.0, 100.0, &[compressed], false, false, false).unwrap();
+        let disk = rect_of(&root, 100.0, 100.0, &[small], false, false, true).unwrap();
+        assert!(
+            disk.w() * disk.h() > logical.w() * logical.h(),
+            "disk-sized small file should be the larger cell"
+        );
     }
 
     #[test]
@@ -785,7 +860,7 @@ mod tests {
     #[test]
     fn render_writes_an_opaque_bgra_buffer() {
         let root = two_file_root();
-        let buf = render(&root, 16, 16, [24, 24, 27], None, false, false);
+        let buf = render(&root, 16, 16, [24, 24, 27], None, false, false, false);
         assert_eq!(buf.len(), 16 * 16 * 4);
         assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
     }
@@ -807,6 +882,7 @@ mod tests {
             test_rect(),
             false,
             false,
+            false,
             |i, r| cells.push((i, r)),
         );
         assert_eq!(cells.len(), 1);
@@ -821,16 +897,17 @@ mod tests {
             test_rect(),
             true,
             true,
+            false,
             |i, r| cells.push((i, r)),
         );
         assert_eq!(cells.len(), 3);
 
         // hit_test never returns hidden pseudo-items.
-        let hit = hit_test(&root, 100.0, 80.0, 50.0, 40.0, false, false).unwrap();
+        let hit = hit_test(&root, 100.0, 80.0, 50.0, 40.0, false, false, false).unwrap();
         assert_eq!(hit, vec![0]);
         // rect_of returns None for hidden pseudo-items.
-        assert_eq!(rect_of(&root, 100.0, 80.0, &[1], false, false), None);
-        assert!(rect_of(&root, 100.0, 80.0, &[1], true, false).is_some());
+        assert_eq!(rect_of(&root, 100.0, 80.0, &[1], false, false, false), None);
+        assert!(rect_of(&root, 100.0, 80.0, &[1], true, false, false).is_some());
     }
 
     fn test_rect() -> Rect {

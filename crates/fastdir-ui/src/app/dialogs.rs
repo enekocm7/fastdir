@@ -790,11 +790,12 @@ fn measure(path: &std::path::Path) -> Node {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+    let disk_size = scanner::allocated_size(path);
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_default();
-    Node::file(name.into(), size, modified)
+    Node::file_on_disk(name.into(), size, disk_size, modified)
 }
 
 /// The first few failed paths with their reasons, one per line.

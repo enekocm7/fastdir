@@ -16,6 +16,8 @@ pub struct Settings {
     pub show_free_space: bool,
     /// Show `<Unknown>` in the treemap (F7, off by default like WinDirStat).
     pub show_unknown: bool,
+    /// Size treemap cells by allocated (on-disk) bytes instead of logical bytes.
+    pub treemap_disk_size: bool,
 }
 
 impl Default for Settings {
@@ -26,6 +28,7 @@ impl Default for Settings {
             last_run_version: None,
             show_free_space: false,
             show_unknown: false,
+            treemap_disk_size: false,
         }
     }
 }
@@ -70,6 +73,7 @@ mod tests {
         assert!(s.skipped_version.is_none());
         assert!(!s.show_free_space);
         assert!(!s.show_unknown);
+        assert!(!s.treemap_disk_size);
     }
 
     #[test]
@@ -80,11 +84,13 @@ mod tests {
             last_run_version: Some("0.1.0".into()),
             show_free_space: true,
             show_unknown: true,
+            treemap_disk_size: true,
         };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert!(!back.auto_check_updates);
         assert_eq!(back.skipped_version.as_deref(), Some("0.2.0"));
         assert!(back.show_free_space);
         assert!(back.show_unknown);
+        assert!(back.treemap_disk_size);
     }
 }

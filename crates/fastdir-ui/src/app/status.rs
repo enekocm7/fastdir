@@ -45,23 +45,26 @@ impl FastDir {
                     let used = t.used_bytes();
                     let free = t.free_bytes().unwrap_or(0);
                     let unknown = t.unknown_bytes().unwrap_or(0);
+                    let disk = t.scanned_disk_bytes();
                     if unknown > 0 {
                         format!(
-                            "{} files · {} folders · {} scanned of {} used ({} free, {} unknown)",
+                            "{} files · {} folders · {} scanned of {} used ({} on disk, {} free, {} unknown)",
                             format::count(t.root.files as u64),
                             format::count(t.root.dirs as u64),
                             format::bytes(scanned),
                             format::bytes(used),
+                            format::bytes(disk),
                             format::bytes(free),
                             format::bytes(unknown),
                         )
                     } else {
                         format!(
-                            "{} files · {} folders · {} scanned of {} used ({} free)",
+                            "{} files · {} folders · {} scanned of {} used ({} on disk, {} free)",
                             format::count(t.root.files as u64),
                             format::count(t.root.dirs as u64),
                             format::bytes(scanned),
                             format::bytes(used),
+                            format::bytes(disk),
                             format::bytes(free),
                         )
                     }
@@ -71,10 +74,11 @@ impl FastDir {
                         .iter()
                         .find(|d| t.root_path.starts_with(&d.path));
                     format!(
-                        "{} files · {} folders · {}{}",
+                        "{} files · {} folders · {} ({} on disk){}",
                         format::count(t.root.files as u64),
                         format::count(t.root.dirs as u64),
                         format::bytes(t.root.size),
+                        format::bytes(t.root.disk_size),
                         drive
                             .map(|d| format!(" · {} free", format::bytes(d.free)))
                             .unwrap_or_default(),

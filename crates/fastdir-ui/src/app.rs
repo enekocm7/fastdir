@@ -120,6 +120,7 @@ const ROW_H: f32 = 22.;
 const COL_BAR: f32 = 110.;
 const COL_PCT: f32 = 62.;
 const COL_SIZE: f32 = 92.;
+const COL_DISK: f32 = 100.;
 const COL_ITEMS: f32 = 82.;
 const COL_FILES: f32 = 82.;
 const COL_DIRS: f32 = 74.;
@@ -134,6 +135,7 @@ const DEPTH_COLORS: [u32; 8] = [
 enum SortKey {
     Name,
     Size,
+    Disk,
     Items,
     Files,
     Dirs,
@@ -248,7 +250,8 @@ impl FastDir {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let settings = Settings::load();
         let (show_free, show_unknown) = (settings.show_free_space, settings.show_unknown);
-        let treemap = cx.new(|_| TreemapView::with_options(show_free, show_unknown));
+        let use_disk_size = settings.treemap_disk_size;
+        let treemap = cx.new(|_| TreemapView::with_options(show_free, show_unknown, use_disk_size));
         let sub = cx.subscribe_in(
             &treemap,
             window,
@@ -357,6 +360,16 @@ impl FastDir {
         let show = self.settings.show_unknown;
         self.treemap
             .update(cx, |t, cx| t.set_show_unknown(show, cx));
+        cx.notify();
+    }
+
+    /// Switch the treemap between logical size and size on disk.
+    pub(super) fn toggle_treemap_disk_size(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.settings.treemap_disk_size = !self.settings.treemap_disk_size;
+        self.settings.save();
+        let use_disk = self.settings.treemap_disk_size;
+        self.treemap
+            .update(cx, |t, cx| t.set_use_disk_size(use_disk, cx));
         cx.notify();
     }
 

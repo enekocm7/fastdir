@@ -5,11 +5,11 @@
 use fastdir_core::format;
 use fastdir_core::model::{Node, NodePath, Tree};
 use fastdir_treemap as treemap;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
-use gpui_kit::assets::IconName;
-use gpui_kit::*;
 use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use image::{Frame, RgbaImage};
 use parking_lot::RwLock;
 use std::cell::Cell;
@@ -20,7 +20,11 @@ use std::time::Duration;
 
 /// Ctrl+click (Cmd+click on macOS) adds to or removes from the selection.
 pub fn is_toggle_click(m: &Modifiers) -> bool {
-    if cfg!(target_os = "macos") { m.platform } else { m.control }
+    if cfg!(target_os = "macos") {
+        m.platform
+    } else {
+        m.control
+    }
 }
 
 pub enum TreemapEvent {
@@ -46,6 +50,7 @@ struct Key {
     zoom: u64,
     show_free: bool,
     show_unknown: bool,
+    use_disk_size: bool,
 }
 
 pub struct TreemapView {
@@ -69,6 +74,7 @@ pub struct TreemapView {
     rendering: bool,
     show_free: bool,
     show_unknown: bool,
+    use_disk_size: bool,
     _task: Option<Task<()>>,
 }
 
@@ -93,14 +99,16 @@ impl TreemapView {
             rendering: false,
             show_free: false,
             show_unknown: false,
+            use_disk_size: false,
             _task: None,
         }
     }
 
-    pub fn with_options(show_free: bool, show_unknown: bool) -> Self {
+    pub fn with_options(show_free: bool, show_unknown: bool, use_disk_size: bool) -> Self {
         let mut v = Self::new();
         v.show_free = show_free;
         v.show_unknown = show_unknown;
+        v.use_disk_size = use_disk_size;
         v
     }
 
@@ -114,6 +122,14 @@ impl TreemapView {
     pub fn set_show_unknown(&mut self, show: bool, cx: &mut Context<Self>) {
         if self.show_unknown != show {
             self.show_unknown = show;
+            cx.notify();
+        }
+    }
+
+    /// Size cells by allocated bytes (`true`) or logical bytes (`false`).
+    pub fn set_use_disk_size(&mut self, use_disk: bool, cx: &mut Context<Self>) {
+        if self.use_disk_size != use_disk {
+            self.use_disk_size = use_disk;
             cx.notify();
         }
     }
@@ -157,9 +173,11 @@ impl TreemapView {
         self.hover = None;
         if let (Some(tree), Some(fs)) = (self.tree.clone(), self.zoom_fs.clone()) {
             let t = tree.read();
-            let found = fs
-                .ancestors()
-                .find_map(|p| t.find(p).filter(|path| t.get(path).is_some_and(Node::is_dir)).map(|path| (path, p)));
+            let found = fs.ancestors().find_map(|p| {
+                t.find(p)
+                    .filter(|path| t.get(path).is_some_and(Node::is_dir))
+                    .map(|path| (path, p))
+            });
             let (path, p) = found.unwrap_or_else(|| (Vec::new(), t.root_path.as_path()));
             let p = p.to_path_buf();
             drop(t);
@@ -176,11 +194,18 @@ impl TreemapView {
     /// the zoom folder is `old` or inside it, follow it to its new location,
     /// unless it left the scanned tree. Call before [`Self::invalidate`].
     pub fn path_moved(&mut self, old: &std::path::Path, new: &std::path::Path) {
-        let in_tree = self.tree.as_ref().is_some_and(|t| t.read().find(new).is_some());
+        let in_tree = self
+            .tree
+            .as_ref()
+            .is_some_and(|t| t.read().find(new).is_some());
         if !in_tree {
             return;
         }
-        if let Some(rest) = self.zoom_fs.as_deref().and_then(|z| z.strip_prefix(old).ok()) {
+        if let Some(rest) = self
+            .zoom_fs
+            .as_deref()
+            .and_then(|z| z.strip_prefix(old).ok())
+        {
             self.zoom_fs = Some(new.join(rest));
         }
     }
@@ -192,7 +217,9 @@ impl TreemapView {
 
     /// Root the treemap at the folder `path`. Files zoom to their folder.
     pub fn set_zoom(&mut self, mut path: NodePath, cx: &mut Context<Self>) {
-        let Some(tree) = self.tree.clone() else { return };
+        let Some(tree) = self.tree.clone() else {
+            return;
+        };
         let fs = {
             let t = tree.read();
             while !path.is_empty() && !t.get(&path).is_some_and(Node::is_dir) {
@@ -225,10 +252,16 @@ impl TreemapView {
         if self.pending == Some(key) || self.image_key == Some(key) {
             return;
         }
-        let Some(tree) = self.tree.clone() else { return };
+        let Some(tree) = self.tree.clone() else {
+            return;
+        };
         self.pending = Some(key);
         self.rendering = true;
-        let background = if key.dark { [24, 24, 27] } else { [235, 235, 235] };
+        let background = if key.dark {
+            [24, 24, 27]
+        } else {
+            [235, 235, 235]
+        };
         let first = self.image.is_none();
         let zoom = self.zoom.clone();
         self._task = Some(cx.spawn(async move |this, cx| {
@@ -251,6 +284,7 @@ impl TreemapView {
                         key.highlight,
                         key.show_free,
                         key.show_unknown,
+                        key.use_disk_size,
                     )
                 })
                 .await;
@@ -288,7 +322,16 @@ impl TreemapView {
         let tree = self.tree.as_ref()?.read();
         let (w, h, x, y) = self.device_point(position);
         let root = tree.get(&self.zoom)?;
-        let rel = treemap::hit_test(root, w, h, x, y, self.show_free, self.show_unknown)?;
+        let rel = treemap::hit_test(
+            root,
+            w,
+            h,
+            x,
+            y,
+            self.show_free,
+            self.show_unknown,
+            self.use_disk_size,
+        )?;
         let mut path = self.zoom.clone();
         path.extend(rel);
         Some(path)
@@ -320,7 +363,17 @@ impl TreemapView {
             let tree = self.tree.as_ref()?.read();
             let node = tree.get(&p)?;
             let full = tree.fs_path(&p)?;
-            let label = format!("{}  —  {}", full.display(), format::bytes(node.size));
+            let size = if self.use_disk_size {
+                node.disk_size
+            } else {
+                node.size
+            };
+            let link = if node.hard_link {
+                "  ·  hard link"
+            } else {
+                ""
+            };
+            let label = format!("{}  —  {}{link}", full.display(), format::bytes(size));
             Some((p, label.into()))
         });
         cx.notify();
@@ -347,6 +400,7 @@ impl Render for TreemapView {
         let has_tree = self.tree.is_some();
         let show_free = self.show_free;
         let show_unknown = self.show_unknown;
+        let use_disk_size = self.use_disk_size;
         let _ = window;
 
         let canvas = canvas(
@@ -366,6 +420,7 @@ impl Render for TreemapView {
                         zoom,
                         show_free,
                         show_unknown,
+                        use_disk_size,
                     };
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
@@ -388,13 +443,19 @@ impl Render for TreemapView {
                 let w = (f32::from(bounds.size.width) as f64 * scale).round();
                 let h = (f32::from(bounds.size.height) as f64 * scale).round();
                 let t = tree.read();
-                let Some(root) = t.get(&zoom_path) else { return };
+                let Some(root) = t.get(&zoom_path) else {
+                    return;
+                };
                 for sel in &selection {
                     // Only things inside the zoomed folder are on screen.
-                    let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else { continue };
+                    let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else {
+                        continue;
+                    };
                     let Some(r) =
-                        treemap::rect_of(root, w, h, rel, show_free, show_unknown)
-                    else { continue };
+                        treemap::rect_of(root, w, h, rel, show_free, show_unknown, use_disk_size)
+                    else {
+                        continue;
+                    };
                     let origin = bounds.origin;
                     let rb = Bounds::new(
                         point(
@@ -421,7 +482,11 @@ impl Render for TreemapView {
                             px(0.),
                             transparent_black(),
                             px(1.),
-                            if dark { black().opacity(0.6) } else { white().opacity(0.8) },
+                            if dark {
+                                black().opacity(0.6)
+                            } else {
+                                white().opacity(0.8)
+                            },
                             BorderStyle::Solid,
                         ));
                     }
@@ -498,10 +563,7 @@ impl Render for TreemapView {
                 )
             });
 
-        v_flex()
-            .size_full()
-            .children(breadcrumb)
-            .child(body)
+        v_flex().size_full().children(breadcrumb).child(body)
     }
 }
 
@@ -515,13 +577,19 @@ impl TreemapView {
             parts.push((t.root_path.display().to_string().into(), Vec::new()));
             let mut node = &t.root;
             for (depth, &i) in self.zoom.iter().enumerate() {
-                let Some(child) = node.children.get(i as usize) else { break };
+                let Some(child) = node.children.get(i as usize) else {
+                    break;
+                };
                 parts.push((child.name.to_string().into(), self.zoom[..=depth].to_vec()));
                 node = child;
             }
         }
         let last = parts.len().saturating_sub(1);
-        let (fg, muted, hover_bg) = (theme.foreground, theme.muted_foreground, theme.secondary_hover);
+        let (fg, muted, hover_bg) = (
+            theme.foreground,
+            theme.muted_foreground,
+            theme.secondary_hover,
+        );
         let zoomed = !self.zoom.is_empty();
 
         h_flex()
@@ -548,7 +616,9 @@ impl TreemapView {
                             .flex_shrink_0()
                             .gap_0p5()
                             .when(ix > 0, |this| {
-                                this.child(Icon::new(IconName::ChevronRight).xsmall().text_color(muted))
+                                this.child(
+                                    Icon::new(IconName::ChevronRight).xsmall().text_color(muted),
+                                )
                             })
                             .child(
                                 div()
@@ -568,11 +638,10 @@ impl TreemapView {
                             )
                     })),
             )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .text_color(muted)
-                    .child(if zoomed { "Z zoom in · Shift+Z zoom out" } else { "Z to zoom into a folder" }),
-            )
+            .child(div().flex_shrink_0().text_color(muted).child(if zoomed {
+                "Z zoom in · Shift+Z zoom out"
+            } else {
+                "Z to zoom into a folder"
+            }))
     }
 }
