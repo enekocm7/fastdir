@@ -6,6 +6,8 @@ use crate::format;
 use crate::fsops;
 use crate::model::{Node, NodePath, Tree};
 use crate::scanner::{self, Progress, ScanResult};
+use crate::settings::Settings;
+use crate::updater::{self, Release};
 use crate::treemap;
 use crate::treemap_view::{TreemapEvent, TreemapView};
 use gpui_kit::assets::IconName;
@@ -61,6 +63,8 @@ actions!(
         ToggleTheme,
     ]
 );
+
+mod update_ui;
 
 const CONTEXT: &str = "FastDir";
 
@@ -150,10 +154,16 @@ pub struct FastDir {
     ext_scroll: UniformListScrollHandle,
     treemap: Entity<TreemapView>,
     busy: Option<SharedString>,
+    settings: Settings,
+    /// A newer release the user can install.
+    available: Option<Arc<Release>>,
+    checking: bool,
+    updating: bool,
     _subscriptions: Vec<Subscription>,
     _rename_sub: Option<Subscription>,
     _scan_task: Option<Task<()>>,
     _ticker: Option<Task<()>>,
+    _update_ticker: Option<Task<()>>,
 }
 
 impl FastDir {
@@ -183,6 +193,7 @@ impl FastDir {
                 cx.defer_in(window, move |this: &mut Self, window, cx| this.start_scan(path, window, cx));
             }
         }
+        cx.defer_in(window, |this: &mut Self, window, cx| this.startup_update_tasks(window, cx));
         Self {
             focus,
             drives: drives::list(),
@@ -198,10 +209,15 @@ impl FastDir {
             ext_scroll: UniformListScrollHandle::new(),
             treemap,
             busy: None,
+            settings: Settings::load(),
+            available: None,
+            checking: false,
+            updating: false,
             _subscriptions: vec![sub],
             _rename_sub: None,
             _scan_task: None,
             _ticker: None,
+            _update_ticker: None,
         }
     }
 
@@ -1290,6 +1306,7 @@ impl FastDir {
         let is_root = self.selected_path().is_some_and(|p| p.is_empty());
         let drives = self.drives.clone();
         let entity = cx.entity().downgrade();
+        let update_entity = entity.clone();
         let focus = self.focus.clone();
         let busy = self.busy.is_some();
 
@@ -1420,6 +1437,72 @@ impl FastDir {
                         .on_click(cx.listener(|this, _, w, cx| this.go_home(w, cx))),
                 )
             })
+            .when_some(self.available.clone(), |d, rel| {
+                let entity = update_entity.clone();
+                d.child(
+                    Button::new("update")
+                        .small()
+                        .primary()
+                        .icon(IconName::ArrowDown)
+                        .label(format!("Update to v{}", rel.version))
+                        .dropdown_caret(true)
+                        .dropdown_menu(move |menu, _, _| {
+                            let (e1, e2, e3) = (entity.clone(), entity.clone(), entity.clone());
+                            menu.item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Update now")
+                                    .icon(IconName::ArrowDown)
+                                    .on_click(move |_, window, cx| {
+                                        e1.update(cx, |this, cx| this.start_update(window, cx)).ok();
+                                    }),
+                            )
+                            .item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Release notes")
+                                    .icon(IconName::FileText)
+                                    .on_click(move |_, window, cx| {
+                                        e2.update(cx, |this, cx| this.show_release_notes(window, cx)).ok();
+                                    }),
+                            )
+                            .item(
+                                gpui_kit::component::menu::PopupMenuItem::new("Skip this version")
+                                    .icon(IconName::Ban)
+                                    .on_click(move |_, window, cx| {
+                                        e3.update(cx, |this, cx| this.skip_update(window, cx)).ok();
+                                    }),
+                            )
+                        }),
+                )
+            })
+            .child(
+                tool("more", IconName::Ellipsis, "More").dropdown_menu({
+                    let auto = self.settings.auto_check_updates;
+                    let entity = update_entity.clone();
+                    move |menu, _, _| {
+                        let (e1, e2) = (entity.clone(), entity.clone());
+                        menu.item(
+                            gpui_kit::component::menu::PopupMenuItem::new("Check for updates")
+                                .icon(IconName::RefreshCw)
+                                .on_click(move |_, window, cx| {
+                                    e1.update(cx, |this, cx| this.check_for_updates(true, window, cx)).ok();
+                                }),
+                        )
+                        .item(
+                            gpui_kit::component::menu::PopupMenuItem::new("Check for updates automatically")
+                                .checked(auto)
+                                .on_click(move |_, _, cx| {
+                                    e2.update(cx, |this, cx| this.toggle_auto_update_check(cx)).ok();
+                                }),
+                        )
+                        .separator()
+                        .item(
+                            gpui_kit::component::menu::PopupMenuItem::new(format!(
+                                "FastDir v{}",
+                                updater::CURRENT_VERSION
+                            ))
+                            .disabled(true),
+                        )
+                    }
+                }),
+            )
             .child(
                 tool(
                     "theme",

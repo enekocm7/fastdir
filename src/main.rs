@@ -6,13 +6,17 @@ mod format;
 mod fsops;
 mod model;
 mod scanner;
+mod settings;
 mod treemap;
 mod treemap_view;
+mod updater;
 
 use gpui_kit::component::{Theme, ThemeMode, TitleBar};
 use gpui_kit::*;
 
 fn main() {
+    // Remove anything a previous update left behind before doing anything else.
+    updater::cleanup();
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {

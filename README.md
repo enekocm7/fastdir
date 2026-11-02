@@ -51,6 +51,14 @@ Download the latest release from the
 | `FastDir-<version>-setup-x64.exe` | Installer: Start menu shortcut, optional desktop icon and Explorer context menu, uninstaller. Installs per-user by default (no admin prompt). |
 | `FastDir-<version>-portable-x64.zip` | Just the executable, no installation needed. |
 
+### Updates
+
+Every time FastDir starts it checks GitHub Releases in the background. When a
+newer version exists, a notification and a toolbar button offer **Update now**
+(downloads, verifies the SHA-256 and relaunches), **Release notes** and **Skip
+this version**. Use the toolbar's `…` menu to check manually or to turn the
+automatic check off. Settings live in `%APPDATA%\FastDir\settings.json`.
+
 ## Usage
 
 ```text
@@ -130,4 +138,6 @@ a release.
 | `src/app.rs` | Main window: drive overview, progress, tree, extension list, toolbar, dialogs |
 | `src/drives.rs` | Volume detection |
 | `src/fsops.rs` | Delete / rename / move / reveal |
+| `src/updater.rs` | GitHub release check, verified download, installer / portable self-update |
+| `src/settings.rs` | Small persisted config |
 | `installer/fastdir.iss` | Inno Setup installer script |

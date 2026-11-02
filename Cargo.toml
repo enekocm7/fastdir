@@ -13,6 +13,12 @@ image = { version = "0.25", default-features = false }
 smallvec = "1.13"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 trash = "5"
+ureq = "3"
+semver = "1.0.28"
+sha2 = "0.11.1"
+serde_json = "1.0.154"
+serde = { version = "1.0.229", features = ["derive"] }
+zip = { version = "9.2.2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
