@@ -33,6 +33,7 @@ impl FastDir {
         self.scan_root = Some(root.clone());
         self.settings.last_scan_path = Some(root.to_string_lossy().into_owned());
         self.settings.save();
+        self.last_errors = 0;
         // The scanner fills this tree in place, so the list and the treemap
         // can show finished top-level folders before the scan ends.
         let tree = Arc::new(RwLock::new(Tree::empty(root.clone())));
@@ -169,6 +170,11 @@ impl FastDir {
         );
         window.set_window_title(&title);
         self.last_scan = Some((elapsed, cancelled));
+        self.last_errors = if let Phase::Scanning { progress, .. } = &self.phase {
+            progress.errors.load(Ordering::Relaxed)
+        } else {
+            0
+        };
         self.phase = Phase::Ready;
         // Keep the folder the user was browsing selected across the finish.
         let selected_fs = self.selected_fs_path().map(|(_, fs, _)| fs);
@@ -283,6 +289,7 @@ impl FastDir {
         self.top_selected = None;
         self.top_stale = true;
         self.drives = drives::list();
+        self.last_errors = 0;
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
         window.set_window_title("FastDir");
         cx.notify();
@@ -290,6 +297,7 @@ impl FastDir {
 
     pub(super) fn render_home(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let show_admin = !elevate::is_elevated();
         let cards = self.drives.iter().enumerate().map(|(i, d)| {
             let path = d.path.clone();
             let frac = d.used_fraction();
@@ -394,12 +402,45 @@ impl FastDir {
                     .children(cards),
             )
             .child(
-                Button::new("scan-folder")
-                    .outline()
-                    .icon(IconName::FolderSearch)
-                    .label("Scan a folder…")
-                    .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
+                h_flex()
+                    .justify_center()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        Button::new("scan-folder")
+                            .outline()
+                            .icon(IconName::FolderSearch)
+                            .label("Scan a folder…")
+                            .on_click(
+                                cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx)),
+                            ),
+                    )
+                    .when(show_admin, |d| {
+                        d.child(
+                            Button::new("restart-admin-home")
+                                .outline()
+                                .icon(IconName::Shield)
+                                .label("Restart as administrator")
+                                .tooltip(
+                                    "Relaunch elevated so protected folders can be scanned",
+                                )
+                                .on_click(cx.listener(|this, _, w, cx| {
+                                    this.restart_elevated(None, w, cx)
+                                })),
+                        )
+                    }),
             )
+            .when(show_admin, |d| {
+                d.child(
+                    div()
+                        .text_xs()
+                        .text_center()
+                        .text_color(theme.muted_foreground)
+                        .child(
+                            "Scanning without elevation skips protected folders — totals will be incomplete.",
+                        ),
+                )
+            })
     }
 
     pub(super) fn render_scanning(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -488,10 +529,32 @@ impl FastDir {
                     .child(current),
             )
             .when(errors > 0, |d| {
-                d.child(div().text_xs().text_color(theme.warning).child(format!(
-                    "{} folders could not be read (access denied)",
-                    format::count(errors)
-                )))
+                let root = root.clone();
+                d.child(
+                    h_flex()
+                        .items_center()
+                        .justify_center()
+                        .gap_3()
+                        .child(div().text_xs().text_color(theme.warning).child(format!(
+                            "{} folders could not be read (access denied)",
+                            format::count(errors)
+                        )))
+                        .when(!elevate::is_elevated(), |d| {
+                            d.child(
+                                Button::new("restart-admin-scanning")
+                                    .small()
+                                    .outline()
+                                    .icon(IconName::Shield)
+                                    .label("Restart as administrator")
+                                    .tooltip(
+                                        "Relaunch elevated and rescan this path so protected folders are included",
+                                    )
+                                    .on_click(cx.listener(move |this, _, w, cx| {
+                                        this.restart_elevated(Some(root.clone()), w, cx)
+                                    })),
+                            )
+                        }),
+                )
             })
             .child(
                 Button::new("stop-scan")

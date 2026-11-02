@@ -3,6 +3,7 @@
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::drives::{self, Drive};
+use fastdir_core::elevate;
 use fastdir_core::filter::Filter;
 use fastdir_core::format;
 use fastdir_core::fsops;
@@ -224,6 +225,8 @@ pub struct FastDir {
     tree: Option<Arc<RwLock<Tree>>>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
+    /// Folders that could not be read in the last finished scan (access denied).
+    last_errors: u64,
     /// Tree generation the visible rows were built from during a live scan.
     partial_generation: u64,
     rows: Vec<Row>,
@@ -357,6 +360,7 @@ impl FastDir {
             tree: None,
             scan_root: None,
             last_scan: None,
+            last_errors: 0,
             partial_generation: 0,
             rows: Vec::new(),
             tab: ListTab::Tree,
@@ -466,7 +470,8 @@ impl FastDir {
         let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
         let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
 
-        v_resizable("main-split")
+        let banner = self.render_elevate_banner(cx);
+        let main = v_resizable("main-split")
             .with_state(&self.main_split)
             .on_resize({
                 let entity = entity.clone();
@@ -516,7 +521,104 @@ impl FastDir {
                     .size_full()
                     .child(self.treemap.clone())
                     .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
-            }))
+            }));
+
+        match banner {
+            Some(banner) => v_flex()
+                .size_full()
+                .child(banner)
+                .child(div().flex_1().min_h_0().w_full().child(main))
+                .into_any_element(),
+            None => main.into_any_element(),
+        }
+    }
+
+    /// Warning shown above the results when folders could not be read.
+    /// Offers to relaunch elevated, passing the current scan path so the new
+    /// instance resumes the same scan.
+    fn render_elevate_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let errors = match &self.phase {
+            Phase::Scanning { progress, .. } => progress.errors.load(Ordering::Relaxed),
+            Phase::Ready => self.last_errors,
+            Phase::Home => return None,
+        };
+        if errors == 0 {
+            return None;
+        }
+        let theme = cx.theme();
+        let root = self.scan_root.clone();
+        let elevated = elevate::is_elevated();
+        Some(
+            h_flex()
+                .flex_shrink_0()
+                .w_full()
+                .px_3()
+                .py_1()
+                .gap_3()
+                .items_center()
+                .justify_between()
+                .border_b_1()
+                .border_color(theme.border)
+                .bg(theme.warning.opacity(0.12))
+                .child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .text_xs()
+                        .text_color(theme.warning)
+                        .child(format!(
+                            "{} folders could not be read (access denied) — totals are incomplete",
+                            format::count(errors)
+                        )),
+                )
+                .when(!elevated, |d| {
+                    d.child(
+                        Button::new("restart-admin-ready")
+                            .small()
+                            .outline()
+                            .icon(IconName::Shield)
+                            .label("Restart as administrator")
+                            .tooltip(
+                                "Relaunch FastDir elevated so protected folders can be scanned",
+                            )
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.restart_elevated(root.clone(), w, cx)
+                            })),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// Relaunch the app elevated, passing `path` so the new instance resumes
+    /// the same scan. Quits this instance on success; UAC cancellation or a
+    /// launch failure is reported and keeps this instance running.
+    pub(super) fn restart_elevated(
+        &mut self,
+        path: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match elevate::restart_as_admin(path.as_deref()) {
+            Ok(()) => cx.quit(),
+            Err(e) if e == "Elevation was cancelled" => {
+                window.push_notification(
+                    Notification::info(
+                        "Staying without elevation — protected folders will be skipped.",
+                    )
+                    .title("Elevation cancelled"),
+                    cx,
+                );
+            }
+            Err(e) => {
+                window.push_notification(
+                    Notification::error(e).title("Could not restart as administrator"),
+                    cx,
+                );
+            }
+        }
     }
 
     /// Remember where the user dragged a divider.
