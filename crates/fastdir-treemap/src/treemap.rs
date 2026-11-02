@@ -608,14 +608,7 @@ struct Light {
     lz: f64,
 }
 
-fn render_leaf(
-    t: Target,
-    rc: &Rect,
-    s: &Surface,
-    color: [f64; 3],
-    light: &Light,
-    cushion: bool,
-) {
+fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light, cushion: bool) {
     let (x0, x1) = px_range(rc.x0, rc.x1, t.w);
     let (y0, y1) = px_range(rc.y0, rc.y1, t.h);
     if x0 >= x1 || y0 >= y1 {
@@ -708,9 +701,7 @@ fn draw(
         let mut color = shade_node(node, opts);
         // Extension highlighting only makes sense when colouring by
         // extension; in age mode every leaf keeps its own colour.
-        if opts.color_mode == ColorMode::Extension
-            && opts.highlight.is_some_and(|hl| hl != ext)
-        {
+        if opts.color_mode == ColorMode::Extension && opts.highlight.is_some_and(|hl| hl != ext) {
             color = dim_color(color);
         }
         // Cell borders: shrink the leaf so a hairline of background shows.
@@ -741,7 +732,16 @@ fn draw(
         );
         cells.par_iter().with_min_len(8).for_each(|&(i, r)| {
             draw(
-                tree, &children[i], r, surface, h_child, false, depth + 1, t, light, opts,
+                tree,
+                &children[i],
+                r,
+                surface,
+                h_child,
+                false,
+                depth + 1,
+                t,
+                light,
+                opts,
             );
         });
     } else {
@@ -1015,8 +1015,15 @@ mod tests {
         let compressed = position("compressed.bin");
         let small = position("small.bin");
 
-        let logical = rect_of(&tree, root, 100.0, 100.0, &[compressed], &RenderOptions::default())
-            .unwrap();
+        let logical = rect_of(
+            &tree,
+            root,
+            100.0,
+            100.0,
+            &[compressed],
+            &RenderOptions::default(),
+        )
+        .unwrap();
         let disk_opts = RenderOptions {
             use_disk: true,
             ..RenderOptions::default()
@@ -1039,7 +1046,9 @@ mod tests {
     #[test]
     fn palettes_stay_distinct_per_rank() {
         // Colour-blind palette differs from the default but keeps ranks apart.
-        let a: Vec<_> = (0..8).map(|r| ext_color_with(Palette::ColorBlind, r)).collect();
+        let a: Vec<_> = (0..8)
+            .map(|r| ext_color_with(Palette::ColorBlind, r))
+            .collect();
         let b: Vec<_> = (0..8).map(ext_color).collect();
         assert_ne!(a, b);
         let mut distinct = a.clone();
@@ -1173,15 +1182,320 @@ mod tests {
         let hit = hit_test(&tree, root, 100.0, 80.0, 50.0, 40.0, &hidden_opts).unwrap();
         assert_eq!(hit, vec![0]);
         // rect_of returns None for hidden pseudo-items.
-        assert_eq!(
-            rect_of(&tree, root, 100.0, 80.0, &[1], &hidden_opts),
-            None
-        );
+        assert_eq!(rect_of(&tree, root, 100.0, 80.0, &[1], &hidden_opts), None);
         let shown_opts = RenderOptions {
             show_free: true,
             ..RenderOptions::default()
         };
         assert!(rect_of(&tree, root, 100.0, 80.0, &[1], &shown_opts).is_some());
+    }
+
+    /// Deterministic xorshift64: no external dependency, same sequence on
+    /// every platform.
+    fn rng_next(state: &mut u64) -> u64 {
+        let mut x = *state;
+        if x == 0 {
+            x = 0x9E37_79B9_7F4A_7C15;
+        }
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn check_cover_no_overlap_proportional(
+        children: &[Node],
+        total: u64,
+        rc: Rect,
+        cells: &[(usize, Rect)],
+    ) {
+        let parent_area = rc.w() * rc.h();
+        // Covers the parent exactly.
+        let area: f64 = cells.iter().map(|(_, r)| r.w() * r.h()).sum();
+        assert!(
+            (area - parent_area).abs() <= 1e-6 * parent_area.max(1.0),
+            "area {area} != parent {parent_area} for {rc:?}"
+        );
+        // Within the parent bounds.
+        for (_, r) in cells {
+            assert!(
+                r.x0 >= rc.x0 - 1e-9 && r.y0 >= rc.y0 - 1e-9,
+                "{r:?} in {rc:?}"
+            );
+            assert!(
+                r.x1 <= rc.x1 + 1e-9 && r.y1 <= rc.y1 + 1e-9,
+                "{r:?} in {rc:?}"
+            );
+            assert!(r.w() > 0.0 && r.h() > 0.0, "{r:?}");
+        }
+        // Areas proportional to sizes.
+        for (i, r) in cells {
+            let expected = children[*i].size as f64 / total as f64 * parent_area;
+            let got = r.w() * r.h();
+            let tol = 1e-6 * expected.max(1.0);
+            assert!(
+                (got - expected).abs() <= tol,
+                "cell {i}: area {got} != expected {expected}"
+            );
+        }
+        // No two interiors overlap (edges may touch exactly).
+        for a in 0..cells.len() {
+            for b in (a + 1)..cells.len() {
+                let (_, ra) = cells[a];
+                let (_, rb) = cells[b];
+                let x_overlap = ra.x0.min(rb.x0) < ra.x1.max(rb.x1) - 1e-9
+                    && ra.x1.max(rb.x1) > ra.x0.min(rb.x0) + 1e-9
+                    && ra.x0 < rb.x1 - 1e-9
+                    && rb.x0 < ra.x1 - 1e-9;
+                let y_overlap = ra.y0 < rb.y1 - 1e-9 && rb.y0 < ra.y1 - 1e-9;
+                assert!(!(x_overlap && y_overlap), "cells overlap: {ra:?} vs {rb:?}");
+            }
+        }
+        // Bounding box of the cells is the parent.
+        let x0 = cells
+            .iter()
+            .map(|(_, r)| r.x0)
+            .fold(f64::INFINITY, f64::min);
+        let x1 = cells
+            .iter()
+            .map(|(_, r)| r.x1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let y0 = cells
+            .iter()
+            .map(|(_, r)| r.y0)
+            .fold(f64::INFINITY, f64::min);
+        let y1 = cells
+            .iter()
+            .map(|(_, r)| r.y1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            (x0 - rc.x0).abs() <= 1e-9 && (x1 - rc.x1).abs() <= 1e-9,
+            "{cells:?}"
+        );
+        assert!(
+            (y0 - rc.y0).abs() <= 1e-9 && (y1 - rc.y1).abs() <= 1e-9,
+            "{cells:?}"
+        );
+    }
+
+    #[test]
+    fn squarify_covers_parent_without_overlap_and_proportional_areas() {
+        // A mix of skewed, even and many-item distributions on several shapes,
+        // including an offset rect.
+        let cases: Vec<Vec<(&str, u64, u64)>> = vec![
+            vec![("a", 6, 6), ("b", 3, 3), ("c", 1, 1)],
+            vec![("big", 1000, 1000), ("mid", 100, 100), ("tiny", 1, 1)],
+            vec![("a", 5, 5), ("b", 5, 5), ("c", 5, 5), ("d", 5, 5)],
+            vec![("only", 42, 42)],
+            (0..25)
+                .map(|i| {
+                    (
+                        Box::leak(format!("f{i}").into_boxed_str()) as &str,
+                        10 + i as u64 * 37,
+                        10 + i as u64 * 37,
+                    )
+                })
+                .collect(),
+        ];
+        let rects = [
+            Rect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 100.0,
+                y1: 80.0,
+            },
+            Rect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 100.0,
+                y1: 100.0,
+            },
+            Rect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 200.0,
+                y1: 50.0,
+            },
+            Rect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 50.0,
+                y1: 200.0,
+            },
+            Rect {
+                x0: 10.0,
+                y0: 20.0,
+                x1: 110.0,
+                y1: 100.0,
+            },
+        ];
+        for files in &cases {
+            let owned: Vec<(String, u64, u64)> = files
+                .iter()
+                .map(|(n, s, d)| (n.to_string(), *s, *d))
+                .collect();
+            let refs: Vec<(&str, u64, u64)> =
+                owned.iter().map(|(n, s, d)| (n.as_str(), *s, *d)).collect();
+            let tree = files_tree(&refs);
+            let children = children_of(&tree);
+            let total = tree.root().size;
+            for rc in rects {
+                let mut cells = Vec::new();
+                squarify(children, total, rc, |i, r| cells.push((i, r)));
+                let expected = children.iter().filter(|c| c.size > 0).count();
+                assert_eq!(cells.len(), expected, "files {files:?} in {rc:?}");
+                if expected > 0 {
+                    check_cover_no_overlap_proportional(children, total, rc, &cells);
+                }
+            }
+        }
+    }
+
+    /// Build a two-level tree with deterministic pseudo-random sizes.
+    fn random_nested_tree() -> Tree {
+        let mut state = 0x1234_5678_9ABC_DEF1u64;
+        let mut arena = Arena::default();
+        let mut top = DirBuilder::new(0);
+        // 3 sub-directories with 2..5 files each, plus top-level files.
+        for d in 0..3 {
+            let mut inner = DirBuilder::new(0);
+            let n_files = 2 + (rng_next(&mut state) % 4) as usize;
+            for f in 0..n_files {
+                let size = 5 + rng_next(&mut state) % 900;
+                inner.add_file(&format!("d{d}f{f}.bin"), size, size, 0);
+            }
+            top.add_dir(&format!("dir{d}"), inner.commit(&mut arena));
+        }
+        for f in 0..4 {
+            let size = 5 + rng_next(&mut state) % 900;
+            // Mix extensions so ext ranks vary.
+            let name = if f % 2 == 0 {
+                format!("top{f}.txt")
+            } else {
+                format!("top{f}.log")
+            };
+            top.add_file(&name, size, size, 0);
+        }
+        let root = top.commit(&mut arena);
+        Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
+    }
+
+    fn collect_paths(tree: &Tree) -> Vec<NodePath> {
+        let mut out = Vec::new();
+        let mut stack = vec![(Vec::new(), tree.root())];
+        while let Some((path, node)) = stack.pop() {
+            out.push(path.clone());
+            for (i, child) in tree.children(node).iter().enumerate() {
+                let mut p = path.clone();
+                p.push(i as u32);
+                stack.push((p, child));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn hit_test_and_rect_of_agree_on_random_nested_trees() {
+        let tree = random_nested_tree();
+        // Large canvas so every leaf stays well above min_cell.
+        let (w, h) = (1000.0, 800.0);
+        let opts = RenderOptions::default();
+        let root_rect = Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: w,
+            y1: h,
+        };
+
+        // Every laid-out node has a positive rect inside the canvas.
+        let paths = collect_paths(&tree);
+        assert!(paths.len() > 10);
+        for path in &paths {
+            let r = rect_of(&tree, tree.root(), w, h, path, &opts)
+                .unwrap_or_else(|| panic!("no rect for {path:?}"));
+            assert!(r.w() > 0.0 && r.h() > 0.0, "{path:?} -> {r:?}");
+            assert!(
+                r.x0 >= root_rect.x0 - 1e-9
+                    && r.y0 >= root_rect.y0 - 1e-9
+                    && r.x1 <= root_rect.x1 + 1e-9
+                    && r.y1 <= root_rect.y1 + 1e-9,
+                "{path:?} -> {r:?}"
+            );
+        }
+
+        // Sibling rects at each level tile their parent without overlap.
+        for path in &paths {
+            let node = tree.get(path).unwrap();
+            if !node.is_dir() || tree.children(node).is_empty() {
+                continue;
+            }
+            let parent_rect = rect_of(&tree, tree.root(), w, h, path, &opts).unwrap();
+            let parent_size = node.size;
+            let mut cells: Vec<(usize, Rect)> = Vec::new();
+            for (i, _) in tree.children(node).iter().enumerate() {
+                let mut child_path = path.clone();
+                child_path.push(i as u32);
+                let r = rect_of(&tree, tree.root(), w, h, &child_path, &opts).unwrap();
+                cells.push((i, r));
+            }
+            // Areas proportional to the child's share of the parent.
+            let parent_area = parent_rect.w() * parent_rect.h();
+            for (i, r) in &cells {
+                let expected =
+                    tree.children(node)[*i].size as f64 / parent_size as f64 * parent_area;
+                let got = r.w() * r.h();
+                assert!(
+                    (got - expected).abs() <= 1e-6 * expected.max(1.0),
+                    "{path:?} child {i}: {got} != {expected}"
+                );
+            }
+            for a in 0..cells.len() {
+                for b in (a + 1)..cells.len() {
+                    let ra = cells[a].1;
+                    let rb = cells[b].1;
+                    let overlap = ra.x0 < rb.x1 - 1e-9
+                        && rb.x0 < ra.x1 - 1e-9
+                        && ra.y0 < rb.y1 - 1e-9
+                        && rb.y0 < ra.y1 - 1e-9;
+                    assert!(!overlap, "siblings overlap: {ra:?} vs {rb:?}");
+                }
+            }
+        }
+
+        // Leaf centres hit exactly; directory centres hit inside the directory.
+        for path in &paths {
+            let node = tree.get(path).unwrap();
+            let r = rect_of(&tree, tree.root(), w, h, path, &opts).unwrap();
+            let (x, y) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
+            let hit = hit_test(&tree, tree.root(), w, h, x, y, &opts)
+                .unwrap_or_else(|| panic!("no hit at ({x},{y}) for {path:?}"));
+            if node.is_dir() && !tree.children(node).is_empty() {
+                assert!(hit.starts_with(path), "dir {path:?} centre hit {hit:?}");
+            } else {
+                assert_eq!(hit, *path, "leaf {path:?} centre hit {hit:?}");
+            }
+            // The hit node's rect contains the sampled point.
+            let hr = rect_of(&tree, tree.root(), w, h, &hit, &opts).unwrap();
+            assert!(
+                x >= hr.x0 - 1e-9 && x < hr.x1 + 1e-9 && y >= hr.y0 - 1e-9 && y < hr.y1 + 1e-9,
+                "point ({x},{y}) not in {hr:?} for hit {hit:?}"
+            );
+        }
+
+        // A grid of sample points round-trips through hit_test -> rect_of.
+        for gx in 0..20 {
+            for gy in 0..16 {
+                let x = (gx as f64 + 0.5) / 20.0 * w;
+                let y = (gy as f64 + 0.5) / 16.0 * h;
+                let hit = hit_test(&tree, tree.root(), w, h, x, y, &opts).unwrap();
+                let r = rect_of(&tree, tree.root(), w, h, &hit, &opts).unwrap();
+                assert!(
+                    x >= r.x0 - 1e-9 && x < r.x1 + 1e-9 && y >= r.y0 - 1e-9 && y < r.y1 + 1e-9,
+                    "grid ({x},{y}) -> {hit:?} -> {r:?}"
+                );
+            }
+        }
     }
 
     fn test_rect() -> Rect {
