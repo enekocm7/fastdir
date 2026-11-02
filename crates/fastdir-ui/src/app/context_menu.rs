@@ -6,18 +6,25 @@ impl FastDir {
     pub(super) fn build_context_menu(&self, menu: PopupMenu, cx: &App) -> PopupMenu {
         let multi = self.is_multi();
         let is_root = self.only_root();
-        let is_dir = !multi && self.selected_fs_path().is_some_and(|s| s.2);
+        let special = self.selected_is_special();
+        let is_dir = !multi && !special && self.selected_fs_path().is_some_and(|s| s.2);
         let can_zoom_in = self.can_zoom_in(cx);
         let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
+        let no_ops = is_root || special;
         menu.action_context(self.focus.clone())
-            .menu_with_icon_and_disabled("Open", IconName::ExternalLink, Box::new(OpenItem), multi)
+            .menu_with_icon_and_disabled(
+                "Open",
+                IconName::ExternalLink,
+                Box::new(OpenItem),
+                multi || special,
+            )
             .menu_with_icon_and_disabled(
                 "Show in Explorer",
                 IconName::FolderOpen,
                 Box::new(RevealItem),
-                multi,
+                multi || special,
             )
-            .menu_with_icon("Copy path", IconName::Copy, Box::new(CopyPath))
+            .menu_with_icon_and_disabled("Copy path", IconName::Copy, Box::new(CopyPath), special)
             .separator()
             .menu_with_icon_and_disabled(
                 "Zoom in",
@@ -36,13 +43,13 @@ impl FastDir {
                 "Rename…",
                 IconName::Pencil,
                 Box::new(RenameItem),
-                is_root || multi,
+                is_root || multi || special,
             )
             .menu_with_icon_and_disabled(
                 "Move to…",
                 IconName::FolderInput,
                 Box::new(MoveItem),
-                is_root,
+                no_ops,
             )
             .menu_with_icon_and_disabled(
                 "Refresh",
@@ -55,13 +62,13 @@ impl FastDir {
                 "Move to Recycle Bin",
                 IconName::Recycle,
                 Box::new(TrashItem),
-                is_root,
+                no_ops,
             )
             .menu_with_icon_and_disabled(
                 "Delete permanently",
                 IconName::Trash,
                 Box::new(DeleteItem),
-                is_root,
+                no_ops,
             )
     }
 

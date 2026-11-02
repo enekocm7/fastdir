@@ -12,7 +12,7 @@ impl FastDir {
     }
 
     pub(super) fn open_selected(&mut self, _: &OpenItem, _: &mut Window, _: &mut Context<Self>) {
-        if self.is_multi() {
+        if self.is_multi() || self.selected_is_special() {
             return;
         }
         if let Some((_, p, _)) = self.selected_fs_path() {
@@ -26,7 +26,7 @@ impl FastDir {
         _: &mut Window,
         _: &mut Context<Self>,
     ) {
-        if self.is_multi() {
+        if self.is_multi() || self.selected_is_special() {
             return;
         }
         if let Some((_, p, _)) = self.selected_fs_path() {
@@ -253,7 +253,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy.is_some() || self.is_multi() {
+        if self.busy.is_some() || self.is_multi() || self.selected_is_special() {
             return;
         }
         let Some((path, fs, _)) = self.selected_fs_path() else {
@@ -557,7 +557,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.busy.is_some() || self.is_multi() {
+        if self.busy.is_some() || self.is_multi() || self.selected_is_special() {
             return;
         }
         let Some((path, fs, is_dir)) = self.selected_fs_path() else {

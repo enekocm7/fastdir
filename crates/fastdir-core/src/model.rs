@@ -12,7 +12,15 @@ pub const NO_EXT: u16 = u16::MAX;
 pub enum NodeKind {
     Dir,
     File,
+    /// Pseudo-item for a drive scan: bytes Windows reports as free.
+    FreeSpace,
+    /// Pseudo-item for a drive scan: used bytes minus scanned bytes.
+    Unknown,
 }
+
+/// Display names for the drive pseudo-items (WinDirStat style).
+pub const FREE_SPACE_NAME: &str = "<Free space>";
+pub const UNKNOWN_NAME: &str = "<Unknown>";
 
 /// One file or directory. Children are always kept sorted by size, largest
 /// first, which is what both the treemap and the default list order need.
@@ -68,9 +76,48 @@ impl Node {
         }
     }
 
+    /// Pseudo-item for free bytes on a scanned drive. Counts as neither a
+    /// file nor a folder so aggregates stay correct.
+    pub fn free_space(size: u64) -> Self {
+        Self {
+            name: FREE_SPACE_NAME.into(),
+            size,
+            modified: 0,
+            files: 0,
+            dirs: 0,
+            ext: NO_EXT,
+            kind: NodeKind::FreeSpace,
+            expanded: false,
+            error: false,
+            children: Vec::new(),
+        }
+    }
+
+    /// Pseudo-item for used-but-unscanned bytes on a scanned drive.
+    pub fn unknown(size: u64) -> Self {
+        Self {
+            name: UNKNOWN_NAME.into(),
+            size,
+            modified: 0,
+            files: 0,
+            dirs: 0,
+            ext: NO_EXT,
+            kind: NodeKind::Unknown,
+            expanded: false,
+            error: false,
+            children: Vec::new(),
+        }
+    }
+
     #[inline]
     pub fn is_dir(&self) -> bool {
         self.kind == NodeKind::Dir
+    }
+
+    /// Either drive pseudo-item (`<Free space>` or `<Unknown>`).
+    #[inline]
+    pub fn is_special(&self) -> bool {
+        matches!(self.kind, NodeKind::FreeSpace | NodeKind::Unknown)
     }
 
     /// Items below this node (files + directories).
@@ -344,40 +391,60 @@ impl Tree {
         new_path
     }
 
-    /// Detach a node from the tree, fixing up all aggregates.
+    /// Detach a node from the tree, fixing up all aggregates. Pseudo-items
+    /// (`<Free space>`, `<Unknown>`) cannot be removed. When a real node is
+    /// removed from a drive scan, free space grows by the same amount so the
+    /// volume total stays constant.
     pub fn remove(&mut self, path: &[u32]) -> Option<Node> {
         let (&last, parent_path) = path.split_last()?;
+        // Peek first so we can reject pseudo-items without mutating.
+        if self.get(path).is_some_and(|n| n.is_special()) {
+            return None;
+        }
+        let removed_size = self.get(path).map(|n| n.size)?;
         let parent = self.get_mut(parent_path)?;
         if last as usize >= parent.children.len() {
             return None;
         }
         let node = parent.children.remove(last as usize);
         self.account_exts(&node, false);
+        if !node.is_special() {
+            self.grow_free(removed_size);
+        }
         self.refresh_ancestors(parent_path);
         Some(node)
     }
 
     /// Attach a node under the directory at `dir_path`. Returns the new path.
+    /// Inserting a real node into a drive scan shrinks free space so the
+    /// volume total stays constant; inserting a pseudo-item leaves it alone.
     pub fn insert(&mut self, dir_path: &[u32], mut node: Node) -> Option<NodePath> {
         fn restamp(tree: &mut Tree, n: &mut Node) {
             if n.is_dir() {
                 for c in &mut n.children {
                     restamp(tree, c);
                 }
-            } else {
+            } else if !n.is_special() {
                 n.ext = tree.ext_id(&n.name);
             }
         }
+        let inserted_size = node.size;
+        let inserted_special = node.is_special();
         restamp(self, &mut node);
         self.account_exts(&node, true);
         let name = node.name.clone();
-        let dir = self.get_mut(dir_path)?;
-        if !dir.is_dir() {
-            return None;
+        let ix = {
+            let dir = self.get_mut(dir_path)?;
+            if !dir.is_dir() {
+                return None;
+            }
+            dir.children.retain(|c| !c.name.eq_ignore_ascii_case(&name));
+            dir.children.push(node);
+            dir.children.len() as u32 - 1
+        };
+        if !inserted_special {
+            self.shrink_free(inserted_size);
         }
-        dir.children.retain(|c| !c.name.eq_ignore_ascii_case(&name));
-        dir.children.push(node);
-        let ix = dir.children.len() as u32 - 1;
         let mut p = dir_path.to_vec();
         p.push(ix);
         Some(self.refresh_ancestors(&p))
@@ -385,10 +452,111 @@ impl Tree {
 
     /// Rename a node in place. Returns its new path.
     pub fn rename(&mut self, path: &[u32], new_name: &str) -> Option<NodePath> {
+        // Pseudo-items cannot be renamed (remove would reject them anyway).
+        if self.get(path).is_some_and(|n| n.is_special()) {
+            return None;
+        }
         let node = self.remove(path)?;
         let mut node = node;
         node.name = new_name.into();
         self.insert(&path[..path.len() - 1], node)
+    }
+
+    /// Attach `<Free space>` and `<Unknown>` under the root for a drive scan
+    /// (WinDirStat style). `total` and `free` are the volume figures from the
+    /// OS at scan time; `total == 0` means "not a drive" and does nothing.
+    /// Only positive entries are added. Re-attaching replaces old entries.
+    pub fn attach_volume_info(&mut self, total: u64, free: u64) {
+        if total == 0 {
+            return;
+        }
+        self.root.children.retain(|c| !c.is_special());
+        // `root.size` is still the scanned total here (no specials yet).
+        let scanned = self.root.size;
+        let used = total.saturating_sub(free);
+        let unknown = used.saturating_sub(scanned);
+        if free > 0 {
+            self.root.children.push(Node::free_space(free));
+        }
+        if unknown > 0 {
+            self.root.children.push(Node::unknown(unknown));
+        }
+        if free > 0 || unknown > 0 {
+            self.root.finalize();
+            self.generation += 1;
+        }
+    }
+
+    fn free_index(&self) -> Option<usize> {
+        self.root
+            .children
+            .iter()
+            .position(|c| c.kind == NodeKind::FreeSpace)
+    }
+
+    fn grow_free(&mut self, delta: u64) {
+        if delta == 0 {
+            return;
+        }
+        if let Some(ix) = self.free_index() {
+            let free = &mut self.root.children[ix];
+            free.size = free.size.saturating_add(delta);
+        }
+    }
+
+    fn shrink_free(&mut self, delta: u64) {
+        if delta == 0 {
+            return;
+        }
+        if let Some(ix) = self.free_index() {
+            let free = &mut self.root.children[ix];
+            free.size = free.size.saturating_sub(delta);
+        }
+    }
+
+    /// Whether this is a drive scan with pseudo-items attached.
+    pub fn is_drive_scan(&self) -> bool {
+        self.root.children.iter().any(|c| c.is_special())
+    }
+
+    /// Bytes in `<Free space>`, if present.
+    pub fn free_bytes(&self) -> Option<u64> {
+        self.root
+            .children
+            .iter()
+            .find(|c| c.kind == NodeKind::FreeSpace)
+            .map(|c| c.size)
+    }
+
+    /// Bytes in `<Unknown>`, if present.
+    pub fn unknown_bytes(&self) -> Option<u64> {
+        self.root
+            .children
+            .iter()
+            .find(|c| c.kind == NodeKind::Unknown)
+            .map(|c| c.size)
+    }
+
+    /// Real scanned bytes (excluding pseudo-items).
+    pub fn scanned_bytes(&self) -> u64 {
+        let pseudo: u64 = self
+            .root
+            .children
+            .iter()
+            .filter(|c| c.is_special())
+            .map(|c| c.size)
+            .sum();
+        self.root.size.saturating_sub(pseudo)
+    }
+
+    /// Used bytes on the volume (scanned + unknown), or `root.size` when this
+    /// is not a drive scan.
+    pub fn used_bytes(&self) -> u64 {
+        if self.is_drive_scan() {
+            self.scanned_bytes() + self.unknown_bytes().unwrap_or(0)
+        } else {
+            self.root.size
+        }
     }
 }
 
@@ -513,5 +681,71 @@ mod tests {
         let tree = sample_tree();
         let sub = tree.find(Path::new("/root/sub")).unwrap();
         assert_eq!(tree.get(&sub).unwrap().dominant_ext(), 1); // .bin
+    }
+
+    #[test]
+    fn attach_volume_info_adds_free_and_unknown() {
+        let mut tree = sample_tree(); // scanned = 50
+        assert!(!tree.is_drive_scan());
+        tree.attach_volume_info(200, 100);
+        // used = 100, unknown = 50, free = 100
+        assert!(tree.is_drive_scan());
+        assert_eq!(tree.free_bytes(), Some(100));
+        assert_eq!(tree.unknown_bytes(), Some(50));
+        assert_eq!(tree.scanned_bytes(), 50);
+        assert_eq!(tree.used_bytes(), 100);
+        assert_eq!(tree.root.size, 200);
+        // Aggregates ignore pseudo-items.
+        assert_eq!(tree.root.files, 3);
+        assert_eq!(tree.root.dirs, 1);
+        // Extension stats are untouched.
+        assert_eq!(tree.exts.len(), 2);
+        // Sorted largest-first: free (100) first.
+        assert_eq!(&*tree.root.children[0].name, FREE_SPACE_NAME);
+    }
+
+    #[test]
+    fn attach_volume_info_skips_zero_entries() {
+        let mut tree = sample_tree(); // scanned = 50
+        tree.attach_volume_info(50, 0);
+        // used = 50, unknown = 0, free = 0 -> no pseudo-items.
+        assert!(!tree.is_drive_scan());
+        assert_eq!(tree.root.size, 50);
+
+        let mut tree = sample_tree();
+        tree.attach_volume_info(0, 0);
+        assert!(!tree.is_drive_scan());
+    }
+
+    #[test]
+    fn pseudo_items_cannot_be_removed_or_renamed() {
+        let mut tree = sample_tree();
+        tree.attach_volume_info(200, 100);
+        let free_path: NodePath = vec![0]; // free (100) is largest
+        assert!(tree.get(&free_path).unwrap().is_special());
+        assert!(tree.remove(&free_path).is_none());
+        assert!(tree.rename(&free_path, "x").is_none());
+        assert!(tree.is_drive_scan());
+    }
+
+    #[test]
+    fn remove_grows_free_to_keep_total_constant() {
+        let mut tree = sample_tree(); // scanned 50
+        tree.attach_volume_info(200, 100); // total 200
+        let path = tree.find(Path::new("/root/c.txt")).unwrap(); // size 30
+        tree.remove(&path).unwrap();
+        assert_eq!(tree.scanned_bytes(), 20);
+        assert_eq!(tree.free_bytes(), Some(130));
+        assert_eq!(tree.root.size, 200);
+    }
+
+    #[test]
+    fn insert_shrinks_free_to_keep_total_constant() {
+        let mut tree = sample_tree();
+        tree.attach_volume_info(200, 100);
+        tree.insert(&[], Node::file("d.log".into(), 40, 8)).unwrap();
+        assert_eq!(tree.scanned_bytes(), 90);
+        assert_eq!(tree.free_bytes(), Some(60));
+        assert_eq!(tree.root.size, 200);
     }
 }

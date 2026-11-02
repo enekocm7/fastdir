@@ -40,18 +40,48 @@ impl FastDir {
             (Phase::Ready, Some(t)) => {
                 let t = t.read();
                 let (elapsed, cancelled) = self.last_scan.unwrap_or_default();
-                let drive = self
-                    .drives
-                    .iter()
-                    .find(|d| t.root_path.starts_with(&d.path));
+                let summary = if t.is_drive_scan() {
+                    let scanned = t.scanned_bytes();
+                    let used = t.used_bytes();
+                    let free = t.free_bytes().unwrap_or(0);
+                    let unknown = t.unknown_bytes().unwrap_or(0);
+                    if unknown > 0 {
+                        format!(
+                            "{} files · {} folders · {} scanned of {} used ({} free, {} unknown)",
+                            format::count(t.root.files as u64),
+                            format::count(t.root.dirs as u64),
+                            format::bytes(scanned),
+                            format::bytes(used),
+                            format::bytes(free),
+                            format::bytes(unknown),
+                        )
+                    } else {
+                        format!(
+                            "{} files · {} folders · {} scanned of {} used ({} free)",
+                            format::count(t.root.files as u64),
+                            format::count(t.root.dirs as u64),
+                            format::bytes(scanned),
+                            format::bytes(used),
+                            format::bytes(free),
+                        )
+                    }
+                } else {
+                    let drive = self
+                        .drives
+                        .iter()
+                        .find(|d| t.root_path.starts_with(&d.path));
+                    format!(
+                        "{} files · {} folders · {}{}",
+                        format::count(t.root.files as u64),
+                        format::count(t.root.dirs as u64),
+                        format::bytes(t.root.size),
+                        drive
+                            .map(|d| format!(" · {} free", format::bytes(d.free)))
+                            .unwrap_or_default(),
+                    )
+                };
                 format!(
-                    "{} files · {} folders · {}{}{}",
-                    format::count(t.root.files as u64),
-                    format::count(t.root.dirs as u64),
-                    format::bytes(t.root.size),
-                    drive
-                        .map(|d| format!(" · {} free", format::bytes(d.free)))
-                        .unwrap_or_default(),
+                    "{summary}{}",
                     format!(
                         " · scanned in {}{}",
                         format::duration(elapsed),

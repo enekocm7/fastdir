@@ -44,6 +44,8 @@ struct Key {
     highlight: Option<u16>,
     /// Bumped whenever the zoom root changes.
     zoom: u64,
+    show_free: bool,
+    show_unknown: bool,
 }
 
 pub struct TreemapView {
@@ -65,6 +67,8 @@ pub struct TreemapView {
     bounds: Rc<Cell<Bounds<Pixels>>>,
     scale: Rc<Cell<f32>>,
     rendering: bool,
+    show_free: bool,
+    show_unknown: bool,
     _task: Option<Task<()>>,
 }
 
@@ -87,7 +91,30 @@ impl TreemapView {
             bounds: Rc::new(Cell::new(Bounds::default())),
             scale: Rc::new(Cell::new(1.0)),
             rendering: false,
+            show_free: false,
+            show_unknown: false,
             _task: None,
+        }
+    }
+
+    pub fn with_options(show_free: bool, show_unknown: bool) -> Self {
+        let mut v = Self::new();
+        v.show_free = show_free;
+        v.show_unknown = show_unknown;
+        v
+    }
+
+    pub fn set_show_free(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_free != show {
+            self.show_free = show;
+            cx.notify();
+        }
+    }
+
+    pub fn set_show_unknown(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_unknown != show {
+            self.show_unknown = show;
+            cx.notify();
         }
     }
 
@@ -216,7 +243,15 @@ impl TreemapView {
                 .spawn(async move {
                     let t = tree.read();
                     let root = t.get(&zoom).unwrap_or(&t.root);
-                    treemap::render(root, key.w, key.h, background, key.highlight)
+                    treemap::render(
+                        root,
+                        key.w,
+                        key.h,
+                        background,
+                        key.highlight,
+                        key.show_free,
+                        key.show_unknown,
+                    )
                 })
                 .await;
             let Some(img) = RgbaImage::from_raw(key.w, key.h, buf) else {
@@ -253,7 +288,7 @@ impl TreemapView {
         let tree = self.tree.as_ref()?.read();
         let (w, h, x, y) = self.device_point(position);
         let root = tree.get(&self.zoom)?;
-        let rel = treemap::hit_test(root, w, h, x, y)?;
+        let rel = treemap::hit_test(root, w, h, x, y, self.show_free, self.show_unknown)?;
         let mut path = self.zoom.clone();
         path.extend(rel);
         Some(path)
@@ -310,6 +345,8 @@ impl Render for TreemapView {
         let zoom = self.zoom_gen;
         let zoom_path = self.zoom.clone();
         let has_tree = self.tree.is_some();
+        let show_free = self.show_free;
+        let show_unknown = self.show_unknown;
         let _ = window;
 
         let canvas = canvas(
@@ -320,7 +357,16 @@ impl Render for TreemapView {
                 let w = (f32::from(bounds.size.width) * scale).round() as u32;
                 let h = (f32::from(bounds.size.height) * scale).round() as u32;
                 if has_tree && w >= 4 && h >= 4 {
-                    let key = Key { generation, w, h, dark, highlight, zoom };
+                    let key = Key {
+                        generation,
+                        w,
+                        h,
+                        dark,
+                        highlight,
+                        zoom,
+                        show_free,
+                        show_unknown,
+                    };
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
                             entity.update(cx, |this, cx| this.request(key, cx)).ok();
@@ -346,7 +392,9 @@ impl Render for TreemapView {
                 for sel in &selection {
                     // Only things inside the zoomed folder are on screen.
                     let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else { continue };
-                    let Some(r) = treemap::rect_of(root, w, h, rel) else { continue };
+                    let Some(r) =
+                        treemap::rect_of(root, w, h, rel, show_free, show_unknown)
+                    else { continue };
                     let origin = bounds.origin;
                     let rb = Bounds::new(
                         point(
