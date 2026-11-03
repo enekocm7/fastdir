@@ -73,6 +73,15 @@ culprit? Rename, move, recycle or delete it right there.
 - **File operations** that update the tree in place, with no rescan:
   rename, move (also across drives), move to Recycle Bin, delete permanently,
   refresh a single folder, show in Explorer, open, copy path.
+- **Compression** (Windows on NTFS volumes): right-click **Compress…** to
+  shrink files and folders with NTFS compression (LZNT1) or the CompactOS /
+  WOF algorithms (XPRESS4K, XPRESS8K, XPRESS16K, LZX). The dialog shows the
+  item count, total size, an estimated saving and can skip already-compressed
+  formats (`.zip`, `.7z`, `.mp4`, `.jpg`, …); folders can also be flagged so
+  new files inherit NTFS compression. It runs on the file-operation queue
+  with progress and cancel, reports items that could not be compressed, and
+  updates the size on disk in place. **Uncompress** reverses it. The actions
+  are hidden on non-NTFS volumes and on machines that are not Windows.
 - **Custom actions** - wire cleanup commands into the right-click **Run**
   menu (`cargo clean`, `git gc`, `docker system prune`, "open a terminal
   here", "open in VS Code", ...) from `[[actions]]` in `config.toml` or

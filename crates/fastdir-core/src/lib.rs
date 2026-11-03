@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod categories;
+pub mod compress;
 pub mod diff;
 pub mod drives;
 pub mod elevate;

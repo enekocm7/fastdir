@@ -37,6 +37,7 @@ impl FastDir {
         let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
         let no_ops = is_root || special;
         let offline = !self.can_touch_selected();
+        let can_compress = self.can_compress_selected();
         menu.separator()
             .menu_with_icon_and_disabled(
                 self.tr("menu.zoom_in"),
@@ -69,6 +70,19 @@ impl FastDir {
                 Box::new(RefreshItem),
                 !is_dir || offline,
             )
+            .when(can_compress, |menu| {
+                menu.separator()
+                    .menu_with_icon(
+                        self.tr("menu.compress"),
+                        IconName::Download,
+                        Box::new(CompressItem),
+                    )
+                    .menu_with_icon(
+                        self.tr("menu.uncompress"),
+                        IconName::ArrowUp,
+                        Box::new(UncompressItem),
+                    )
+            })
             .separator()
             .menu_with_icon_and_disabled(
                 self.tr("menu.export"),

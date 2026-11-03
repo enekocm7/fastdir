@@ -1024,6 +1024,54 @@ impl Tree {
         *self.at_mut(slot) = dir;
     }
 
+    /// Re-measure the allocated size of every file below `path` with
+    /// `measure` and refresh the aggregates and sort order on the way up.
+    ///
+    /// Used after an operation that changes how the data is stored on disk
+    /// (compression) without changing its logical size, so the tree shows the
+    /// new size on disk without a rescan.
+    pub fn refresh_disk_sizes(
+        &mut self,
+        path: &[u32],
+        mut measure: impl FnMut(&Path) -> Option<u64>,
+    ) -> Option<NodePath> {
+        let fs = self.fs_path(path)?;
+        self.refresh_disk_rec(path, &fs, &mut measure);
+        Some(self.refresh_ancestors(path))
+    }
+
+    fn refresh_disk_rec(
+        &mut self,
+        path: &[u32],
+        fs: &Path,
+        measure: &mut impl FnMut(&Path) -> Option<u64>,
+    ) {
+        let Some(node) = self.get(path).copied() else {
+            return;
+        };
+        if node.is_dir() {
+            let names: Vec<Box<str>> = self
+                .children(&node)
+                .iter()
+                .map(|child| self.name(child).into())
+                .collect();
+            for (ix, name) in names.iter().enumerate() {
+                let mut child = path.to_vec();
+                child.push(ix as u32);
+                self.refresh_disk_rec(&child, &fs.join(name.as_ref()), measure);
+            }
+            if let Some(slot) = self.slot(path) {
+                self.finalize(slot);
+            }
+        } else if node.kind() == NodeKind::File
+            && !node.hard_link()
+            && let Some(disk) = measure(fs)
+            && let Some(n) = self.get_mut(path)
+        {
+            n.disk_size = disk;
+        }
+    }
+
     /// Re-aggregate and re-sort every directory on `path` from the deepest up.
     /// Returns the new index path of the node that was at `path` (its position
     /// among siblings can change when sizes change).
@@ -1340,6 +1388,25 @@ mod tests {
             .iter()
             .map(|c| tree.name(c).to_string())
             .collect()
+    }
+
+    #[test]
+    fn refresh_disk_sizes_updates_files_and_aggregates() {
+        let mut tree = sample_tree();
+        tree.refresh_disk_sizes(&[], |path| {
+            Some(match path.file_name()?.to_str()? {
+                "a.txt" => 1,
+                "b.bin" => 2,
+                "c.txt" => 3,
+                _ => return None,
+            })
+        })
+        .unwrap();
+        assert_eq!(tree.root().disk_size, 6);
+        let sub = tree.find(Path::new("/root/sub")).unwrap();
+        assert_eq!(tree.get(&sub).unwrap().disk_size, 3);
+        let a = tree.find(Path::new("/root/sub/a.txt")).unwrap();
+        assert_eq!(tree.get(&a).unwrap().disk_size, 1);
     }
 
     #[test]

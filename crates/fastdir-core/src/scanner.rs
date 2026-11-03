@@ -438,18 +438,28 @@ fn scan_detached(path: &Path, name: &str, progress: &Progress, options: &ScanOpt
 pub fn allocated_size(path: &Path) -> u64 {
     use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_SPARSE_FILE,
+        FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE,
     };
 
     let meta = std::fs::metadata(path).ok();
     let logical = meta.as_ref().map(|m| m.len()).unwrap_or(0);
     let attrs = meta.as_ref().map(|m| m.file_attributes()).unwrap_or(0);
-    if attrs & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) != 0
+    let cluster = cluster_size(path);
+    // WOF-compressed files (CompactOS) expose no attribute at all: their
+    // compressed size is only visible through `GetCompressedFileSizeW`.
+    if attrs
+        & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE | FILE_ATTRIBUTE_REPARSE_POINT)
+        != 0
         && let Some(size) = compressed_size(path)
     {
         return size;
     }
-    round_up(logical, cluster_size(path))
+    if let Some(size) = compressed_size(path)
+        && size.saturating_add(cluster) <= logical
+    {
+        return size;
+    }
+    round_up(logical, cluster)
 }
 
 #[cfg(unix)]
@@ -943,8 +953,15 @@ fn read_by_id(
                     // `AllocationSize` is exact for compressed/sparse files.
                     // For ordinary files it can be the tiny MFT-resident size,
                     // so round the logical size up to the cluster instead.
-                    let special =
-                        attrs & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) != 0;
+                    // WOF (CompactOS) files expose neither flag: they report
+                    // an allocation size of 0 and keep the compressed size in
+                    // `GetCompressedFileSizeW`.
+                    let special = attrs
+                        & (FILE_ATTRIBUTE_COMPRESSED
+                            | FILE_ATTRIBUTE_SPARSE_FILE
+                            | FILE_ATTRIBUTE_REPARSE_POINT)
+                        != 0
+                        || (alloc == 0 && size > 0);
                     let disk_size = if special {
                         if alloc > 0 {
                             alloc
@@ -1046,13 +1063,17 @@ fn list_dir_find(path: &Path, cluster: u64, mut f: impl FnMut(Entry)) -> bool {
                     }
                 } else {
                     let size = ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
-                    let disk_size =
-                        if attrs & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) != 0 {
-                            compressed_size(&path.join(&*name))
-                                .unwrap_or_else(|| round_up(size, cluster))
-                        } else {
-                            round_up(size, cluster)
-                        };
+                    let disk_size = if attrs
+                        & (FILE_ATTRIBUTE_COMPRESSED
+                            | FILE_ATTRIBUTE_SPARSE_FILE
+                            | FILE_ATTRIBUTE_REPARSE_POINT)
+                        != 0
+                    {
+                        compressed_size(&path.join(&*name))
+                            .unwrap_or_else(|| round_up(size, cluster))
+                    } else {
+                        round_up(size, cluster)
+                    };
                     f(Entry::File {
                         name,
                         size,
