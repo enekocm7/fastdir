@@ -14,6 +14,7 @@ use std::path::PathBuf;
 const CLI_WORDS: &[&str] = &[
     "scan",
     "top",
+    "duplicates",
     "mcp",
     "help",
     "version",
@@ -91,6 +92,18 @@ pub struct TopCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DuplicatesCommand {
+    pub scan: ScanArgs,
+    pub out: OutputArgs,
+    /// Smallest file to hash; zero-byte files are always skipped.
+    pub min_size: u64,
+    /// Only files with one of these extensions (repeatable, empty = all).
+    pub extensions: Vec<String>,
+    /// Most groups to report (`None` = all).
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpCommand {
     /// Expose `recycle_path` / `delete_path`. Off by default.
     pub allow_destructive: bool,
@@ -102,6 +115,7 @@ pub enum HelpTopic {
     General,
     Scan,
     Top,
+    Duplicates,
     Mcp,
 }
 
@@ -111,11 +125,15 @@ pub enum Command {
     Version,
     Scan(ScanCommand),
     Top(TopCommand),
+    Duplicates(DuplicatesCommand),
     Mcp(McpCommand),
 }
 
 /// Default number of files `top` reports.
 pub const DEFAULT_TOP_LIMIT: usize = 20;
+
+/// Default smallest file `duplicates` hashes.
+pub const DEFAULT_DUPLICATE_MIN_SIZE: u64 = fastdir_core::duplicates::DEFAULT_MIN_SIZE;
 
 /// A usage error, printed with a hint to run `--help`. Exit code 2.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -212,11 +230,13 @@ pub fn parse(args: &[OsString]) -> Result<Command, UsageError> {
             None => Ok(Command::Help(HelpTopic::General)),
             Some("scan") => Ok(Command::Help(HelpTopic::Scan)),
             Some("top") => Ok(Command::Help(HelpTopic::Top)),
+            Some("duplicates") => Ok(Command::Help(HelpTopic::Duplicates)),
             Some("mcp") => Ok(Command::Help(HelpTopic::Mcp)),
             Some(other) => err(format!("unknown command \"{other}\"")),
         },
         "scan" => parse_scan_like(cur, HelpTopic::Scan),
         "top" => parse_scan_like(cur, HelpTopic::Top),
+        "duplicates" => parse_duplicates(cur),
         "mcp" => parse_mcp(cur),
         other if other.starts_with('-') => err(format!("unknown option \"{other}\"")),
         other => err(format!("unknown command \"{other}\"")),
@@ -330,6 +350,109 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     })
 }
 
+fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
+    let mut path: Option<String> = None;
+    let mut threads = None;
+    let mut exclude = Vec::new();
+    let mut follow_junctions = false;
+    let mut cross_volumes = false;
+    let mut skip_hidden_system = false;
+    let mut quiet = false;
+    let mut format = Format::Json;
+    let mut output = None;
+    let mut pretty = false;
+    let mut min_size = DEFAULT_DUPLICATE_MIN_SIZE;
+    let mut extensions = Vec::new();
+    let mut limit = None;
+    let mut positional_only = false;
+
+    while let Some(arg) = cur.args.next() {
+        if positional_only || !arg.starts_with('-') || arg == "-" {
+            if path.is_some() {
+                return err(format!("unexpected extra argument \"{arg}\""));
+            }
+            path = Some(arg);
+            continue;
+        }
+        let (name, inline) = split_eq(&arg);
+        let takes_value = matches!(
+            name,
+            "--threads"
+                | "--exclude"
+                | "--format"
+                | "--output"
+                | "-o"
+                | "--min-size"
+                | "--ext"
+                | "--limit"
+                | "-n"
+        );
+        if inline.is_some() && !takes_value {
+            return err(format!("{name} does not take a value"));
+        }
+        match name {
+            "--" => positional_only = true,
+            "--help" | "-h" => return Ok(Command::Help(HelpTopic::Duplicates)),
+            "--threads" => {
+                let n = parse_number(name, &cur.value(name, inline)?, 1)?;
+                if n > 64 {
+                    return err("--threads expects a number between 1 and 64");
+                }
+                threads = Some(n);
+            }
+            "--exclude" => exclude.push(cur.value(name, inline)?),
+            "--follow-junctions" => follow_junctions = true,
+            "--cross-volumes" => cross_volumes = true,
+            "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--quiet" | "-q" => quiet = true,
+            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--output" | "-o" => {
+                let v = cur.value(name, inline)?;
+                output = if v == "-" {
+                    None
+                } else {
+                    Some(PathBuf::from(v))
+                };
+            }
+            "--pretty" => pretty = true,
+            "--min-size" => {
+                let raw = cur.value(name, inline)?;
+                min_size = fastdir_core::filter::parse_size(&raw).ok_or_else(|| {
+                    UsageError(format!(
+                        "--min-size expects a size such as 500MB or 1 GiB, got \"{raw}\""
+                    ))
+                })?;
+            }
+            "--ext" => extensions.push(cur.value(name, inline)?),
+            "--limit" | "-n" => limit = Some(parse_number(name, &cur.value(name, inline)?, 1)?),
+            _ => return err(format!("unknown option \"{name}\"")),
+        }
+    }
+    let Some(path) = path else {
+        return err("missing <path> to scan");
+    };
+    Ok(Command::Duplicates(DuplicatesCommand {
+        scan: ScanArgs {
+            path: normalize_path(&path),
+            threads,
+            exclude,
+            follow_junctions,
+            cross_volumes,
+            skip_hidden_system,
+            collect_owners: false,
+            quiet,
+        },
+        out: OutputArgs {
+            format,
+            output,
+            pretty,
+        },
+        min_size,
+        extensions,
+        limit,
+    }))
+}
+
 fn parse_mcp(cur: Cursor) -> Result<Command, UsageError> {
     let mut allow_destructive = false;
     for arg in cur.args {
@@ -350,6 +473,8 @@ Usage:
   fastdir [<folder>]              open the GUI (optionally scanning <folder>)
   fastdir scan <path> [options]   scan <path> and print the tree as JSON or CSV
   fastdir top <path> [options]    print the largest files under <path>
+  fastdir duplicates <path> [options]
+                                  list groups of identical files and the space they waste
   fastdir mcp [options]           run an MCP server on stdin/stdout
   fastdir help [<command>]        show help for a command
   fastdir --version               print the version
@@ -405,6 +530,31 @@ Scanning:
   --skip-hidden, --owners, -q/--quiet   as for `fastdir scan`
 ";
 
+pub const DUPLICATES_HELP: &str = "\
+Usage: fastdir duplicates <path> [options]
+
+Scans <path> and lists groups of byte-identical files, largest waste first.
+Files are grouped by size, then the first and last 64 KB are hashed, and only
+the files that still match get a full BLAKE3 hash. Zero-byte files and extra
+hard links to a file are not duplicates.
+
+Output:
+  --format json|csv       output format (default: json)
+  -o, --output <file|->   write to a file instead of stdout
+  --pretty                indent the JSON
+
+Duplicates:
+  --min-size <size>       smallest file to consider (default: 1 MB);
+                          accepts 500MB or 1.5 GiB
+  --ext <ext>             only files with this extension (repeatable), e.g. .mp4
+  -n, --limit <groups>    how many groups to report (default: all);
+                          the totals still count every group found
+
+Scanning:
+  --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
+  --skip-hidden, -q/--quiet   as for `fastdir scan`
+";
+
 pub const MCP_HELP: &str = "\
 Usage: fastdir mcp [--allow-destructive]
 
@@ -413,8 +563,8 @@ Scans are kept in memory, so follow-up questions about the same folder do
 not rescan it.
 
 Tools: scan_path, get_children, largest_files, search, path_info,
-export_scan. With --allow-destructive, recycle_path and delete_path are
-also offered; they are off by default.
+find_duplicates, export_scan. With --allow-destructive, recycle_path and
+delete_path are also offered; they are off by default.
 ";
 
 #[cfg(test)]
@@ -444,6 +594,7 @@ mod tests {
     fn cli_invocation_detection() {
         assert!(is_cli_invocation(&args(&["scan", "C:\\"])));
         assert!(is_cli_invocation(&args(&["top"])));
+        assert!(is_cli_invocation(&args(&["duplicates", "C:\\"])));
         assert!(is_cli_invocation(&args(&["mcp"])));
         assert!(is_cli_invocation(&args(&["--version"])));
         assert!(is_cli_invocation(&args(&["--help"])));
@@ -459,6 +610,14 @@ mod tests {
         assert_eq!(parse_ok(&["-h"]), Command::Help(HelpTopic::General));
         assert_eq!(parse_ok(&["help", "scan"]), Command::Help(HelpTopic::Scan));
         assert_eq!(parse_ok(&["help", "top"]), Command::Help(HelpTopic::Top));
+        assert_eq!(
+            parse_ok(&["help", "duplicates"]),
+            Command::Help(HelpTopic::Duplicates)
+        );
+        assert_eq!(
+            parse_ok(&["duplicates", "--help"]),
+            Command::Help(HelpTopic::Duplicates)
+        );
         assert_eq!(
             parse_ok(&["scan", "--help"]),
             Command::Help(HelpTopic::Scan)
@@ -564,6 +723,59 @@ mod tests {
             Command::Top(t) => assert_eq!(t.limit, 3),
             other => panic!("expected top, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn duplicates_options() {
+        match parse_ok(&["duplicates", "dir"]) {
+            Command::Duplicates(d) => {
+                assert_eq!(d.scan.path, PathBuf::from("dir"));
+                assert_eq!(d.out.format, Format::Json);
+                assert_eq!(d.min_size, DEFAULT_DUPLICATE_MIN_SIZE);
+                assert!(d.extensions.is_empty());
+                assert_eq!(d.limit, None);
+            }
+            other => panic!("expected duplicates, got {other:?}"),
+        }
+        let c = match parse_ok(&[
+            "duplicates",
+            "D:\\",
+            "--min-size",
+            "1.5 GiB",
+            "--ext",
+            "mp4",
+            "--ext=.iso",
+            "-n",
+            "5",
+            "--format",
+            "csv",
+            "-o",
+            "dupes.csv",
+            "--threads",
+            "4",
+            "--exclude",
+            "node_modules",
+            "--skip-system",
+            "-q",
+            "--pretty",
+        ]) {
+            Command::Duplicates(d) => d,
+            other => panic!("expected duplicates, got {other:?}"),
+        };
+        assert_eq!(c.min_size, 3 * 1024 * 1024 * 1024 / 2);
+        assert_eq!(c.extensions, vec!["mp4", ".iso"]);
+        assert_eq!(c.limit, Some(5));
+        assert_eq!(c.out.format, Format::Csv);
+        assert_eq!(c.out.output, Some(PathBuf::from("dupes.csv")));
+        assert_eq!(c.scan.threads, Some(4));
+        assert_eq!(c.scan.exclude, vec!["node_modules"]);
+        assert!(c.scan.skip_hidden_system && c.scan.quiet);
+        assert!(c.out.pretty);
+
+        assert!(parse_err(&["duplicates"]).contains("missing <path>"));
+        assert!(parse_err(&["duplicates", "d", "--min-size", "lots"]).contains("--min-size"));
+        assert!(parse_err(&["duplicates", "d", "--limit", "0"]).contains("at least 1"));
+        assert!(parse_err(&["duplicates", "d", "--max-depth", "2"]).contains("--max-depth"));
     }
 
     #[test]

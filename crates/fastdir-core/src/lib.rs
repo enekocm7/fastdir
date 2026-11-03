@@ -8,6 +8,7 @@ pub mod actions;
 pub mod categories;
 pub mod diff;
 pub mod drives;
+pub mod duplicates;
 pub mod elevate;
 pub mod export;
 pub mod filter;

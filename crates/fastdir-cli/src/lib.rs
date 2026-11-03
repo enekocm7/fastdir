@@ -13,7 +13,10 @@ pub mod mcp;
 pub mod schema;
 mod signal;
 
-use args::{Command, Format, HelpTopic, OutputArgs, ScanArgs, ScanCommand, TopCommand};
+use args::{
+    Command, DuplicatesCommand, Format, HelpTopic, OutputArgs, ScanArgs, ScanCommand, TopCommand,
+};
+use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
 use fastdir_core::export::{ExportOptions, export_csv};
 use fastdir_core::format;
 use fastdir_core::model::Tree;
@@ -86,6 +89,7 @@ fn run_inline(args: &[OsString]) -> i32 {
                 HelpTopic::General => args::GENERAL_HELP,
                 HelpTopic::Scan => args::SCAN_HELP,
                 HelpTopic::Top => args::TOP_HELP,
+                HelpTopic::Duplicates => args::DUPLICATES_HELP,
                 HelpTopic::Mcp => args::MCP_HELP,
             });
             Ok(())
@@ -96,6 +100,7 @@ fn run_inline(args: &[OsString]) -> i32 {
         }
         Command::Scan(c) => run_scan_command(&c),
         Command::Top(c) => run_top_command(&c),
+        Command::Duplicates(c) => run_duplicates_command(&c),
         Command::Mcp(c) => mcp::serve(c.allow_destructive).map_err(io_error),
     };
     match result {
@@ -306,6 +311,101 @@ fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
     }
 }
 
+fn duplicate_options(c: &DuplicatesCommand) -> DuplicateOptions {
+    DuplicateOptions {
+        min_size: c.min_size,
+        extensions: c.extensions.clone(),
+        limit: c.limit,
+        threads: c.scan.threads,
+    }
+}
+
+fn run_duplicates_command(c: &DuplicatesCommand) -> Result<(), CliError> {
+    let scanned = scan_with_progress(&c.scan)?;
+    signal::install();
+    let progress = Arc::new(DuplicateProgress::default());
+    let done = Arc::new(AtomicBool::new(false));
+    let reporter = {
+        let progress = progress.clone();
+        let done = done.clone();
+        let quiet = c.scan.quiet;
+        std::thread::spawn(move || report_duplicate_progress(&progress, &done, quiet))
+    };
+    let options = duplicate_options(c);
+    let report = duplicates::find(&scanned.tree, &[], &options, progress.clone());
+    done.store(true, Ordering::Relaxed);
+    let _ = reporter.join();
+    if report.cancelled || signal::interrupted() {
+        return Err(CliError::new(exit::CANCELLED, "duplicates cancelled"));
+    }
+    if !c.scan.quiet {
+        let shown = if c.limit.is_some_and(|limit| limit < report.total_groups) {
+            format!(
+                "{} (showing {})",
+                format::count(report.total_groups as u64),
+                format::count(report.groups.len() as u64)
+            )
+        } else {
+            format::count(report.total_groups as u64)
+        };
+        let mut line = format!(
+            "Found {} duplicate groups: {} reclaimable ({} hashed in {})",
+            shown,
+            format::bytes(report.total_wasted),
+            format::bytes(report.bytes_hashed),
+            format::duration(report.elapsed),
+        );
+        if report.hash_errors > 0 {
+            line.push_str(&format!(
+                " ({} unreadable)",
+                format::count(report.hash_errors)
+            ));
+        }
+        eprintln!("{line}");
+    }
+    match c.out.format {
+        Format::Json => write_json(
+            &c.out,
+            &schema::duplicates_doc(&scanned.meta, &report, &options),
+        ),
+        Format::Csv => {
+            let mut w = open_output(&c.out)?;
+            w.write_all(schema::duplicates_csv(&report).as_bytes())
+                .and_then(|_| w.flush())
+                .map_err(io_error)
+        }
+    }
+}
+
+/// Draws the hashing counter on an interactive stderr and forwards `Ctrl+C`
+/// to the duplicate scanner.
+fn report_duplicate_progress(progress: &DuplicateProgress, done: &AtomicBool, quiet: bool) {
+    let live = !quiet && io::stderr().is_terminal();
+    let mut last_draw = Instant::now();
+    let mut drew = false;
+    while !done.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(50));
+        if signal::interrupted() {
+            progress.cancel.store(true, Ordering::Relaxed);
+        }
+        if live && last_draw.elapsed() >= Duration::from_millis(250) {
+            last_draw = Instant::now();
+            let line = format!(
+                "Hashing... {} files, {}  {}",
+                format::count(progress.files_hashed.load(Ordering::Relaxed)),
+                format::bytes(progress.bytes_hashed.load(Ordering::Relaxed)),
+                progress.current.lock().as_str(),
+            );
+            let line: String = line.chars().take(110).collect();
+            eprint!("\r{line:<110}");
+            drew = true;
+        }
+    }
+    if drew {
+        eprint!("\r{:<110}\r", "");
+    }
+}
+
 /// Connect a GUI-subsystem process to the console it was started from, so
 /// `fastdir scan ...` can print. Redirected handles (pipes, files) are
 /// inherited regardless and are left alone; only missing ones are pointed
@@ -384,6 +484,37 @@ mod tests {
         assert_eq!(resolve_root(&file).unwrap_err().code, exit::NOT_FOUND);
         let resolved = resolve_root(&dir).unwrap();
         assert!(resolved.is_absolute());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn duplicates_writes_versioned_json_to_a_file() {
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-dupes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.bin"), b"identical").unwrap();
+        std::fs::write(dir.join("b.bin"), b"identical").unwrap();
+        std::fs::write(dir.join("c.bin"), b"different").unwrap();
+        let out =
+            std::env::temp_dir().join(format!("fastdir-cli-dupes-{}.json", std::process::id()));
+        let code = run(vec![
+            "duplicates".into(),
+            dir.clone().into_os_string(),
+            "-q".into(),
+            "--min-size".into(),
+            "1".into(),
+            "-o".into(),
+            out.clone().into_os_string(),
+        ]);
+        assert_eq!(code, exit::OK);
+        let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+        assert_eq!(doc["schema"], "fastdir.duplicates");
+        assert_eq!(doc["version"], 1);
+        assert_eq!(doc["total_groups"], 1);
+        assert_eq!(doc["total_wasted"], 9);
+        assert_eq!(doc["groups"][0]["size"], 9);
+        assert_eq!(doc["groups"][0]["files"].as_array().unwrap().len(), 2);
+        let _ = std::fs::remove_file(&out);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
