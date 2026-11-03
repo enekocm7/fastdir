@@ -222,6 +222,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Složky",
         "list.col_date" => "Poslední změna",
         "list.tree_tab" => "Adresářový strom",
+        "list.col_owner" => "Vlastník",
+        "list.owner_col" => "Vlastník",
+        "list.by_owner" => "Podle vlastníka",
+        "list.unknown_owner" => "(neznámý)",
         "list.top_tab" => "Největší soubory ({n})",
         "list.no_match" => "Filtru neodpovídá žádná položka",
         "list.empty" => "Tato složka je prázdná",
@@ -319,6 +323,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Vlákna skenování",
         "set.scan.threads_cap" => "Použije je příští skenování (1-64).",
         "set.scan.partial" => "Zobrazovat průběžné výsledky během skenování",
+        "set.scan.owners" => "Sbírat vlastníky souborů",
+        "set.scan.owners_cap" => "Zaznamená vlastníka každého souboru pro sloupec Vlastník a součty podle uživatele. Pomalejší skenování.",
         "set.scan.partial_cap" => {
             "Dokončené složky a náhled stromové mapy se zobrazí před koncem skenování."
         }
@@ -367,6 +373,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Sloupec složek",
         "set.list.modified_col" => "Sloupec poslední změny",
         "set.list.disk_col" => "Sloupec velikosti na disku",
+        "set.list.owner_col" => "Sloupec Vlastník",
         "tb.menu_hide_empty" => "Skrýt prázdné složky",
         "tb.tip_hide_empty" => "Skrýt prázdné složky (bez souborů)",
         "set.list.hide_empty" => "Skrýt prázdné složky",

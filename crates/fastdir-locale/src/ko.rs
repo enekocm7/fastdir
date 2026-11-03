@@ -228,6 +228,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "폴더 수",
         "list.col_date" => "마지막 변경",
         "list.tree_tab" => "디렉터리 트리",
+        "list.col_owner" => "소유자",
+        "list.owner_col" => "소유자",
+        "list.by_owner" => "소유자별",
+        "list.unknown_owner" => "(알 수 없음)",
         "list.top_tab" => "상위 파일 ({n})",
         "list.no_match" => "필터와 일치하는 항목이 없습니다",
         "list.empty" => "이 폴더는 비어 있습니다",
@@ -319,6 +323,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "검사 스레드",
         "set.scan.threads_cap" => "다음 검사에 사용됩니다 (1-64).",
         "set.scan.partial" => "검사 중 부분 결과 표시",
+        "set.scan.owners" => "파일 소유자 수집",
+        "set.scan.owners_cap" => "소유자 열과 사용자별 합계를 위해 각 파일의 소유자를 기록합니다. 검색이 느려집니다.",
         "set.scan.partial_cap" => {
             "검사가 끝나기 전에 완료된 폴더와 트리맵 미리보기가 나타납니다."
         }
@@ -367,6 +373,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "폴더 수 열",
         "set.list.modified_col" => "마지막 변경 열",
         "set.list.disk_col" => "디스크 사용 크기 열",
+        "set.list.owner_col" => "소유자 열",
         "tb.menu_hide_empty" => "빈 폴더 숨기기",
         "tb.tip_hide_empty" => "빈 폴더 숨기기 (파일이 없는 폴더)",
         "set.list.hide_empty" => "빈 폴더 숨기기",

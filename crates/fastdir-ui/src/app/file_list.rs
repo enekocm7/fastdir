@@ -12,6 +12,7 @@ fn sort_top_files(files: &mut [FileEntry], sort: (SortKey, bool)) {
             SortKey::Size => a.size.cmp(&b.size),
             SortKey::Disk => a.disk_size.cmp(&b.disk_size),
             SortKey::Modified => a.modified.cmp(&b.modified),
+            SortKey::Owner => a.owner.cmp(&b.owner),
             _ => a.size.cmp(&b.size),
         }
         .then_with(|| a.name.cmp(&b.name));
@@ -27,8 +28,8 @@ impl FastDir {
         if key == SortKey::Size && desc {
             return idx; // children are stored in this order
         }
-        idx.sort_by(|&a, &b| {
-            let (a, b) = (&c[a as usize], &c[b as usize]);
+        idx.sort_by(|&ia, &ib| {
+            let (a, b) = (&c[ia as usize], &c[ib as usize]);
             let ord = match key {
                 SortKey::Name => b.is_dir().cmp(&a.is_dir()).reverse().then_with(|| {
                     tree.name(a)
@@ -41,6 +42,16 @@ impl FastDir {
                 SortKey::Files => a.files.cmp(&b.files),
                 SortKey::Dirs => a.dirs.cmp(&b.dirs),
                 SortKey::Modified => a.modified().cmp(&b.modified()),
+                SortKey::Owner => tree
+                    .owner_name(tree.child_owner(node, ia as usize))
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .cmp(
+                        &tree
+                            .owner_name(tree.child_owner(node, ib as usize))
+                            .unwrap_or("")
+                            .to_lowercase(),
+                    ),
             };
             if desc { ord.reverse() } else { ord }
         });
@@ -102,6 +113,7 @@ impl FastDir {
         }
         /// Keep every match plus the ancestors needed to reach it. Returns
         /// whether this subtree contributed a row.
+        #[allow(clippy::too_many_arguments)]
         fn walk_filtered(
             tree: &Tree,
             node: &Node,
@@ -110,6 +122,7 @@ impl FastDir {
             rows: &mut Vec<Row>,
             sort: (SortKey, bool),
             filter: &Filter,
+            owner_filter: Option<u16>,
             hide_empty: bool,
         ) -> bool {
             if hidden(node, depth, hide_empty) {
@@ -129,12 +142,14 @@ impl FastDir {
                         rows,
                         sort,
                         filter,
+                        owner_filter,
                         hide_empty,
                     );
                     path.pop();
                 }
             }
-            let matched = filter.matches(tree.name(node), node, tree.ext_name(node));
+            let owner_ok = owner_filter.is_none_or(|want| tree.owner_at(path) == want);
+            let matched = owner_ok && filter.matches(tree.name(node), node, tree.ext_name(node));
             if matched || any {
                 rows.insert(
                     start,
@@ -150,7 +165,8 @@ impl FastDir {
             }
         }
         let mut path = Vec::new();
-        if self.filter.is_active() {
+        let owner_filter = self.selected_owner;
+        if self.filter.is_active() || owner_filter.is_some() {
             walk_filtered(
                 &tree,
                 tree.root(),
@@ -159,6 +175,7 @@ impl FastDir {
                 &mut self.rows,
                 self.sort,
                 &self.filter,
+                owner_filter,
                 hide_empty,
             );
             // Start on the first actual match, not on an ancestor shown for
@@ -186,7 +203,31 @@ impl FastDir {
     /// Rebuild the extension panel rows for the current grouping mode.
     fn rebuild_ext_rows(&mut self, tree: &Tree) {
         self.ext_rows.clear();
+        self.owner_rows.clear();
         match self.settings.list.ext_grouping {
+            ExtGrouping::Owner if tree.has_owners() => {
+                let (key, desc) = self.owner_sort;
+                let mut rows = tree.owner_totals();
+                rows.sort_unstable_by(|a, b| {
+                    let ord = match key {
+                        SortKey::Name => tree
+                            .owner_name(a.owner)
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .cmp(&tree.owner_name(b.owner).unwrap_or("").to_lowercase()),
+                        SortKey::Disk => a.disk_size.cmp(&b.disk_size),
+                        SortKey::Files => a.files.cmp(&b.files),
+                        _ => a.size.cmp(&b.size),
+                    };
+                    if desc { ord.reverse() } else { ord }
+                });
+                self.owner_rows = rows;
+                self.ext_rows = self
+                    .owner_rows
+                    .iter()
+                    .map(|total| ExtRow::Owner { owner: total.owner })
+                    .collect();
+            }
             ExtGrouping::Extension => {
                 self.ext_rows = (0..tree.exts.len() as u16)
                     .filter(|&i| tree.exts[i as usize].files > 0)
@@ -214,6 +255,14 @@ impl FastDir {
                     }
                 }
             }
+            // The owner view needs owners; a saved setting pointing at it on a
+            // scan without them falls back to the extension list.
+            ExtGrouping::Owner => {
+                self.ext_rows = (0..tree.exts.len() as u16)
+                    .filter(|&i| tree.exts[i as usize].files > 0)
+                    .map(|ext| ExtRow::Extension { ext })
+                    .collect();
+            }
         }
     }
 
@@ -228,6 +277,21 @@ impl FastDir {
         // A highlight from the other view would keep dimming the treemap
         // with no visible row selected, so clear it.
         self.set_selected_ext(None, cx);
+        if let Some(tree) = self.tree.clone() {
+            let tree = tree.read();
+            self.rebuild_ext_rows(&tree);
+        }
+        self.ext_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Sort the per-user totals view by one of its columns.
+    pub(super) fn set_owner_sort(&mut self, key: SortKey, cx: &mut Context<Self>) {
+        if self.owner_sort.0 == key {
+            self.owner_sort.1 = !self.owner_sort.1;
+        } else {
+            self.owner_sort = (key, key != SortKey::Name);
+        }
         if let Some(tree) = self.tree.clone() {
             let tree = tree.read();
             self.rebuild_ext_rows(&tree);
@@ -334,6 +398,14 @@ impl FastDir {
                 show.show_modified,
                 show.show_disk,
             );
+            let show_owner = show.show_owner && tree.has_owners();
+            let owner_s = if show_owner {
+                tree.owner_name(tree.owner_at(&row.path))
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                String::new()
+            };
             let size_s = self.bytes(node.size);
             let disk_s = self.bytes(node.disk_size);
             let pct_s = self.percent_of(&tree, &row.path, node);
@@ -494,10 +566,17 @@ impl FastDir {
                                 .when(filtering && row.matched, |d| {
                                     d.font_weight(FontWeight::SEMIBOLD)
                                 })
-                                .child(SharedString::from(self.display_name(tree.name(node)).to_string())),
+                                .child(SharedString::from(
+                                    self.display_name(tree.name(node)).to_string(),
+                                )),
                         )
                         .when(node.hard_link(), |d| {
-                            d.child(div().flex_shrink_0().text_color(muted).child(self.tr("list.hard_link")))
+                            d.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_color(muted)
+                                    .child(self.tr("list.hard_link")),
+                            )
                         }),
                 )
                 .child(
@@ -558,6 +637,19 @@ impl FastDir {
                         Some(color) => num(COL_DATE, date_s).text_color(rgb(color)),
                         None => num(COL_DATE, date_s).text_color(muted),
                     })
+                })
+                .when(show_owner, |d| {
+                    d.child(
+                        div()
+                            .w(px(COL_OWNER))
+                            .flex_shrink_0()
+                            .px_2()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_color(muted)
+                            .child(owner_s),
+                    )
                 });
             out.push(el.into_any_element());
         }
@@ -575,12 +667,19 @@ impl FastDir {
 
     /// Highlight one extension in the treemap (`None` clears it).
     pub(super) fn set_selected_ext(&mut self, ext: Option<u16>, cx: &mut Context<Self>) {
-        if self.selected_ext == ext && self.selected_category.is_none() {
+        if self.selected_ext == ext
+            && self.selected_category.is_none()
+            && self.selected_owner.is_none()
+        {
             return;
         }
         self.selected_ext = ext;
         self.selected_category = None;
         self.treemap.update(cx, |t, cx| t.set_highlight(ext, cx));
+        if self.selected_owner.take().is_some() {
+            // The owner view was filtering the list; clearing it re-filters.
+            self.rebuild_rows();
+        }
         cx.notify();
     }
 
@@ -590,7 +689,10 @@ impl FastDir {
         category: Option<FileCategory>,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_category == category && self.selected_ext.is_none() {
+        if self.selected_category == category
+            && self.selected_ext.is_none()
+            && self.selected_owner.is_none()
+        {
             return;
         }
         self.selected_category = category;
@@ -598,7 +700,38 @@ impl FastDir {
         let index = category.map(|c| c.index() as u8);
         self.treemap
             .update(cx, |t, cx| t.set_highlight_category(index, cx));
+        if self.selected_owner.take().is_some() {
+            self.rebuild_rows();
+        }
         cx.notify();
+    }
+
+    /// Highlight every file of one owner in the treemap and filter the list
+    /// to that account. `None` clears both.
+    pub(super) fn set_selected_owner(&mut self, owner: Option<u16>, cx: &mut Context<Self>) {
+        if self.selected_owner == owner
+            && self.selected_ext.is_none()
+            && self.selected_category.is_none()
+        {
+            return;
+        }
+        self.selected_owner = owner;
+        self.selected_ext = None;
+        self.selected_category = None;
+        self.treemap
+            .update(cx, |t, cx| t.set_highlight_owner(owner, cx));
+        self.rebuild_rows();
+        cx.notify();
+    }
+
+    /// Clicking a user row toggles their treemap highlight and list filter.
+    pub(super) fn toggle_owner(&mut self, owner: u16, cx: &mut Context<Self>) {
+        let owner = if self.selected_owner == Some(owner) {
+            None
+        } else {
+            Some(owner)
+        };
+        self.set_selected_owner(owner, cx);
     }
 
     /// Clicking an extension row toggles its treemap highlight.
@@ -624,6 +757,11 @@ impl FastDir {
     /// A selected file row also highlights that file's extension (or its
     /// category, when the treemap is coloured by category).
     pub(super) fn highlight_ext_of_row(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.selected_owner.is_some() {
+            // The owner view is highlighting and filtering; clicking one of
+            // its rows should not drop that filter.
+            return;
+        }
         let info = self.tree.as_ref().and_then(|tree| {
             let tree = tree.read();
             let row = self.rows.get(ix)?;
@@ -651,6 +789,11 @@ impl FastDir {
             show.show_modified,
             show.show_disk,
         );
+        let show_owner = show.show_owner
+            && self
+                .tree
+                .as_ref()
+                .is_some_and(|tree| tree.read().has_owners());
         let head = |id: &'static str,
                     label: &'static str,
                     k: SortKey,
@@ -688,7 +831,14 @@ impl FastDir {
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme.muted_foreground)
-            .child(head("h-name", self.tr("list.col_name"), SortKey::Name, None, false, cx))
+            .child(head(
+                "h-name",
+                self.tr("list.col_name"),
+                SortKey::Name,
+                None,
+                false,
+                cx,
+            ))
             .child(
                 div()
                     .w(sp(COL_BAR))
@@ -696,7 +846,14 @@ impl FastDir {
                     .px_2()
                     .child(self.tr("list.col_subtree")),
             )
-            .child(head("h-pct", self.tr("list.col_pct"), SortKey::Size, Some(COL_PCT), true, cx))
+            .child(head(
+                "h-pct",
+                self.tr("list.col_pct"),
+                SortKey::Size,
+                Some(COL_PCT),
+                true,
+                cx,
+            ))
             .child(head(
                 "h-size",
                 self.tr("list.col_size"),
@@ -752,6 +909,16 @@ impl FastDir {
                     SortKey::Modified,
                     Some(COL_DATE),
                     true,
+                    cx,
+                ))
+            })
+            .when(show_owner, |d| {
+                d.child(head(
+                    "h-owner",
+                    self.tr("list.col_owner"),
+                    SortKey::Owner,
+                    Some(COL_OWNER),
+                    false,
                     cx,
                 ))
             })
@@ -820,7 +987,10 @@ impl FastDir {
             ))
             .child(tab(
                 "tab-top-files",
-                self.tr_fmt("list.top_tab", &[("n", &self.count(self.top_files.len() as u64))]),
+                self.tr_fmt(
+                    "list.top_tab",
+                    &[("n", &self.count(self.top_files.len() as u64))],
+                ),
                 top_tab,
                 ListTab::TopFiles,
                 cx,
@@ -968,6 +1138,11 @@ impl FastDir {
     fn render_top_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let (key, desc) = self.top_sort;
+        let show_owner = self.settings.list.show_owner
+            && self
+                .tree
+                .as_ref()
+                .is_some_and(|tree| tree.read().has_owners());
         let head = |id: &'static str,
                     label: &'static str,
                     k: SortKey,
@@ -1017,7 +1192,14 @@ impl FastDir {
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme.muted_foreground)
-            .child(head("top-name", self.tr("list.col_name"), SortKey::Name, None, false, cx))
+            .child(head(
+                "top-name",
+                self.tr("list.col_name"),
+                SortKey::Name,
+                None,
+                false,
+                cx,
+            ))
             .child(head(
                 "top-size",
                 self.tr("list.col_size"),
@@ -1042,6 +1224,16 @@ impl FastDir {
                 true,
                 cx,
             ))
+            .when(show_owner, |d| {
+                d.child(head(
+                    "top-owner",
+                    self.tr("list.col_owner"),
+                    SortKey::Owner,
+                    Some(COL_OWNER),
+                    false,
+                    cx,
+                ))
+            })
             .child(
                 Button::new("top-limit")
                     .ghost()
@@ -1057,7 +1249,9 @@ impl FastDir {
                                 gpui_kit::component::menu::PopupMenuItem::new(label.clone())
                                     .checked(limit == n)
                                     .on_click(move |_, _, cx| {
-                                        entity.update(cx, |this, cx| this.set_top_limit(n, cx)).ok();
+                                        entity
+                                            .update(cx, |this, cx| this.set_top_limit(n, cx))
+                                            .ok();
                                     }),
                             );
                         }
@@ -1122,6 +1316,7 @@ impl FastDir {
         let hover = theme.list_hover;
         let even = theme.list_even;
         let selected = self.top_selected;
+        let show_owner = self.settings.list.show_owner && tree.has_owners();
         let num = |w: f32, s: String| {
             div()
                 .w(px(w))
@@ -1212,6 +1407,21 @@ impl FastDir {
                     .child(num(COL_SIZE, format::bytes(entry.size)).font_weight(FontWeight::MEDIUM))
                     .child(num(COL_DISK, format::bytes(entry.disk_size)))
                     .child(num(COL_DATE, self.date(entry.modified)).text_color(muted))
+                    .when(show_owner, |d| {
+                        d.child(
+                            div()
+                                .w(px(COL_OWNER))
+                                .flex_shrink_0()
+                                .px_2()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_color(muted)
+                                .child(SharedString::from(
+                                    tree.owner_name(entry.owner).unwrap_or("").to_string(),
+                                )),
+                        )
+                    })
                     .into_any_element(),
             );
         }
@@ -1238,6 +1448,7 @@ impl FastDir {
         let hover = theme.list_hover;
         let selected_ext = self.selected_ext;
         let selected_category = self.selected_category;
+        let selected_owner = self.selected_owner;
         let grouped = self.settings.list.ext_grouping == ExtGrouping::Category;
         let palette = palette_of(self.settings.treemap.palette);
         let lang = self.settings.locale.language.clone();
@@ -1355,6 +1566,84 @@ impl FastDir {
                             .into_any_element(),
                     );
                 }
+                ExtRow::Owner { owner } => {
+                    let Some(owner_total) =
+                        self.owner_rows.iter().find(|total| total.owner == owner)
+                    else {
+                        continue;
+                    };
+                    let (r, g, b) = treemap::ext_color_with(palette, owner);
+                    let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
+                    let is_sel = selected_owner == Some(owner);
+                    let name = tree
+                        .owner_name(owner)
+                        .unwrap_or_else(|| self.tr("list.unknown_owner"))
+                        .to_string();
+                    out.push(
+                        h_flex()
+                            .id(("owner", ix))
+                            .h(sp(ROW_H))
+                            .w_full()
+                            .px_2()
+                            .gap_2()
+                            .text_xs()
+                            .cursor_pointer()
+                            .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
+                            .when(is_sel, |d| {
+                                d.bg(active).border_l_2().border_color(active_border)
+                            })
+                            .when(!is_sel, |d| {
+                                d.border_l_2()
+                                    .border_color(transparent_black())
+                                    .hover(|s| s.bg(hover))
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.focus.focus(window, cx);
+                                    this.toggle_owner(owner, cx);
+                                }),
+                            )
+                            .child(div().size(sp(10.)).rounded_sm().flex_shrink_0().bg(color))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(sp(50.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(SharedString::from(name)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(64.))
+                                    .text_right()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(self.bytes(owner_total.size)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(70.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(self.bytes(owner_total.disk_size)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(44.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(format::percent_in(owner_total.size, total, &lang)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(56.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(self.count(owner_total.files)),
+                            )
+                            .into_any_element(),
+                    );
+                }
                 ExtRow::Extension { ext } => {
                     let Some(e) = tree.exts.get(ext as usize) else {
                         continue;
@@ -1430,6 +1719,12 @@ impl FastDir {
         let theme = cx.theme();
         let count = self.ext_rows.len();
         let grouped = self.settings.list.ext_grouping == ExtGrouping::Category;
+        let owners = self.settings.list.ext_grouping == ExtGrouping::Owner
+            && self
+                .tree
+                .as_ref()
+                .is_some_and(|tree| tree.read().has_owners());
+        let flat_ext = !grouped && !owners;
         let language = self.settings.locale.language.clone();
         let totals = if grouped {
             self.tree.as_ref().map(|tree| tree.read().category_totals())
@@ -1440,6 +1735,39 @@ impl FastDir {
             .as_ref()
             .map(|t| t.iter().map(|c| c.bytes).sum())
             .unwrap_or(0);
+        let (owner_key, owner_desc) = self.owner_sort;
+        let owner_fg = theme.foreground;
+        let owner_hover = theme.list_hover;
+        let head_bg = theme.list_head;
+        let head_border = theme.border;
+        let owner_head = |id: &'static str,
+                          label: &'static str,
+                          key: SortKey,
+                          w: Option<f32>,
+                          cx: &mut Context<Self>| {
+            h_flex()
+                .id(id)
+                .h_full()
+                .px_2()
+                .gap_1()
+                .cursor_pointer()
+                .when_some(w, |d, w| d.w(sp(w)).flex_shrink_0().justify_end())
+                .when(w.is_none(), |d| d.flex_1().min_w(sp(50.)))
+                .when(owner_key == key, |d| d.text_color(owner_fg))
+                .hover(|s| s.bg(owner_hover))
+                .child(label)
+                .when(owner_key == key, |d| {
+                    d.child(
+                        Icon::new(if owner_desc {
+                            IconName::ArrowDown
+                        } else {
+                            IconName::ArrowUp
+                        })
+                        .xsmall(),
+                    )
+                })
+                .on_click(cx.listener(move |this, _, _, cx| this.set_owner_sort(key, cx)))
+        };
         v_flex()
             .size_full()
             .border_l_1()
@@ -1465,7 +1793,7 @@ impl FastDir {
                                     .px_1()
                                     .rounded_sm()
                                     .cursor_pointer()
-                                    .when(!grouped, |d| d.bg(theme.list_active))
+                                    .when(flat_ext, |d| d.bg(theme.list_active))
                                     .hover(|s| s.bg(theme.list_hover))
                                     .child(SharedString::from(
                                         fastdir_locale::t(&language, "list.by_extension")
@@ -1496,6 +1824,32 @@ impl FastDir {
                                             this.set_ext_grouping(ExtGrouping::Category, cx);
                                         }),
                                     ),
+                            )
+                            .when(
+                                self.tree
+                                    .as_ref()
+                                    .is_some_and(|tree| tree.read().has_owners()),
+                                |d| {
+                                    d.child(
+                                        div()
+                                            .id("ext-by-owner")
+                                            .px_1()
+                                            .rounded_sm()
+                                            .cursor_pointer()
+                                            .when(owners, |d| d.bg(theme.list_active))
+                                            .hover(|s| s.bg(theme.list_hover))
+                                            .child(SharedString::from(
+                                                fastdir_locale::t(&language, "list.by_owner")
+                                                    .to_string(),
+                                            ))
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.set_ext_grouping(ExtGrouping::Owner, cx);
+                                                }),
+                                            ),
+                                    )
+                                },
                             ),
                     ),
             )
@@ -1512,24 +1866,68 @@ impl FastDir {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.muted_foreground)
                     .child(div().w(sp(10.)))
-                    .child(div().flex_1().min_w(sp(50.)).child(if grouped {
-                        self.tr("list.category_col")
-                    } else {
-                        self.tr("list.ext_col")
-                    }))
-                    .child(
-                        div()
-                            .w(sp(70.))
-                            .text_right()
-                            .child(self.tr("list.bytes_col")),
-                    )
-                    .child(div().w(sp(48.)).text_right().child(self.tr("list.col_pct")))
-                    .child(
-                        div()
-                            .w(sp(64.))
-                            .text_right()
-                            .child(self.tr("list.files_col")),
-                    ),
+                    .when(owners, |d| {
+                        d.child(owner_head(
+                            "owner-h-name",
+                            self.tr("list.owner_col"),
+                            SortKey::Name,
+                            None,
+                            cx,
+                        ))
+                        .child(owner_head(
+                            "owner-h-size",
+                            self.tr("list.bytes_col"),
+                            SortKey::Size,
+                            Some(64.),
+                            cx,
+                        ))
+                        .child(owner_head(
+                            "owner-h-disk",
+                            self.tr("list.col_disk"),
+                            SortKey::Disk,
+                            Some(70.),
+                            cx,
+                        ))
+                        .child(owner_head(
+                            "owner-h-pct",
+                            self.tr("list.col_pct"),
+                            SortKey::Size,
+                            Some(44.),
+                            cx,
+                        ))
+                        .child(owner_head(
+                            "owner-h-files",
+                            self.tr("list.files_col"),
+                            SortKey::Files,
+                            Some(56.),
+                            cx,
+                        ))
+                    })
+                    .when(!owners, |d| {
+                        d.child(div().flex_1().min_w(sp(50.)).child(if grouped {
+                            self.tr("list.category_col")
+                        } else {
+                            self.tr("list.ext_col")
+                        }))
+                        .child(
+                            div()
+                                .w(sp(70.))
+                                .text_right()
+                                .child(self.tr("list.bytes_col")),
+                        )
+                        .child(
+                            div()
+                                .w(sp(48.))
+                                .text_right()
+                                .child(self.tr("list.col_pct")),
+                        )
+                        .child(
+                            div()
+                                .w(sp(64.))
+                                .text_right()
+                                .child(self.tr("list.files_col")),
+                        )
+                    }),
             )
             .when_some(totals.filter(|_| category_total > 0), |this, totals| {
                 this.child(
@@ -1538,8 +1936,8 @@ impl FastDir {
                         .w_full()
                         .flex_shrink_0()
                         .border_b_1()
-                        .border_color(theme.border)
-                        .bg(theme.list_head)
+                        .border_color(head_border)
+                        .bg(head_bg)
                         .children(totals.iter().enumerate().filter(|(_, t)| t.bytes > 0).map(
                             |(index, t)| {
                                 let (r, g, b) = treemap::category_color(index);

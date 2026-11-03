@@ -228,6 +228,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "المجلدات",
         "list.col_date" => "آخر تغيير",
         "list.tree_tab" => "شجرة الدليل",
+        "list.col_owner" => "المالك",
+        "list.owner_col" => "المالك",
+        "list.by_owner" => "حسب المالك",
+        "list.unknown_owner" => "(غير معروف)",
         "list.top_tab" => "أكبر الملفات ({n})",
         "list.no_match" => "لا توجد عناصر مطابقة لعامل التصفية",
         "list.empty" => "هذا المجلد فارغ",
@@ -337,6 +341,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "خيوط الفحص",
         "set.scan.threads_cap" => "تُستخدم في الفحص التالي (1-64).",
         "set.scan.partial" => "إظهار النتائج الجزئية أثناء الفحص",
+        "set.scan.owners" => "جمع مالكي الملفات",
+        "set.scan.owners_cap" => "يسجل مالك كل ملف لعمود المالك والإجماليات لكل مستخدم. فحص أبطأ.",
         "set.scan.partial_cap" => {
             "تظهر المجلدات المكتملة ومعاينة لخريطة الشجرة قبل انتهاء الفحص."
         }
@@ -385,6 +391,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "عمود المجلدات",
         "set.list.modified_col" => "عمود آخر تغيير",
         "set.list.disk_col" => "عمود الحجم على القرص",
+        "set.list.owner_col" => "عمود المالك",
         "tb.menu_hide_empty" => "إخفاء المجلدات الفارغة",
         "tb.tip_hide_empty" => "إخفاء المجلدات الفارغة (التي لا تحتوي على ملفات)",
         "set.list.hide_empty" => "إخفاء المجلدات الفارغة",

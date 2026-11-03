@@ -226,6 +226,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Pastas",
         "list.col_date" => "Última alteração",
         "list.tree_tab" => "Árvore de pastas",
+        "list.col_owner" => "Proprietário",
+        "list.owner_col" => "Proprietário",
+        "list.by_owner" => "Por proprietário",
+        "list.unknown_owner" => "(desconhecido)",
         "list.top_tab" => "Principais arquivos ({n})",
         "list.no_match" => "Nenhum item corresponde ao filtro",
         "list.empty" => "Esta pasta está vazia",
@@ -317,6 +321,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Threads de verificação",
         "set.scan.threads_cap" => "Usado pela próxima verificação (1-64).",
         "set.scan.partial" => "Mostrar resultados parciais durante a verificação",
+        "set.scan.owners" => "Coletar proprietários dos arquivos",
+        "set.scan.owners_cap" => "Registra o proprietário de cada arquivo para a coluna Proprietário e os totais por usuário. Análises mais lentas.",
         "set.scan.partial_cap" => {
             "Pastas concluídas e uma prévia do treemap aparecem antes do fim."
         }
@@ -365,6 +371,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Coluna de pastas",
         "set.list.modified_col" => "Coluna de última alteração",
         "set.list.disk_col" => "Coluna de tamanho em disco",
+        "set.list.owner_col" => "Coluna Proprietário",
         "tb.menu_hide_empty" => "Ocultar pastas vazias",
         "tb.tip_hide_empty" => "Ocultar pastas vazias (sem arquivos)",
         "set.list.hide_empty" => "Ocultar pastas vazias",

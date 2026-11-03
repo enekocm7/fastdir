@@ -228,6 +228,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "文件夹数",
         "list.col_date" => "上次更改",
         "list.tree_tab" => "目录树",
+        "list.col_owner" => "所有者",
+        "list.owner_col" => "所有者",
+        "list.by_owner" => "按所有者",
+        "list.unknown_owner" => "（未知）",
         "list.top_tab" => "最大文件 ({n})",
         "list.no_match" => "没有与筛选器匹配的项",
         "list.empty" => "此文件夹为空",
@@ -319,6 +323,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "扫描线程数",
         "set.scan.threads_cap" => "下次扫描使用 (1-64)。",
         "set.scan.partial" => "扫描时显示部分结果",
+        "set.scan.owners" => "收集文件所有者",
+        "set.scan.owners_cap" => "为“所有者”列和按用户统计记录每个文件的所有者。扫描会更慢。",
         "set.scan.partial_cap" => {
             "扫描结束前显示已完成的文件夹和树状图预览。"
         }
@@ -367,6 +373,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "文件夹数列",
         "set.list.modified_col" => "上次更改列",
         "set.list.disk_col" => "磁盘占用列",
+        "set.list.owner_col" => "所有者列",
         "tb.menu_hide_empty" => "隐藏空文件夹",
         "tb.tip_hide_empty" => "隐藏空文件夹（不含文件的文件夹）",
         "set.list.hide_empty" => "隐藏空文件夹",

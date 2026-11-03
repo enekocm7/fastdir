@@ -103,6 +103,7 @@ impl FastDir {
     pub(super) fn clear_filters(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.filter_form = FilterForm::default();
         self.filter = Filter::default();
+        self.set_selected_owner(None, cx);
         self.search
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.tab = ListTab::Tree;

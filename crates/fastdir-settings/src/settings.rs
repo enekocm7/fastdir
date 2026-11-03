@@ -35,6 +35,7 @@ pub enum SortColumn {
     Files,
     Dirs,
     Modified,
+    Owner,
 }
 
 /// How folder sizes are displayed in the list, the status bar and tooltips.
@@ -103,6 +104,8 @@ pub enum ExtGrouping {
     Extension,
     /// Expandable category rows, each listing its extensions.
     Category,
+    /// Per-user totals (only offered when the scan collected owners).
+    Owner,
 }
 
 /// What the Delete key does (Shift+Delete always does the other).
@@ -223,6 +226,9 @@ pub struct ScanSettings {
     pub thread_count: Option<u16>,
     /// Show finished top-level folders and a treemap preview while scanning.
     pub show_partial_results: bool,
+    /// Record the owning account of every entry. Off by default because on
+    /// Windows it needs one extra security query per file.
+    pub collect_owners: bool,
 }
 
 impl Default for ScanSettings {
@@ -234,6 +240,7 @@ impl Default for ScanSettings {
             cross_volumes: false,
             thread_count: None,
             show_partial_results: true,
+            collect_owners: false,
         }
     }
 }
@@ -306,6 +313,8 @@ pub struct ListSettings {
     pub show_folders: bool,
     pub show_modified: bool,
     pub show_disk: bool,
+    /// Show the Owner column (only meaningful when the scan collected owners).
+    pub show_owner: bool,
     /// Hide folders that contain no data (no files and zero size, recursively).
     pub hide_empty_folders: bool,
     /// Whether the extension panel lists extensions or file-type categories.
@@ -331,6 +340,7 @@ impl Default for ListSettings {
             show_folders: true,
             show_modified: true,
             show_disk: true,
+            show_owner: true,
             hide_empty_folders: false,
             ext_grouping: ExtGrouping::Extension,
         }
@@ -744,6 +754,11 @@ mod tests {
         assert!(!s.treemap.disk_size);
         assert!(s.scan.show_partial_results);
         assert!(!s.scan.cross_volumes);
+        assert!(
+            !s.scan.collect_owners,
+            "owner collection is opt-in because it is expensive"
+        );
+        assert!(s.list.show_owner);
         assert_eq!(s.appearance.ui_scale, 1.0);
         assert!(s.integration.context_menu);
         assert!(!s.integration.single_instance);
@@ -800,6 +815,7 @@ mod tests {
                 cross_volumes: false,
                 thread_count: Some(4),
                 show_partial_results: false,
+                collect_owners: true,
             },
             treemap: TreemapSettings {
                 show_free_space: true,
@@ -828,6 +844,7 @@ mod tests {
                 show_folders: true,
                 show_modified: false,
                 show_disk: true,
+                show_owner: false,
                 hide_empty_folders: true,
                 ext_grouping: ExtGrouping::Category,
             },
@@ -888,8 +905,14 @@ mod tests {
         let text = toml::to_string_pretty(&s).unwrap();
         assert!(text.contains("[scan]"), "sections keep the file readable");
         assert!(text.contains("[treemap]"));
-        assert!(text.contains("[locale]"), "the language section is written out");
-        assert!(text.contains("[categories]"), "category overrides are written out");
+        assert!(
+            text.contains("[locale]"),
+            "the language section is written out"
+        );
+        assert!(
+            text.contains("[categories]"),
+            "category overrides are written out"
+        );
         assert!(text.contains("mp4"), "category extensions are written out");
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(back, s);
@@ -897,10 +920,9 @@ mod tests {
 
     #[test]
     fn category_overrides_parse_on_their_own() {
-        let s: Settings = toml::from_str(
-            "[categories]\nvideo = [\"mp4\", \"custom\"]\narchives = [\"zip\"]\n",
-        )
-        .unwrap();
+        let s: Settings =
+            toml::from_str("[categories]\nvideo = [\"mp4\", \"custom\"]\narchives = [\"zip\"]\n")
+                .unwrap();
         assert_eq!(
             s.categories.get("video").map(Vec::as_slice),
             Some(["mp4".to_string(), "custom".to_string()].as_slice())

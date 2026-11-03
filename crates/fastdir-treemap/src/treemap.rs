@@ -9,7 +9,7 @@
 //! and highlighting re-run the layout only along a single path instead of
 //! keeping millions of rectangles in memory.
 
-use fastdir_core::model::{NO_EXT, Node, NodeKind, NodePath, Tree};
+use fastdir_core::model::{NO_EXT, NO_OWNER, Node, NodeKind, NodePath, Tree};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -495,6 +495,11 @@ pub struct RenderOptions {
     /// Category index in full colour, everything else dimmed. Takes
     /// precedence over `highlight` when both are set.
     pub highlight_category: Option<u8>,
+    /// Owner index in full colour, everything else dimmed. Takes precedence
+    /// over the category and extension highlights.
+    pub highlight_owner: Option<u16>,
+    /// Owner of `root`, so a root leaf can be highlighted too.
+    pub root_owner: u16,
     /// Lay out the `<Free space>` pseudo-item.
     pub show_free: bool,
     /// Lay out the `<Unknown>` pseudo-item.
@@ -520,6 +525,8 @@ impl Default for RenderOptions {
         Self {
             highlight: None,
             highlight_category: None,
+            highlight_owner: None,
+            root_owner: NO_OWNER,
             show_free: false,
             show_unknown: false,
             use_disk: false,
@@ -810,6 +817,8 @@ fn render_leaf(t: Target, rc: &Rect, s: &Surface, color: [f64; 3], light: &Light
 fn draw(
     tree: &Tree,
     node: &Node,
+    // Owner index of `node` ([`NO_OWNER`] when unknown or not collected).
+    owner: u16,
     rc: Rect,
     surface: Surface,
     h: f64,
@@ -839,7 +848,11 @@ fn draw(
         // A category highlight works in every colour mode. Otherwise
         // extension highlighting only applies when colouring by extension;
         // in age and category modes every leaf keeps its own colour.
-        if let Some(want) = opts.highlight_category {
+        if let Some(want) = opts.highlight_owner {
+            if want != owner {
+                color = dim_color(color);
+            }
+        } else if let Some(want) = opts.highlight_category {
             if want as usize != tree.ext_category(ext).index() {
                 color = dim_color(color);
             }
@@ -878,6 +891,7 @@ fn draw(
             draw(
                 tree,
                 &children[i],
+                tree.child_owner(node, i),
                 r,
                 surface,
                 h_child,
@@ -900,6 +914,7 @@ fn draw(
                 draw(
                     tree,
                     &children[i],
+                    tree.child_owner(node, i),
                     r,
                     surface,
                     h_child,
@@ -955,6 +970,7 @@ pub fn render(
     draw(
         tree,
         root,
+        opts.root_owner,
         rc,
         Surface([0.0; 4]),
         HEIGHT * opts.cushion_strength.clamp(0.0, 2.0) as f64,
@@ -1212,7 +1228,7 @@ mod tests {
         let opts = RenderOptions {
             color_mode: ColorMode::Category,
             highlight_category: Some(
-                fastdir_core::categories::builtin_category("txt").index() as u8,
+                fastdir_core::categories::builtin_category("txt").index() as u8
             ),
             ..RenderOptions::default()
         };
@@ -1257,7 +1273,10 @@ mod tests {
         assert_eq!(age_bucket(now - HALF_YEAR, now), AgeBucket::Year);
         assert_eq!(age_bucket(now - (YEAR - 1), now), AgeBucket::Year);
         assert_eq!(age_bucket(now - YEAR, now), AgeBucket::ThreeYears);
-        assert_eq!(age_bucket(now - (THREE_YEARS - 1), now), AgeBucket::ThreeYears);
+        assert_eq!(
+            age_bucket(now - (THREE_YEARS - 1), now),
+            AgeBucket::ThreeYears
+        );
         assert_eq!(age_bucket(now - THREE_YEARS, now), AgeBucket::Older);
     }
 

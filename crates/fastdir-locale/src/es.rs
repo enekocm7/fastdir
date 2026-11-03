@@ -228,6 +228,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Carpetas",
         "list.col_date" => "Último cambio",
         "list.tree_tab" => "Árbol de directorios",
+        "list.col_owner" => "Propietario",
+        "list.owner_col" => "Propietario",
+        "list.by_owner" => "Por propietario",
+        "list.unknown_owner" => "(desconocido)",
         "list.top_tab" => "Archivos principales ({n})",
         "list.no_match" => "Ningún elemento coincide con el filtro",
         "list.empty" => "Esta carpeta está vacía",
@@ -319,6 +323,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Hilos de análisis",
         "set.scan.threads_cap" => "Los usa el próximo análisis (1-64).",
         "set.scan.partial" => "Mostrar resultados parciales durante el análisis",
+        "set.scan.owners" => "Recopilar propietarios de archivos",
+        "set.scan.owners_cap" => "Registra el propietario de cada archivo para la columna Propietario y los totales por usuario. Análisis más lentos.",
         "set.scan.partial_cap" => {
             "Las carpetas terminadas y una vista previa del treemap aparecen antes de que termine."
         }
@@ -367,6 +373,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Columna de carpetas",
         "set.list.modified_col" => "Columna de último cambio",
         "set.list.disk_col" => "Columna de tamaño en disco",
+        "set.list.owner_col" => "Columna Propietario",
         "tb.menu_hide_empty" => "Ocultar carpetas vacías",
         "tb.tip_hide_empty" => "Ocultar carpetas vacías (sin archivos)",
         "set.list.hide_empty" => "Ocultar carpetas vacías",
