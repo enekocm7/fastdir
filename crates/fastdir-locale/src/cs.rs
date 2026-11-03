@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "Zobrazit v Souborech",
         "menu.export" => "Exportovat výsledky…",
         "menu.copy_path" => "Kopírovat cestu",
+        "menu.copy_name" => "Kopírovat název",
         "menu.zoom_in" => "Přiblížit",
         "menu.zoom_out" => "Oddálit",
         "menu.rename" => "Přejmenovat…",

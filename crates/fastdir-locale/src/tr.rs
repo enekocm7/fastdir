@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "Dosyalarda göster",
         "menu.export" => "Sonuçları dışa aktar…",
         "menu.copy_path" => "Yolu kopyala",
+        "menu.copy_name" => "Adı kopyala",
         "menu.zoom_in" => "Yakınlaştır",
         "menu.zoom_out" => "Uzaklaştır",
         "menu.rename" => "Yeniden adlandır…",

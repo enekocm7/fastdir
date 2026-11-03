@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "ファイルで表示",
         "menu.export" => "結果をエクスポート…",
         "menu.copy_path" => "パスをコピー",
+        "menu.copy_name" => "名前をコピー",
         "menu.zoom_in" => "拡大",
         "menu.zoom_out" => "縮小",
         "menu.rename" => "名前の変更…",

@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "Mostrar em Ficheiros",
         "menu.export" => "Exportar resultados…",
         "menu.copy_path" => "Copiar caminho",
+        "menu.copy_name" => "Copiar nome",
         "menu.zoom_in" => "Aproximar",
         "menu.zoom_out" => "Afastar",
         "menu.rename" => "Renomear…",

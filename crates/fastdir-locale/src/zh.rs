@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "在文件中显示",
         "menu.export" => "导出结果…",
         "menu.copy_path" => "复制路径",
+        "menu.copy_name" => "复制名称",
         "menu.zoom_in" => "放大",
         "menu.zoom_out" => "缩小",
         "menu.rename" => "重命名…",
