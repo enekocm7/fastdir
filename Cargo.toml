@@ -49,6 +49,8 @@ windows-sys = { version = "0.61", features = [
 # Unix APIs (drive enumeration via statvfs/getmntinfo, device IDs for the
 # mount-point check). Only used on `cfg(unix)` targets.
 libc = "0.2"
+# Benchmarks
+criterion = { version = "0.5", default-features = false }
 # Workspace crates
 fastdir-core = { path = "crates/fastdir-core" }
 fastdir-treemap = { path = "crates/fastdir-treemap" }

@@ -8,3 +8,10 @@ repository.workspace = true
 [dependencies]
 fastdir-core.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "treemap"
+harness = false
