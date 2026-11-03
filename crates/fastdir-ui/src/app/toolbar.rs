@@ -259,6 +259,7 @@ impl FastDir {
                 let show_free = self.settings.treemap.show_free_space;
                 let show_unknown = self.settings.treemap.show_unknown;
                 let treemap_disk = self.settings.treemap.disk_size;
+                let color_by_age = self.settings.treemap.color_mode == TreemapColorMode::Age;
                 let show_partial = self.settings.scan.show_partial_results;
                 let show_treemap = self.settings.treemap.show;
                 let hide_empty = self.settings.list.hide_empty_folders;
@@ -269,6 +270,7 @@ impl FastDir {
                 let menu_free = self.tr("tb.menu_free");
                 let menu_unknown = self.tr("tb.menu_unknown");
                 let menu_disk = self.tr("tb.menu_disk");
+                let menu_age = self.tr("tb.menu_age");
                 let menu_partial = self.tr("tb.menu_partial");
                 let menu_treemap = self.tr("tb.menu_treemap");
                 let menu_hide_empty = self.tr("tb.menu_hide_empty");
@@ -282,6 +284,7 @@ impl FastDir {
                     let e6 = entity.clone();
                     let e7 = entity.clone();
                     let e8 = entity.clone();
+                    let e9 = entity.clone();
                     menu.item(
                         gpui_kit::component::menu::PopupMenuItem::new(menu_settings)
                             .icon(IconName::Settings)
@@ -335,6 +338,14 @@ impl FastDir {
                             .checked(treemap_disk)
                             .on_click(move |_, window, cx| {
                                 e5.update(cx, |this, cx| this.toggle_treemap_disk_size(window, cx))
+                                    .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(menu_age)
+                            .checked(color_by_age)
+                            .on_click(move |_, _, cx| {
+                                e9.update(cx, |this, cx| this.toggle_treemap_age_colors(cx))
                                     .ok();
                             }),
                     )

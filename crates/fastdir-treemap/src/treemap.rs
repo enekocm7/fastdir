@@ -175,38 +175,148 @@ pub fn node_color_with(palette: Palette, node: &Node) -> (u8, u8, u8) {
     }
 }
 
-/// Warm-to-cold colour for a file modified at `modified` ("now" is `now`,
-/// both Unix seconds). New files glow red, year-old ones are blue.
-fn age_color(modified: i64, now: i64) -> (u8, u8, u8) {
-    if modified <= 0 {
-        return (128, 128, 128);
-    }
-    const STOPS: [(f64, (u8, u8, u8)); 5] = [
-        (0.0, (231, 76, 60)),
-        (7.0, (230, 126, 34)),
-        (30.0, (241, 196, 15)),
-        (180.0, (46, 204, 113)),
-        (365.0, (52, 152, 219)),
+const DAY: i64 = 86_400;
+const WEEK: i64 = 7 * DAY;
+const MONTH: i64 = 30 * DAY;
+const HALF_YEAR: i64 = 182 * DAY;
+const YEAR: i64 = 365 * DAY;
+const THREE_YEARS: i64 = 3 * YEAR;
+
+/// Fixed age buckets used by [`ColorMode::Age`] and the legend. The order is
+/// newest to oldest so the colour scale and legend read left to right.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AgeBucket {
+    /// Less than one week old.
+    Week,
+    /// One week to under one month.
+    Month,
+    /// One month to under six months.
+    SixMonths,
+    /// Six months to under one year.
+    Year,
+    /// One year to under three years.
+    ThreeYears,
+    /// Three years or older.
+    Older,
+    /// No usable modification time.
+    Unknown,
+}
+
+impl AgeBucket {
+    /// Every bucket, newest to oldest. Suitable for legends.
+    pub const ALL: [AgeBucket; 7] = [
+        AgeBucket::Week,
+        AgeBucket::Month,
+        AgeBucket::SixMonths,
+        AgeBucket::Year,
+        AgeBucket::ThreeYears,
+        AgeBucket::Older,
+        AgeBucket::Unknown,
     ];
-    let days = now.saturating_sub(modified).max(0) as f64 / 86_400.0;
-    let mut prev = STOPS[0];
-    for &stop in &STOPS[1..] {
-        if days <= stop.0 {
-            let t = if stop.0 > prev.0 {
-                ((days - prev.0) / (stop.0 - prev.0)).clamp(0.0, 1.0)
-            } else {
-                1.0
-            };
-            let lerp = |a: u8, b: u8| (a as f64 + (b as f64 - a as f64) * t).round() as u8;
-            return (
-                lerp(prev.1.0, stop.1.0),
-                lerp(prev.1.1, stop.1.1),
-                lerp(prev.1.2, stop.1.2),
-            );
+
+    fn index(self) -> usize {
+        match self {
+            AgeBucket::Week => 0,
+            AgeBucket::Month => 1,
+            AgeBucket::SixMonths => 2,
+            AgeBucket::Year => 3,
+            AgeBucket::ThreeYears => 4,
+            AgeBucket::Older => 5,
+            AgeBucket::Unknown => 6,
         }
-        prev = stop;
     }
-    STOPS[STOPS.len() - 1].1
+}
+
+/// The age bucket for a modification time. `modified` and `now` are Unix
+/// seconds; non-positive timestamps are [`AgeBucket::Unknown`]. Future
+/// timestamps count as brand new.
+pub fn age_bucket(modified: i64, now: i64) -> AgeBucket {
+    if modified <= 0 {
+        return AgeBucket::Unknown;
+    }
+    let age = now.saturating_sub(modified).max(0);
+    if age < WEEK {
+        AgeBucket::Week
+    } else if age < MONTH {
+        AgeBucket::Month
+    } else if age < HALF_YEAR {
+        AgeBucket::SixMonths
+    } else if age < YEAR {
+        AgeBucket::Year
+    } else if age < THREE_YEARS {
+        AgeBucket::ThreeYears
+    } else {
+        AgeBucket::Older
+    }
+}
+
+/// Warm-to-cold ramp, one colour per bucket (new to old, then unknown).
+const AGE_PALETTE: [(u8, u8, u8); 7] = [
+    (231, 76, 60),
+    (230, 126, 34),
+    (241, 196, 15),
+    (46, 204, 113),
+    (52, 152, 219),
+    (142, 68, 173),
+    (128, 128, 128),
+];
+/// Colour-blind-safe variant (Okabe-Ito based), same order.
+const AGE_PALETTE_COLORBLIND: [(u8, u8, u8); 7] = [
+    (213, 94, 0),
+    (230, 159, 0),
+    (240, 228, 66),
+    (0, 158, 115),
+    (86, 180, 233),
+    (0, 114, 178),
+    (128, 128, 128),
+];
+/// Greyscale ramp for the mono palette (old is darker).
+const AGE_PALETTE_MONO: [(u8, u8, u8); 7] = [
+    (225, 225, 225),
+    (200, 200, 200),
+    (175, 175, 175),
+    (150, 150, 150),
+    (120, 120, 120),
+    (90, 90, 90),
+    (128, 128, 128),
+];
+
+/// Display colour for an age bucket under `palette`.
+pub fn age_bucket_color(bucket: AgeBucket, palette: Palette) -> (u8, u8, u8) {
+    let ix = bucket.index();
+    match palette {
+        Palette::Default => AGE_PALETTE[ix],
+        Palette::ColorBlind => AGE_PALETTE_COLORBLIND[ix],
+        Palette::Mono => AGE_PALETTE_MONO[ix],
+    }
+}
+
+/// Warm-to-cold colour for a file modified at `modified` ("now" is `now`,
+/// both Unix seconds), using fixed buckets so it matches the legend.
+pub fn age_color(modified: i64, now: i64, palette: Palette) -> (u8, u8, u8) {
+    age_bucket_color(age_bucket(modified, now), palette)
+}
+
+/// Bytes per age bucket for every real file under `root`, matching the
+/// treemap's size metric. Directories are traversed but not counted, so the
+/// totals add up to the files' bytes without double counting.
+pub fn age_bucket_totals(
+    tree: &Tree,
+    root: &Node,
+    now: i64,
+    use_disk: bool,
+) -> [(AgeBucket, u64); 7] {
+    let mut totals = [0u64; 7];
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.is_dir() {
+            stack.extend(tree.children(node));
+        } else if !node.is_special() {
+            let bucket = age_bucket(node.modified(), now);
+            totals[bucket.index()] += node_size(node, use_disk);
+        }
+    }
+    std::array::from_fn(|i| (AgeBucket::ALL[i], totals[i]))
 }
 
 fn shade_node(node: &Node, opts: &RenderOptions) -> [f64; 3] {
@@ -215,7 +325,7 @@ fn shade_node(node: &Node, opts: &RenderOptions) -> [f64; 3] {
         NodeKind::Unknown => UNKNOWN_COLOR,
         _ => match opts.color_mode {
             ColorMode::Extension => ext_color_with(opts.palette, node.ext),
-            ColorMode::Age => age_color(node.modified(), opts.now),
+            ColorMode::Age => age_color(node.modified(), opts.now, opts.palette),
         },
     };
     bright_color(rgb)
@@ -930,10 +1040,17 @@ mod tests {
 
     /// A one-level tree of files with the given `(name, size, disk_size)`.
     fn files_tree(files: &[(&str, u64, u64)]) -> Tree {
+        let named: Vec<(&str, u64, u64, i64)> =
+            files.iter().map(|&(n, s, d)| (n, s, d, 0)).collect();
+        files_tree_at(&named)
+    }
+
+    /// Like [`files_tree`], with an explicit modification time per file.
+    fn files_tree_at(files: &[(&str, u64, u64, i64)]) -> Tree {
         let mut arena = Arena::default();
         let mut root = DirBuilder::new(0);
-        for &(name, size, disk) in files {
-            root.add_file(name, size, disk, 0);
+        for &(name, size, disk, modified) in files {
+            root.add_file(name, size, disk, modified);
         }
         let root = root.commit(&mut arena);
         Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
@@ -1065,14 +1182,87 @@ mod tests {
     }
 
     #[test]
-    fn age_colours_run_from_warm_to_cold() {
+    fn age_bucket_mapping_uses_fixed_boundaries() {
         let now = 1_800_000_000;
-        assert_eq!(age_color(now, now), (231, 76, 60));
-        assert_eq!(age_color(now - 400 * 86_400, now), (52, 152, 219));
-        assert_eq!(age_color(0, now), (128, 128, 128));
-        // In between stays on the gradient, never grey.
-        let mid = age_color(now - 60 * 86_400, now);
-        assert_ne!(mid, (128, 128, 128));
+        assert_eq!(age_bucket(0, now), AgeBucket::Unknown);
+        assert_eq!(age_bucket(-5, now), AgeBucket::Unknown);
+        assert_eq!(age_bucket(now + 100, now), AgeBucket::Week);
+        assert_eq!(age_bucket(now, now), AgeBucket::Week);
+        assert_eq!(age_bucket(now - (7 * DAY - 1), now), AgeBucket::Week);
+        assert_eq!(age_bucket(now - 7 * DAY, now), AgeBucket::Month);
+        assert_eq!(age_bucket(now - (30 * DAY - 1), now), AgeBucket::Month);
+        assert_eq!(age_bucket(now - 30 * DAY, now), AgeBucket::SixMonths);
+        assert_eq!(age_bucket(now - (HALF_YEAR - 1), now), AgeBucket::SixMonths);
+        assert_eq!(age_bucket(now - HALF_YEAR, now), AgeBucket::Year);
+        assert_eq!(age_bucket(now - (YEAR - 1), now), AgeBucket::Year);
+        assert_eq!(age_bucket(now - YEAR, now), AgeBucket::ThreeYears);
+        assert_eq!(age_bucket(now - (THREE_YEARS - 1), now), AgeBucket::ThreeYears);
+        assert_eq!(age_bucket(now - THREE_YEARS, now), AgeBucket::Older);
+    }
+
+    #[test]
+    fn age_colours_are_distinct_per_bucket_and_palette() {
+        let all: Vec<_> = AgeBucket::ALL
+            .iter()
+            .map(|&b| age_bucket_color(b, Palette::Default))
+            .collect();
+        let mut distinct = all.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), all.len());
+
+        let colorblind: Vec<_> = AgeBucket::ALL
+            .iter()
+            .map(|&b| age_bucket_color(b, Palette::ColorBlind))
+            .collect();
+        assert_ne!(all, colorblind);
+        let mut distinct = colorblind.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), colorblind.len());
+
+        // Mono stays grey and still separates every bucket.
+        let mono: Vec<_> = AgeBucket::ALL
+            .iter()
+            .map(|&b| age_bucket_color(b, Palette::Mono))
+            .collect();
+        assert!(mono.iter().all(|(r, g, b)| r == g && g == b));
+        let mut distinct = mono.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), mono.len());
+    }
+
+    #[test]
+    fn age_colour_uses_buckets_for_known_and_unknown_times() {
+        let now = 1_800_000_000;
+        assert_eq!(age_color(now, now, Palette::Default), (231, 76, 60));
+        assert_eq!(
+            age_color(now - 4 * YEAR, now, Palette::Default),
+            (142, 68, 173)
+        );
+        assert_eq!(age_color(0, now, Palette::Default), (128, 128, 128));
+    }
+
+    #[test]
+    fn age_totals_sum_files_per_bucket() {
+        let now = 1_800_000_000;
+        let tree = files_tree_at(&[
+            ("new.bin", 10, 10, now - 2 * DAY),
+            ("month.bin", 20, 20, now - 20 * DAY),
+            ("old.bin", 30, 30, now - 4 * YEAR),
+            ("unknown.bin", 5, 5, 0),
+        ]);
+        let totals = age_bucket_totals(&tree, tree.root(), now, false);
+        let by = |b: AgeBucket| totals.iter().find(|(x, _)| *x == b).unwrap().1;
+        assert_eq!(by(AgeBucket::Week), 10);
+        assert_eq!(by(AgeBucket::Month), 20);
+        assert_eq!(by(AgeBucket::SixMonths), 0);
+        assert_eq!(by(AgeBucket::Year), 0);
+        assert_eq!(by(AgeBucket::ThreeYears), 0);
+        assert_eq!(by(AgeBucket::Older), 30);
+        assert_eq!(by(AgeBucket::Unknown), 5);
+        assert_eq!(totals.iter().map(|(_, n)| n).sum::<u64>(), 65);
     }
 
     #[test]

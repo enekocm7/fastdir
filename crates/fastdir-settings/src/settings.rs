@@ -278,6 +278,9 @@ pub struct ListSettings {
     pub percent_base: PercentBase,
     /// Absolute timestamps vs. relative ones (`3 days ago`).
     pub date_format: DateFormat,
+    /// Tint the "Last change" column on the same new-to-old age scale as the
+    /// treemap.
+    pub age_tint: bool,
     /// Column and direction for new scans.
     pub sort: SortSettings,
     /// How many files the "Top files" view lists.
@@ -304,6 +307,7 @@ impl Default for ListSettings {
             size_unit: SizeUnit::Binary,
             percent_base: PercentBase::Parent,
             date_format: DateFormat::Absolute,
+            age_tint: false,
             sort: SortSettings::default(),
             top_files_limit: default_top_files_limit(),
             show_items: true,
@@ -789,6 +793,7 @@ mod tests {
                 size_unit: SizeUnit::Decimal,
                 percent_base: PercentBase::Total,
                 date_format: DateFormat::Relative,
+                age_tint: true,
                 sort: SortSettings {
                     column: SortColumn::Modified,
                     descending: false,

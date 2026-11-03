@@ -653,6 +653,17 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Toggle between extension colours and the age scale.
+    pub(super) fn toggle_treemap_age_colors(&mut self, cx: &mut Context<Self>) {
+        self.settings.treemap.color_mode = match self.settings.treemap.color_mode {
+            TreemapColorMode::Extension => TreemapColorMode::Age,
+            TreemapColorMode::Age => TreemapColorMode::Extension,
+        };
+        self.settings.save();
+        self.refresh_treemap_options(cx);
+        cx.notify();
+    }
+
     /// The scanner policy built from `[scan]` settings. Passed into
     /// `fastdir-core` on every scan rather than read globally.
     pub(super) fn scan_options(&self) -> scanner::ScanOptions {
