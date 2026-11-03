@@ -3,14 +3,21 @@
 //! Every directory is listed on a work-stealing thread pool (rayon); its
 //! sub-directories are fanned out as independent tasks, so all cores stay
 //! busy and the disk queue stays deep. On Windows the listing uses
-//! `FindFirstFileExW` with `FIND_FIRST_EX_LARGE_FETCH` and the basic info
-//! level, which returns name, size, attributes and timestamps for a whole
-//! batch of entries in one kernel call — no per-file `stat`.
+//! `GetFileInformationByHandleEx(FileIdExtdDirectoryInfo)`, which returns
+//! name, size, allocation size, attributes, timestamps and the file ID for a
+//! whole batch of entries in one kernel call — no per-file `stat`, and no 8.3
+//! short names. Filesystems that reject that class fall back to
+//! `FindFirstFileExW` with `FIND_FIRST_EX_LARGE_FETCH` and the basic info level.
+//!
+//! Anything that is constant for a volume (cluster size, whether the file-ID
+//! class works) is looked up once per scan and passed down, never per folder.
 
 use crate::model::{Arena, DirBuilder, Node, Subtree, Tree};
 use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
-use std::collections::HashSet;
+#[cfg(windows)]
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -52,7 +59,7 @@ pub struct LiveScanResult {
 /// The set is sharded so the parallel scan threads rarely contend. Entries are
 /// only inserted for files that can actually contribute bytes.
 struct LinkTracker {
-    shards: [Mutex<HashSet<u64>>; 16],
+    shards: [Mutex<HashSet<u128>>; 16],
 }
 
 impl Default for LinkTracker {
@@ -65,12 +72,14 @@ impl Default for LinkTracker {
 
 impl LinkTracker {
     /// `true` when `id` was seen before. A zero ID means "unknown" and is
-    /// never treated as a duplicate.
-    fn is_duplicate(&self, id: u64) -> bool {
+    /// never treated as a duplicate. IDs are 128-bit so ReFS file IDs (which
+    /// do not fit in 64 bits) stay unique; NTFS and Unix only use the low half.
+    fn is_duplicate(&self, id: u128) -> bool {
         if id == 0 {
             return false;
         }
-        let shard = (id.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 60) as usize;
+        let folded = (id as u64) ^ ((id >> 64) as u64);
+        let shard = (folded.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 60) as usize;
         !self.shards[shard].lock().insert(id)
     }
 }
@@ -159,6 +168,39 @@ fn volume_key(path: &Path) -> Option<String> {
     }
 }
 
+/// Facts about one volume that do not change during a scan. Looked up once
+/// per volume instead of once per directory: a `GetDiskFreeSpaceW` call per
+/// folder used to double the time of a full-drive scan.
+struct Volume {
+    /// Allocation unit used to round logical sizes up to the size on disk,
+    /// or 0 when unknown (sizes are then reported as-is).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    cluster: u64,
+    /// Cleared the first time the volume rejects the file-ID listing class
+    /// (FAT, some network shares), so later folders go straight to the
+    /// `FindFirstFileExW` fallback instead of failing twice per folder.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    by_id: AtomicBool,
+}
+
+impl Volume {
+    #[cfg(windows)]
+    fn for_path(path: &Path) -> Self {
+        Self {
+            cluster: cluster_size(path),
+            by_id: AtomicBool::new(true),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn for_path(_path: &Path) -> Self {
+        Self {
+            cluster: 0,
+            by_id: AtomicBool::new(false),
+        }
+    }
+}
+
 /// Per-scan policy plus the loop protection for followed junctions.
 struct ScanContext<'a> {
     options: &'a ScanOptions,
@@ -167,6 +209,11 @@ struct ScanContext<'a> {
     /// Volume of the scan root; sub-folders on other volumes are pruned
     /// unless `cross_volumes` is set.
     root_volume: Option<String>,
+    /// Cached facts about the scan root's volume.
+    root_info: Arc<Volume>,
+    /// Cached facts about other volumes reached through followed junctions,
+    /// keyed by [`volume_key`].
+    volumes: Mutex<HashMap<String, Arc<Volume>>>,
 }
 
 impl<'a> ScanContext<'a> {
@@ -179,12 +226,31 @@ impl<'a> ScanContext<'a> {
         if let Some(ref c) = canonical {
             visited.lock().insert(c.clone());
         }
-        let root_volume = volume_key(canonical.as_deref().unwrap_or(root));
+        let resolved = canonical.as_deref().unwrap_or(root);
+        let root_volume = volume_key(resolved);
+        let root_info = Arc::new(Volume::for_path(resolved));
         Self {
             options,
             visited,
             root_volume,
+            root_info,
+            volumes: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Cached [`Volume`] facts for the volume `path` lives on.
+    fn volume_info(&self, path: &Path) -> Arc<Volume> {
+        let Some(key) = volume_key(path) else {
+            return self.root_info.clone();
+        };
+        if self.root_volume.as_deref() == Some(key.as_str()) {
+            return self.root_info.clone();
+        }
+        self.volumes
+            .lock()
+            .entry(key)
+            .or_insert_with(|| Arc::new(Volume::for_path(path)))
+            .clone()
     }
 
     fn same_volume(&self, path: &Path) -> bool {
@@ -196,20 +262,20 @@ impl<'a> ScanContext<'a> {
         }
     }
 
-    /// Whether the junction / symlink `name` inside `parent` may be entered.
-    /// Records its target so a loop (A -> B -> A) is only visited once.
-    fn follow_dir(&self, parent: &Path, name: &str) -> bool {
+    /// Whether the junction / symlink `name` inside `parent` may be entered,
+    /// and if so the volume its target lives on. Records the target so a
+    /// loop (A -> B -> A) is only visited once.
+    fn follow_dir(&self, parent: &Path, name: &str) -> Option<Arc<Volume>> {
         let child = parent.join(name);
-        let Ok(canonical) = std::fs::canonicalize(&child) else {
-            return false;
-        };
+        let canonical = std::fs::canonicalize(&child).ok()?;
         if !canonical.is_dir() {
-            return false;
+            return None;
         }
         if !self.options.cross_volumes && !self.same_volume(&canonical) {
-            return false;
+            return None;
         }
-        self.visited.lock().insert(canonical)
+        let volume = self.volume_info(&canonical);
+        self.visited.lock().insert(canonical).then_some(volume)
     }
 }
 
@@ -297,7 +363,7 @@ pub fn scan_live(
                 subdirs: Vec::new(),
             }
         } else {
-            list_one(&root, 0, &progress, &links, &ctx)
+            list_one(&root, 0, &progress, &links, &ctx, &ctx.root_info)
         };
         let mut arena = Arena::default();
         let root_node = node.commit(&mut arena);
@@ -305,11 +371,20 @@ pub fn scan_live(
         sub.root_mut().set_expanded(true);
         *live.write() = Tree::new(sub, root.clone());
 
-        subdirs.into_par_iter().for_each(|(child_name, modified)| {
-            let child_path = root.join(&*child_name);
+        subdirs.into_par_iter().for_each(|sub| {
+            let child_path = root.join(&*sub.name);
+            let volume = sub.volume.as_deref().unwrap_or(&ctx.root_info);
             let arena = Mutex::new(Arena::default());
-            let child = scan_dir(&child_path, modified, &progress, &links, &arena, &ctx);
-            let sub = Subtree::new(arena.into_inner(), &child_name, child);
+            let child = scan_dir(
+                &child_path,
+                sub.modified,
+                &progress,
+                &links,
+                &arena,
+                &ctx,
+                volume,
+            );
+            let sub = Subtree::new(arena.into_inner(), &sub.name, child);
             live.write().adopt(&[], sub);
         });
 
@@ -347,7 +422,7 @@ fn scan_detached(path: &Path, name: &str, progress: &Progress, options: &ScanOpt
         let links = LinkTracker::default();
         let visited = Mutex::new(HashSet::new());
         let ctx = ScanContext::for_scan(path, options, &visited);
-        scan_dir(path, 0, progress, &links, &arena, &ctx)
+        scan_dir(path, 0, progress, &links, &arena, &ctx, &ctx.root_info)
     };
     Subtree::new(arena.into_inner(), name, root)
 }
@@ -385,10 +460,19 @@ pub fn allocated_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
+/// A sub-directory found while listing its parent, to be scanned next.
+struct Subdir {
+    name: Box<str>,
+    modified: i64,
+    /// The volume of a followed junction's target; `None` means the same
+    /// volume as the parent.
+    volume: Option<Arc<Volume>>,
+}
+
 /// Entries listed for one directory, before its sub-directories are scanned.
 struct Listing {
     node: DirBuilder,
-    subdirs: Vec<(Box<str>, i64)>,
+    subdirs: Vec<Subdir>,
 }
 
 /// List one directory's entries into a [`DirBuilder`] and collect its
@@ -401,6 +485,7 @@ fn list_one(
     progress: &Progress,
     links: &LinkTracker,
     ctx: &ScanContext,
+    volume: &Volume,
 ) -> Listing {
     let mut node = DirBuilder::new(modified);
     if let Some(mut cur) = progress.current.try_lock() {
@@ -409,10 +494,10 @@ fn list_one(
     }
 
     let options = ctx.options;
-    let mut subdirs: Vec<(Box<str>, i64)> = Vec::new();
+    let mut subdirs: Vec<Subdir> = Vec::new();
     let mut files: u64 = 0;
     let mut bytes: u64 = 0;
-    let ok = list_dir(path, |entry| match entry {
+    let ok = list_dir(path, volume, |entry| match entry {
         Entry::File {
             name,
             size,
@@ -448,11 +533,18 @@ fn list_one(
             if options.is_excluded(&name) {
                 return;
             }
-            if !options.cross_volumes && !ctx.same_volume(&path.join(&*name)) {
+            // On Windows a mount point is a reparse point (`Entry::Link`), so a
+            // plain directory is always on its parent's volume: skip the check.
+            if cfg!(not(windows)) && !options.cross_volumes && !ctx.same_volume(&path.join(&*name))
+            {
                 // A mount point on another volume: list it but do not enter.
                 node.add_empty_dir(&name, modified);
             } else {
-                subdirs.push((name, modified));
+                subdirs.push(Subdir {
+                    name,
+                    modified,
+                    volume: None,
+                });
             }
         }
         Entry::Link {
@@ -470,10 +562,18 @@ fn list_one(
             // the user opted in (with a warning about double counting). Even
             // then each target is entered at most once, so a loop (A -> B ->
             // A) terminates instead of scanning forever.
-            if options.follow_junctions && ctx.follow_dir(path, &name) {
-                subdirs.push((name, modified));
+            let target = if options.follow_junctions {
+                ctx.follow_dir(path, &name)
             } else {
-                node.add_empty_dir(&name, modified);
+                None
+            };
+            match target {
+                Some(target) => subdirs.push(Subdir {
+                    name,
+                    modified,
+                    volume: Some(target),
+                }),
+                None => node.add_empty_dir(&name, modified),
             }
         }
     });
@@ -499,19 +599,29 @@ fn scan_dir(
     links: &LinkTracker,
     arena: &Mutex<Arena>,
     ctx: &ScanContext,
+    volume: &Volume,
 ) -> Node {
     if progress.cancelled() {
         return DirBuilder::new(modified).commit(&mut arena.lock());
     }
-    let Listing { mut node, subdirs } = list_one(path, modified, progress, links, ctx);
+    let Listing { mut node, subdirs } = list_one(path, modified, progress, links, ctx, volume);
 
     if !subdirs.is_empty() {
         let children: Vec<(Box<str>, Node)> = subdirs
             .into_par_iter()
-            .map(|(name, modified)| {
-                let child_path = path.join(&*name);
-                let child = scan_dir(&child_path, modified, progress, links, arena, ctx);
-                (name, child)
+            .map(|sub| {
+                let child_path = path.join(&*sub.name);
+                let child_volume = sub.volume.as_deref().unwrap_or(volume);
+                let child = scan_dir(
+                    &child_path,
+                    sub.modified,
+                    progress,
+                    links,
+                    arena,
+                    ctx,
+                    child_volume,
+                );
+                (sub.name, child)
             })
             .collect();
         for (name, child) in children {
@@ -530,7 +640,7 @@ enum Entry {
         disk_size: u64,
         modified: i64,
         /// Unique per file (shared by hard links), or 0 when unknown.
-        file_id: u64,
+        file_id: u128,
         /// Hidden or system (Windows attributes, dot-file on Unix).
         hidden: bool,
     },
@@ -585,6 +695,13 @@ fn volume_root(path: &Path) -> String {
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
         s = format!(r"\\{rest}");
     } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        // A volume without a drive letter (e.g. the canonical target of a
+        // junction into a folder mount): its root is `\\?\Volume{GUID}\`.
+        if rest.starts_with("Volume{")
+            && let Some(end) = rest.find('\\')
+        {
+            return format!(r"\\?\{}\", &rest[..end]);
+        }
         s = rest.to_string();
     }
     if let Some(rest) = s.strip_prefix(r"\\") {
@@ -654,25 +771,51 @@ fn compressed_size(path: &Path) -> Option<u64> {
 /// List a directory with `GetFileInformationByHandleEx`, which returns the
 /// file ID and allocated size of every entry in the same batch as the name,
 /// size and timestamps. Falling back to `FindFirstFileExW` keeps filesystems
-/// that lack `FileIdBothDirectoryInfo` working.
+/// that lack `FileIdExtdDirectoryInfo` working; once a volume has rejected the
+/// class, its folders skip straight to the fallback.
 #[cfg(windows)]
-fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
-    if list_dir_by_id(path, &mut f) {
-        return true;
+fn list_dir(path: &Path, volume: &Volume, mut f: impl FnMut(Entry)) -> bool {
+    if volume.by_id.load(Ordering::Relaxed) {
+        match list_dir_by_id(path, volume.cluster, &mut f) {
+            ById::Listed => return true,
+            ById::Unsupported => volume.by_id.store(false, Ordering::Relaxed),
+            ById::Failed => {}
+        }
     }
-    list_dir_find(path, f)
+    list_dir_find(path, volume.cluster, f)
+}
+
+/// Outcome of a [`list_dir_by_id`] attempt.
+#[cfg(windows)]
+enum ById {
+    /// The directory was listed (possibly empty).
+    Listed,
+    /// The filesystem does not support the information class.
+    Unsupported,
+    /// Anything else (access denied, vanished folder, ...): nothing was
+    /// listed, so the caller may retry with another API.
+    Failed,
+}
+
+/// 128 KiB listing buffer, as `u64`s so the `FILE_ID_EXTD_DIR_INFO` casts
+/// are 8-byte aligned.
+#[cfg(windows)]
+const LIST_BUF_WORDS: usize = 16 * 1024;
+
+#[cfg(windows)]
+thread_local! {
+    /// One listing buffer per scan thread, reused for every directory. A
+    /// fresh zeroed 128 KiB allocation per folder bypasses the Windows
+    /// low-fragmentation heap and was a measurable cost.
+    static LIST_BUF: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
 }
 
 #[cfg(windows)]
-fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE};
+fn list_dir_by_id(path: &Path, cluster: u64, f: &mut impl FnMut(Entry)) -> ById {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FILE_ATTRIBUTE_SYSTEM,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
-        OPEN_EXISTING,
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     let wide = wide_z(path);
@@ -688,47 +831,85 @@ fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        return false;
+        return ById::Failed;
     }
 
-    // 128 KiB, 8-byte aligned so the FILE_ID_BOTH_DIR_INFO casts are valid.
-    let mut buf = vec![0u64; 16 * 1024];
+    let result = LIST_BUF.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut buf) => {
+            if buf.len() < LIST_BUF_WORDS {
+                buf.resize(LIST_BUF_WORDS, 0);
+            }
+            read_by_id(handle, &mut buf, path, cluster, f)
+        }
+        // Only reachable if a callback ever lists another directory while
+        // this one is being read; stay correct with a private buffer.
+        Err(_) => read_by_id(handle, &mut vec![0u64; LIST_BUF_WORDS], path, cluster, f),
+    });
+    unsafe { CloseHandle(handle) };
+    result
+}
+
+#[cfg(windows)]
+fn read_by_id(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    buf: &mut [u64],
+    path: &Path,
+    cluster: u64,
+    f: &mut impl FnMut(Entry),
+) -> ById {
+    use windows_sys::Win32::Foundation::{
+        ERROR_INVALID_FUNCTION, ERROR_INVALID_LEVEL, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES,
+        ERROR_NOT_SUPPORTED,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SPARSE_FILE, FILE_ATTRIBUTE_SYSTEM,
+        FILE_ID_EXTD_DIR_INFO, FileIdExtdDirectoryInfo, FileIdExtdDirectoryRestartInfo,
+        GetFileInformationByHandleEx,
+    };
+
+    let buf_bytes = std::mem::size_of_val(buf);
     let mut restart = true;
-    let mut listed_any = false;
-    let cluster = cluster_size(path);
     loop {
+        // The first call uses the restart class so enumeration starts at the
+        // beginning of the directory.
         let class = if restart {
-            FileIdBothDirectoryRestartInfo
+            FileIdExtdDirectoryRestartInfo
         } else {
-            FileIdBothDirectoryInfo
+            FileIdExtdDirectoryInfo
         };
         let ok = unsafe {
             GetFileInformationByHandleEx(
                 handle,
                 class,
                 buf.as_mut_ptr() as *mut _,
-                (buf.len() * 8) as u32,
+                buf_bytes as u32,
             )
         };
         if ok == 0 {
-            let code = std::io::Error::last_os_error().raw_os_error();
-            unsafe { CloseHandle(handle) };
-            if restart && code != Some(ERROR_NO_MORE_FILES as i32) {
-                // Unsupported information class (or a denied directory): let
-                // the caller retry with FindFirstFileExW.
-                return false;
+            let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
+            if code == ERROR_NO_MORE_FILES {
+                // An empty (or finished) directory is a success.
+                return ById::Listed;
             }
-            // An empty (or finished) directory is a success.
-            return listed_any || restart;
+            if !restart {
+                // Entries were already delivered; keep what was listed.
+                return ById::Listed;
+            }
+            return match code {
+                ERROR_INVALID_PARAMETER
+                | ERROR_INVALID_LEVEL
+                | ERROR_NOT_SUPPORTED
+                | ERROR_INVALID_FUNCTION => ById::Unsupported,
+                _ => ById::Failed,
+            };
         }
         restart = false;
-        listed_any = true;
 
+        let base = buf.as_ptr() as *const u8;
         let mut offset = 0usize;
         loop {
-            let info = unsafe {
-                &*((buf.as_ptr() as *const u8).add(offset) as *const FILE_ID_BOTH_DIR_INFO)
-            };
+            let info = unsafe { &*(base.add(offset) as *const FILE_ID_EXTD_DIR_INFO) };
             let len = info.FileNameLength as usize / 2;
             let name_w = unsafe { std::slice::from_raw_parts(info.FileName.as_ptr(), len) };
             let is_dot = name_w == [b'.' as u16] || name_w == [b'.' as u16, b'.' as u16];
@@ -771,18 +952,24 @@ fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
                     } else {
                         round_up(size, cluster)
                     };
+                    // On NTFS the low 64 bits are the file reference number;
+                    // ReFS uses all 128. All-ones is `FILE_INVALID_FILE_ID`.
+                    let file_id = match u128::from_le_bytes(info.FileId.Identifier) {
+                        u128::MAX => 0,
+                        id => id,
+                    };
                     f(Entry::File {
                         name,
                         size,
                         disk_size,
                         modified,
-                        file_id: info.FileId as u64,
+                        file_id,
                         hidden,
                     });
                 }
             }
             let next = info.NextEntryOffset as usize;
-            if next == 0 || offset + next >= buf.len() * 8 {
+            if next == 0 || offset + next >= buf_bytes {
                 break;
             }
             offset += next;
@@ -791,7 +978,7 @@ fn list_dir_by_id(path: &Path, f: &mut impl FnMut(Entry)) -> bool {
 }
 
 #[cfg(windows)]
-fn list_dir_find(path: &Path, mut f: impl FnMut(Entry)) -> bool {
+fn list_dir_find(path: &Path, cluster: u64, mut f: impl FnMut(Entry)) -> bool {
     use windows_sys::Win32::Foundation::{FILETIME, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
@@ -812,7 +999,6 @@ fn list_dir_find(path: &Path, mut f: impl FnMut(Entry)) -> bool {
         filetime_i64_to_unix(t as i64)
     }
 
-    let cluster = cluster_size(path);
     unsafe {
         let mut data: WIN32_FIND_DATAW = std::mem::zeroed();
         let handle = FindFirstFileExW(
@@ -882,7 +1068,7 @@ fn list_dir_find(path: &Path, mut f: impl FnMut(Entry)) -> bool {
 }
 
 #[cfg(not(windows))]
-fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
+fn list_dir(path: &Path, _volume: &Volume, mut f: impl FnMut(Entry)) -> bool {
     let Ok(rd) = std::fs::read_dir(path) else {
         return false;
     };
@@ -905,7 +1091,7 @@ fn list_dir(path: &Path, mut f: impl FnMut(Entry)) -> bool {
                 // single volume a scan covers.
                 Some(m) => (
                     m.blocks().saturating_mul(512),
-                    if m.nlink() > 1 { m.ino() } else { 0 },
+                    if m.nlink() > 1 { m.ino() as u128 } else { 0 },
                 ),
                 None => (size, 0),
             }
