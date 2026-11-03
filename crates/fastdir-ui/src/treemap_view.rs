@@ -50,6 +50,7 @@ struct Key {
     h: u32,
     dark: bool,
     highlight: Option<u16>,
+    highlight_category: Option<u8>,
     /// Bumped whenever the zoom root changes.
     zoom: u64,
     show_free: bool,
@@ -71,6 +72,7 @@ impl Key {
         h: u32,
         dark: bool,
         highlight: Option<u16>,
+        highlight_category: Option<u8>,
         zoom: u64,
         opts: RenderOptions,
     ) -> Self {
@@ -80,6 +82,7 @@ impl Key {
             h,
             dark,
             highlight,
+            highlight_category,
             zoom,
             show_free: opts.show_free,
             show_unknown: opts.show_unknown,
@@ -98,6 +101,7 @@ impl Key {
     fn opts(&self) -> RenderOptions {
         RenderOptions {
             highlight: self.highlight,
+            highlight_category: self.highlight_category,
             show_free: self.show_free,
             show_unknown: self.show_unknown,
             use_disk: self.use_disk_size,
@@ -121,6 +125,7 @@ pub struct TreemapView {
     /// Every selected node; each one gets an outline.
     selection: Vec<NodePath>,
     highlight: Option<u16>,
+    highlight_category: Option<u8>,
     /// Folder the treemap is rooted at (`[]` is the scan root).
     zoom: NodePath,
     /// File-system path of `zoom`, used to find it again after the tree
@@ -162,6 +167,7 @@ impl TreemapView {
             stale: Default::default(),
             selection: Vec::new(),
             highlight: None,
+            highlight_category: None,
             zoom: Vec::new(),
             zoom_fs: None,
             zoom_gen: 0,
@@ -225,6 +231,7 @@ impl TreemapView {
     fn render_opts(&self) -> RenderOptions {
         RenderOptions {
             highlight: self.highlight,
+            highlight_category: self.highlight_category,
             show_free: self.show_free,
             show_unknown: self.show_unknown,
             use_disk: self.use_disk_size,
@@ -254,6 +261,7 @@ impl TreemapView {
         self.tree = tree;
         self.selection.clear();
         self.highlight = None;
+        self.highlight_category = None;
         self.zoom.clear();
         self.zoom_fs = None;
         self.zoom_gen += 1;
@@ -274,10 +282,21 @@ impl TreemapView {
     }
 
     /// Highlight the leaves of one extension rank; `None` shows every leaf in
-    /// full colour.
+    /// full colour. Clears a category highlight.
     pub fn set_highlight(&mut self, highlight: Option<u16>, cx: &mut Context<Self>) {
-        if self.highlight != highlight {
+        if self.highlight != highlight || self.highlight_category.is_some() {
             self.highlight = highlight;
+            self.highlight_category = None;
+            cx.notify();
+        }
+    }
+
+    /// Highlight every leaf in one file-type category (index into
+    /// `FileCategory::ALL`); `None` clears it. Clears an extension highlight.
+    pub fn set_highlight_category(&mut self, highlight: Option<u8>, cx: &mut Context<Self>) {
+        if self.highlight_category != highlight || self.highlight.is_some() {
+            self.highlight_category = highlight;
+            self.highlight = None;
             cx.notify();
         }
     }
@@ -530,6 +549,7 @@ impl Render for TreemapView {
         let pending = self.pending;
         let image_key = self.image_key;
         let highlight = self.highlight;
+        let highlight_category = self.highlight_category;
         let zoom = self.zoom_gen;
         let zoom_path = self.zoom.clone();
         let has_tree = self.tree.is_some();
@@ -545,7 +565,16 @@ impl Render for TreemapView {
                 let w = (f32::from(bounds.size.width) * scale).round() as u32;
                 let h = (f32::from(bounds.size.height) * scale).round() as u32;
                 if has_tree && w >= 4 && h >= 4 {
-                    let key = Key::new(generation, w, h, dark, highlight, zoom, render_opts);
+                    let key = Key::new(
+                        generation,
+                        w,
+                        h,
+                        dark,
+                        highlight,
+                        highlight_category,
+                        zoom,
+                        render_opts,
+                    );
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
                             entity.update(cx, |this, cx| this.request(key, cx)).ok();

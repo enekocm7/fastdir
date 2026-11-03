@@ -38,6 +38,8 @@ impl FastDir {
         // The scanner fills this tree in place, so the list and the treemap
         // can show finished top-level folders before the scan ends.
         let tree = Arc::new(RwLock::new(Tree::empty(root.clone())));
+        // Apply the user's `[categories]` overrides before any file arrives.
+        tree.write().set_category_map(self.category_map());
         self.tree = Some(tree.clone());
         self.partial_generation = 0;
         self.rows.clear();
@@ -45,6 +47,7 @@ impl FastDir {
         self.marked.clear();
         self.anchor = None;
         self.selected_ext = None;
+        self.selected_category = None;
         self.tab = ListTab::Tree;
         self.filter = Filter::default();
         self.filter_form = FilterForm::default();
@@ -186,6 +189,7 @@ impl FastDir {
         let selected_fs = self.selected_fs_path().map(|(_, fs, _)| fs);
         self.marked.clear();
         self.selected_ext = None;
+        self.selected_category = None;
         self.tab = ListTab::Tree;
         self.rebuild_rows();
         self.restore_selected_fs(selected_fs);

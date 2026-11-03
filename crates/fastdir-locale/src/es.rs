@@ -329,7 +329,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.tree.colorby" => "Colorear por",
         "set.tree.colorby_ext" => "Extensión",
         "set.tree.colorby_age" => "Antigüedad",
-        "set.tree.colorby_cap" => "La lista de extensiones mantiene los colores por extensión.",
+        "set.tree.colorby_cap" => "El panel de extensiones muestra los colores correspondientes.",
         "set.tree.cushion" => "Sombreado acolchado",
         "set.tree.cushion_cap" => "Sombreado tipo cojín o rectángulos planos.",
         "set.tree.strength" => "Intensidad del acolchado",
@@ -409,6 +409,20 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Cada ajuste vuelve a su valor predeterminado. Se conservan la posición de la ventana y los paneles."
         }
         "set.reset.ok" => "Restablecer",
+        "set.tree.colorby_category" => "Categoría",
+        "list.by_category" => "Por categoría",
+        "list.by_extension" => "Por extensión",
+        "list.category_col" => "Categoría",
+        "category.video" => "Vídeo",
+        "category.images" => "Imágenes",
+        "category.audio" => "Audio",
+        "category.archives" => "Archivos",
+        "category.documents" => "Documentos",
+        "category.code" => "Código",
+        "category.executables" => "Ejecutables e instaladores",
+        "category.disk_images" => "Imágenes de disco",
+        "category.system" => "Sistema",
+        "category.other" => "Otros",
         _ => return None,
     })
 }

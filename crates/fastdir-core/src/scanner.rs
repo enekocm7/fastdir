@@ -369,7 +369,12 @@ pub fn scan_live(
         let root_node = node.commit(&mut arena);
         let mut sub = Subtree::new(arena, &name, root_node);
         sub.root_mut().set_expanded(true);
-        *live.write() = Tree::new(sub, root.clone());
+        // Keep the category table the caller set on the empty tree (the UI
+        // applies `[categories]` overrides there before the scan starts).
+        let categories = live.read().categories().clone();
+        let mut tree = Tree::new(sub, root.clone());
+        tree.set_category_map(categories);
+        *live.write() = tree;
 
         subdirs.into_par_iter().for_each(|sub| {
             let child_path = root.join(&*sub.name);
@@ -1259,6 +1264,11 @@ mod tests {
         std::fs::write(dir.join("two/b.bin"), vec![0u8; 11]).unwrap();
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
+        let categories = crate::categories::CategoryMap::with_overrides([(
+            "video".to_string(),
+            vec!["bin".to_string()],
+        )]);
+        live.write().set_category_map(categories);
         let result = scan_live(
             dir.clone(),
             Arc::new(Progress::default()),
@@ -1277,6 +1287,11 @@ mod tests {
         assert_eq!(&*tree.exts[0].name, ".bin");
         assert_eq!((tree.exts[0].bytes, tree.exts[0].files), (18, 2));
         assert_eq!(&*tree.exts[1].name, ".txt");
+        // The caller's category table survives the live tree being rebuilt.
+        assert_eq!(
+            tree.exts[0].category,
+            crate::categories::FileCategory::Video
+        );
         assert!(tree.generation >= 2);
         drop(tree);
 

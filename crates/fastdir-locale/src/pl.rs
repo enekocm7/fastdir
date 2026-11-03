@@ -335,7 +335,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.tree.colorby" => "Koloruj według",
         "set.tree.colorby_ext" => "Rozszerzenie",
         "set.tree.colorby_age" => "Wiek",
-        "set.tree.colorby_cap" => "Lista rozszerzeń zachowuje kolory rozszerzeń.",
+        "set.tree.colorby_cap" => "Panel rozszerzeń pokazuje odpowiednie kolory.",
         "set.tree.cushion" => "Cieniowanie wypukłe",
         "set.tree.cushion_cap" => "Cieniowanie poduszkowe lub płaskie prostokąty.",
         "set.tree.strength" => "Siła cieniowania",
@@ -415,6 +415,20 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Każde ustawienie wraca do wartości domyślnej. Pozycja okna i rozmiary paneli zostaną zachowane."
         }
         "set.reset.ok" => "Resetuj",
+        "set.tree.colorby_category" => "Kategoria",
+        "list.by_category" => "Według kategorii",
+        "list.by_extension" => "Według rozszerzenia",
+        "list.category_col" => "Kategoria",
+        "category.video" => "Wideo",
+        "category.images" => "Obrazy",
+        "category.audio" => "Dźwięk",
+        "category.archives" => "Archiwa",
+        "category.documents" => "Dokumenty",
+        "category.code" => "Kod",
+        "category.executables" => "Programy i instalatory",
+        "category.disk_images" => "Obrazy dysków",
+        "category.system" => "System",
+        "category.other" => "Inne",
         _ => return None,
     })
 }

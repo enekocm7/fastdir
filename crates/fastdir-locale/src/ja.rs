@@ -329,7 +329,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.tree.colorby" => "色分け",
         "set.tree.colorby_ext" => "拡張子",
         "set.tree.colorby_age" => "更新日時",
-        "set.tree.colorby_cap" => "拡張子一覧では拡張子の色を維持します。",
+        "set.tree.colorby_cap" => "拡張子パネルに対応する色が表示されます。",
         "set.tree.cushion" => "クッションシェーディング",
         "set.tree.cushion_cap" => "立体的な陰影、またはフラットな矩形。",
         "set.tree.strength" => "クッションの強さ",
@@ -409,6 +409,20 @@ pub fn get(key: &str) -> Option<&'static str> {
             "すべての設定が既定値に戻ります。ウィンドウ位置とパネルサイズは保持されます。"
         }
         "set.reset.ok" => "リセット",
+        "set.tree.colorby_category" => "カテゴリ",
+        "list.by_category" => "カテゴリ別",
+        "list.by_extension" => "拡張子別",
+        "list.category_col" => "カテゴリ",
+        "category.video" => "ビデオ",
+        "category.images" => "画像",
+        "category.audio" => "オーディオ",
+        "category.archives" => "アーカイブ",
+        "category.documents" => "ドキュメント",
+        "category.code" => "コード",
+        "category.executables" => "実行可能ファイルとインストーラー",
+        "category.disk_images" => "ディスクイメージ",
+        "category.system" => "システム",
+        "category.other" => "その他",
         _ => return None,
     })
 }

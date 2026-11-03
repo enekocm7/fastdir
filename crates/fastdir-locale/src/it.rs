@@ -327,7 +327,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.tree.colorby" => "Colora per",
         "set.tree.colorby_ext" => "Estensione",
         "set.tree.colorby_age" => "Età",
-        "set.tree.colorby_cap" => "L'elenco estensioni mantiene i colori per estensione.",
+        "set.tree.colorby_cap" => "Il pannello delle estensioni mostra i colori corrispondenti.",
         "set.tree.cushion" => "Ombreggiatura a cuscino",
         "set.tree.cushion_cap" => "Ombreggiatura a cuscino oppure rettangoli piatti.",
         "set.tree.strength" => "Intensità del cuscino",
@@ -407,6 +407,20 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Ogni impostazione torna al valore predefinito. La posizione della finestra e le dimensioni dei pannelli vengono mantenute."
         }
         "set.reset.ok" => "Reimposta",
+        "set.tree.colorby_category" => "Categoria",
+        "list.by_category" => "Per categoria",
+        "list.by_extension" => "Per estensione",
+        "list.category_col" => "Categoria",
+        "category.video" => "Video",
+        "category.images" => "Immagini",
+        "category.audio" => "Audio",
+        "category.archives" => "Archivi",
+        "category.documents" => "Documenti",
+        "category.code" => "Codice",
+        "category.executables" => "Eseguibili e programmi di installazione",
+        "category.disk_images" => "Immagini disco",
+        "category.system" => "Sistema",
+        "category.other" => "Altro",
         _ => return None,
     })
 }

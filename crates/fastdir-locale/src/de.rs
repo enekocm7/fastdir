@@ -327,7 +327,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.tree.colorby" => "Färben nach",
         "set.tree.colorby_ext" => "Erweiterung",
         "set.tree.colorby_age" => "Alter",
-        "set.tree.colorby_cap" => "Die Erweiterungsliste behält Erweiterungsfarben.",
+        "set.tree.colorby_cap" => "Die Erweiterungsliste zeigt die passenden Farben.",
         "set.tree.cushion" => "Polsterschattierung",
         "set.tree.cushion_cap" => "Kissenschattierung oder flache Rechtecke.",
         "set.tree.strength" => "Polsterstärke",
@@ -407,6 +407,20 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Jede Einstellung kehrt zum Standard zurück. Fensterposition und Panelgrößen bleiben erhalten."
         }
         "set.reset.ok" => "Zurücksetzen",
+        "set.tree.colorby_category" => "Kategorie",
+        "list.by_category" => "Nach Kategorie",
+        "list.by_extension" => "Nach Erweiterung",
+        "list.category_col" => "Kategorie",
+        "category.video" => "Video",
+        "category.images" => "Bilder",
+        "category.audio" => "Audio",
+        "category.archives" => "Archive",
+        "category.documents" => "Dokumente",
+        "category.code" => "Code",
+        "category.executables" => "Programme und Installationspakete",
+        "category.disk_images" => "Datenträgerabbilder",
+        "category.system" => "System",
+        "category.other" => "Sonstiges",
         _ => return None,
     })
 }

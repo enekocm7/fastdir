@@ -76,6 +76,7 @@ impl Render for SettingsView {
         let color_mode_ix = match treemap.color_mode {
             TreemapColorMode::Extension => 0,
             TreemapColorMode::Age => 1,
+            TreemapColorMode::Category => 2,
         };
         let size_unit_ix = match list.size_unit {
             SizeUnit::Binary => 0,
@@ -771,10 +772,15 @@ impl Render for SettingsView {
                                                     .label(tr("set.tree.colorby_ext")),
                                             )
                                             .child(Radio::new("colormode-age").label(tr("set.tree.colorby_age")))
+                                            .child(
+                                                Radio::new("colormode-category")
+                                                    .label(tr("set.tree.colorby_category")),
+                                            )
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let mode = match ix {
                                                         1 => TreemapColorMode::Age,
+                                                        2 => TreemapColorMode::Category,
                                                         _ => TreemapColorMode::Extension,
                                                     };
                                                     color_mode_owner.update(cx, |this, cx| {

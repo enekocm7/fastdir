@@ -329,7 +329,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.tree.colorby" => "Barvit podle",
         "set.tree.colorby_ext" => "Přípona",
         "set.tree.colorby_age" => "Stáří",
-        "set.tree.colorby_cap" => "Seznam přípon zachovává barvy přípon.",
+        "set.tree.colorby_cap" => "Panel přípon zobrazuje odpovídající barvy.",
         "set.tree.cushion" => "Stínování polštáře",
         "set.tree.cushion_cap" => "Polštářové stínování, nebo ploché obdélníky.",
         "set.tree.strength" => "Síla stínování",
@@ -409,6 +409,20 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Každé nastavení se vrátí na výchozí. Poloha okna a velikosti panelů zůstanou zachovány."
         }
         "set.reset.ok" => "Obnovit",
+        "set.tree.colorby_category" => "Kategorie",
+        "list.by_category" => "Podle kategorie",
+        "list.by_extension" => "Podle přípony",
+        "list.category_col" => "Kategorie",
+        "category.video" => "Video",
+        "category.images" => "Obrázky",
+        "category.audio" => "Zvuk",
+        "category.archives" => "Archivy",
+        "category.documents" => "Dokumenty",
+        "category.code" => "Kód",
+        "category.executables" => "Spustitelné soubory a instalátory",
+        "category.disk_images" => "Obrazy disků",
+        "category.system" => "Systém",
+        "category.other" => "Ostatní",
         _ => return None,
     })
 }
