@@ -95,7 +95,7 @@ jobs:
 
   linux:
     name: Linux x64
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
 
@@ -159,7 +159,7 @@ jobs:
 
   macos:
     name: macOS arm64
-    runs-on: macos-latest
+    runs-on: blacksmith-6vcpu-macos-latest
     steps:
       - uses: actions/checkout@v4
 
