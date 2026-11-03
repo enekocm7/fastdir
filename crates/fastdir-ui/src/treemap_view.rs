@@ -150,6 +150,9 @@ pub struct TreemapView {
     zoom_fs: Option<PathBuf>,
     zoom_gen: u64,
     hover: Option<(NodePath, SharedString)>,
+    /// The treemap has keyboard focus: arrows move between cells and a
+    /// focus ring is drawn.
+    keyboard_focus: bool,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     scale: Rc<Cell<f32>>,
     rendering: bool,
@@ -193,6 +196,7 @@ impl TreemapView {
             zoom_fs: None,
             zoom_gen: 0,
             hover: None,
+            keyboard_focus: false,
             bounds: Rc::new(Cell::new(Bounds::default())),
             scale: Rc::new(Cell::new(1.0)),
             rendering: false,
@@ -326,6 +330,40 @@ impl TreemapView {
             self.selection = selection;
             cx.notify();
         }
+    }
+
+    /// Give or take keyboard focus (draws the focus ring).
+    pub fn set_keyboard_focus(&mut self, focus: bool, cx: &mut Context<Self>) {
+        if self.keyboard_focus != focus {
+            self.keyboard_focus = focus;
+            cx.notify();
+        }
+    }
+
+    pub fn has_keyboard_focus(&self) -> bool {
+        self.keyboard_focus
+    }
+
+    /// The cell next to the current selection in `dir` (absolute path), or
+    /// the largest cell when nothing in view is selected.
+    pub fn neighbor(&self, dir: treemap::Direction) -> Option<NodePath> {
+        let tree = self.tree.as_ref()?.read();
+        let b = self.bounds.get();
+        let s = self.scale.get() as f64;
+        let w = (f32::from(b.size.width) as f64 * s).round();
+        let h = (f32::from(b.size.height) as f64 * s).round();
+        let root = tree.get(&self.zoom)?;
+        let opts = self.render_opts();
+        let from: Vec<u32> = self
+            .selection
+            .last()
+            .and_then(|sel| sel.strip_prefix(self.zoom.as_slice()))
+            .map(<[u32]>::to_vec)
+            .unwrap_or_default();
+        let rel = treemap::neighbor(&tree, root, w, h, &from, dir, &opts)?;
+        let mut path = self.zoom.clone();
+        path.extend(rel);
+        Some(path)
     }
 
     /// Highlight the leaves of one extension rank; `None` shows every leaf in
@@ -664,6 +702,8 @@ impl Render for TreemapView {
         let change_gen = self.change_gen;
         let zoom_path = self.zoom.clone();
         let has_tree = self.tree.is_some();
+        let focused = self.keyboard_focus;
+        let accent = theme.primary;
         let render_opts = self.render_opts();
         let paint_opts = render_opts;
         let _ = window;
@@ -732,6 +772,17 @@ impl Render for TreemapView {
                         ),
                     );
                     let _ = &cx;
+                    if focused {
+                        // Keyboard focus ring: accent colour, outside the cell.
+                        window.paint_quad(quad(
+                            rb.dilate(px(2.)),
+                            px(0.),
+                            transparent_black(),
+                            px(3.),
+                            accent,
+                            BorderStyle::Solid,
+                        ));
+                    }
                     window.paint_quad(quad(
                         rb,
                         px(0.),
@@ -754,6 +805,16 @@ impl Render for TreemapView {
                             BorderStyle::Solid,
                         ));
                     }
+                }
+                if focused {
+                    window.paint_quad(quad(
+                        bounds,
+                        px(0.),
+                        transparent_black(),
+                        px(2.),
+                        accent,
+                        BorderStyle::Solid,
+                    ));
                 }
             },
         )

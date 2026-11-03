@@ -1156,6 +1156,92 @@ pub fn rect_of(
     Some(rc)
 }
 
+/// A direction for keyboard navigation between treemap cells.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// The laid-out children of `node` inside `rc` as `(child index, rect)`.
+fn child_rects(tree: &Tree, node: &Node, rc: Rect, opts: &RenderOptions) -> Vec<(usize, Rect)> {
+    let mut out = Vec::new();
+    squarify_filtered(
+        tree.children(node),
+        node_size(node, opts.use_disk),
+        rc,
+        opts.show_free,
+        opts.show_unknown,
+        opts.use_disk,
+        |i, r| out.push((i, r)),
+    );
+    out
+}
+
+/// The cell next to the one at `from` (relative to `root`) in direction
+/// `dir`, for keyboard navigation. Siblings are tried first; when none lies
+/// that way the search moves up a level, so the result may be a folder that
+/// contains the neighbouring cells. An empty `from` yields the first visible
+/// child (the largest). Returns `None` at the edge of the layout.
+pub fn neighbor(
+    tree: &Tree,
+    root: &Node,
+    w: f64,
+    h: f64,
+    from: &[u32],
+    dir: Direction,
+    opts: &RenderOptions,
+) -> Option<NodePath> {
+    let full = Rect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: w,
+        y1: h,
+    };
+    if from.is_empty() {
+        return child_rects(tree, root, full, opts)
+            .first()
+            .map(|&(i, _)| vec![i as u32]);
+    }
+    for level in (1..=from.len()).rev() {
+        let parent_path = &from[..level - 1];
+        let mut parent = root;
+        for &i in parent_path {
+            parent = tree.children(parent).get(i as usize)?;
+        }
+        let parent_rc = rect_of(tree, root, w, h, parent_path, opts)?;
+        let cells = child_rects(tree, parent, parent_rc, opts);
+        let want = from[level - 1] as usize;
+        let Some(&(_, cur)) = cells.iter().find(|&&(i, _)| i == want) else {
+            continue;
+        };
+        let (cx, cy) = ((cur.x0 + cur.x1) / 2.0, (cur.y0 + cur.y1) / 2.0);
+        let best = cells
+            .iter()
+            .filter(|&&(i, _)| i != want)
+            .filter_map(|&(i, r)| {
+                let (rx, ry) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
+                // Distance along the travel axis and offset across it.
+                let (along, across) = match dir {
+                    Direction::Right => (rx - cx, (ry - cy).abs()),
+                    Direction::Left => (cx - rx, (ry - cy).abs()),
+                    Direction::Down => (ry - cy, (rx - cx).abs()),
+                    Direction::Up => (cy - ry, (rx - cx).abs()),
+                };
+                (along > 1e-9).then_some((i, along + 2.0 * across))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((i, _)) = best {
+            let mut path = parent_path.to_vec();
+            path.push(i as u32);
+            return Some(path);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1349,12 +1435,8 @@ mod tests {
                 + (a.1 as i32 - b.1 as i32).abs()
                 + (a.2 as i32 - b.2 as i32).abs()
         };
-        assert!(
-            distance(tiny, CHANGE_NEUTRAL_COLOR) < distance(grew, CHANGE_NEUTRAL_COLOR)
-        );
-        assert!(
-            distance(huge, CHANGE_NEUTRAL_COLOR) > distance(grew, CHANGE_NEUTRAL_COLOR)
-        );
+        assert!(distance(tiny, CHANGE_NEUTRAL_COLOR) < distance(grew, CHANGE_NEUTRAL_COLOR));
+        assert!(distance(huge, CHANGE_NEUTRAL_COLOR) > distance(grew, CHANGE_NEUTRAL_COLOR));
     }
 
     #[test]
@@ -1874,5 +1956,35 @@ mod tests {
             x1: 100.0,
             y1: 80.0,
         }
+    }
+
+    #[test]
+    fn neighbor_moves_between_siblings_and_stops_at_edges() {
+        let tree = two_file_root();
+        let opts = RenderOptions::default();
+        // 100x20: the two cells sit side by side.
+        let root = tree.root();
+        let first = child_rects(
+            &tree,
+            root,
+            Rect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 100.0,
+                y1: 20.0,
+            },
+            &opts,
+        );
+        let (a, b) = (first[0].0 as u32, first[1].0 as u32);
+        let go = |from: u32, dir| neighbor(&tree, root, 100.0, 20.0, &[from], dir, &opts);
+        assert_eq!(go(a, Direction::Right), Some(vec![b]));
+        assert_eq!(go(b, Direction::Left), Some(vec![a]));
+        assert_eq!(go(a, Direction::Left), None);
+        assert_eq!(go(a, Direction::Up), None);
+        // From the root, the first visible child is chosen.
+        assert_eq!(
+            neighbor(&tree, root, 100.0, 20.0, &[], Direction::Down, &opts),
+            Some(vec![a])
+        );
     }
 }

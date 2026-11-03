@@ -509,6 +509,10 @@ Or in any client's JSON configuration:
 | Ctrl+Enter | Open with the default app |
 | Z | Zoom the treemap into the selected folder |
 | Shift+Z | Zoom the treemap out one folder |
+| F8 | Move keyboard focus to the treemap (and back) |
+| ↑ ↓ ← → *(treemap focused)* | Select the neighbouring cell; the list follows |
+| Enter / Backspace *(treemap focused)* | Zoom into the selected folder / zoom out |
+| Esc *(treemap focused)* | Give the keys back to the list |
 | Ctrl+E | Show in Explorer |
 | Ctrl+Shift+C | Copy the path |
 | F2 | Rename |
@@ -524,6 +528,21 @@ Or in any client's JSON configuration:
 | Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |
 | Ctrl+, | Open settings |
+
+### Accessibility
+
+- Everything is reachable by keyboard, including the treemap: press **F8**
+  (or click a cell) and the arrow keys walk between cells, with an accent
+  focus ring around the selected cell and the panel. The list selection
+  stays in sync.
+- **Screen readers:** GPUI does not yet expose an accessibility tree
+  (no UI Automation / AccessKit integration), so NVDA, Narrator and
+  VoiceOver cannot read toolbar buttons, rows or dialogs. This is a known
+  upstream limitation; see
+  [zed-industries/zed#7992](https://github.com/zed-industries/zed/issues/7992).
+  Scan progress and the selected item are always shown as text in the
+  status bar. Tab-order, dialog focus trapping, high-contrast / reduce-motion
+  detection and a 200 % scaling audit are tracked as follow-ups.
 
 ## Building from source
 

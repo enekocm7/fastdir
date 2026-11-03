@@ -81,6 +81,7 @@ actions!(
         ToggleTheme,
         ZoomIn,
         ZoomOut,
+        FocusTreemap,
         ToggleFreeSpace,
         ToggleUnknown,
         FocusSearch,
@@ -152,6 +153,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-t", ToggleTheme, Some(CONTEXT)),
         KeyBinding::new("z", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
+        KeyBinding::new("f8", FocusTreemap, Some(CONTEXT)),
         KeyBinding::new("f6", ToggleFreeSpace, Some(CONTEXT)),
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
         KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
@@ -538,6 +540,8 @@ impl FastDir {
                     this.tab = ListTab::Tree;
                     this.reveal_in_list(path.clone(), mode, cx);
                     this.focus.focus(window, cx);
+                    this.treemap
+                        .update(cx, |t, cx| t.set_keyboard_focus(true, cx));
                 }
                 TreemapEvent::Activate(path) => {
                     this.tab = ListTab::Tree;
@@ -1274,6 +1278,7 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::toggle_theme))
             .on_action(cx.listener(Self::zoom_in))
             .on_action(cx.listener(Self::zoom_out))
+            .on_action(cx.listener(Self::focus_treemap))
             .on_action(cx.listener(Self::toggle_free_space))
             .on_action(cx.listener(Self::toggle_unknown))
             .on_action(cx.listener(Self::focus_search))
@@ -1307,11 +1312,9 @@ impl Render for FastDir {
             .on_action(cx.listener(|this, _: &RunAction9, window, cx| {
                 this.run_action_shortcut(9, window, cx)
             }))
-            .on_drop::<ExternalPaths>(cx.listener(
-                |this, paths: &ExternalPaths, window, cx| {
-                    this.open_dropped(paths, window, cx)
-                },
-            ))
+            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.open_dropped(paths, window, cx)
+            }))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))

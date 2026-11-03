@@ -238,6 +238,11 @@ impl FastDir {
     }
 
     pub(super) fn stop_scan(&mut self, _: &StopScan, window: &mut Window, cx: &mut Context<Self>) {
+        if self.treemap.read(cx).has_keyboard_focus() {
+            // Esc first hands the keyboard back to the list.
+            self.leave_treemap(cx);
+            return;
+        }
         let scanning = if let Phase::Scanning { progress, .. } = &self.phase {
             progress.cancel.store(true, Ordering::Relaxed);
             true

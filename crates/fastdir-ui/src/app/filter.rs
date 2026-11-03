@@ -81,10 +81,7 @@ impl FastDir {
         ) {
             Ok(filter) => filter,
             Err(error) => {
-                window.push_notification(
-                    Notification::warning(error).title(rejected),
-                    cx,
-                );
+                window.push_notification(Notification::warning(error).title(rejected), cx);
                 return false;
             }
         };
@@ -123,6 +120,7 @@ impl FastDir {
         if !matches!(self.phase, Phase::Ready) {
             return;
         }
+        self.leave_treemap(cx);
         self.search.update(cx, |input, cx| input.focus(window, cx));
     }
 
