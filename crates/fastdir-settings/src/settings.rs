@@ -35,6 +35,10 @@ pub enum SortColumn {
     Files,
     Dirs,
     Modified,
+    /// Size change against a saved scan (comparison view only).
+    Delta,
+    /// Change status (comparison view only).
+    Status,
 }
 
 /// How folder sizes are displayed in the list, the status bar and tooltips.
@@ -92,6 +96,8 @@ pub enum TreemapColorMode {
     Age,
     /// Colour by file-type category (video, images, archives, ...).
     Category,
+    /// Colour by size change against a saved scan (green shrank, red grew).
+    Change,
 }
 
 /// How the extension panel groups its rows.

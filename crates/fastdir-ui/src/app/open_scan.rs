@@ -90,6 +90,7 @@ impl FastDir {
 
     /// Replace the current view with an imported scan.
     fn show_saved_scan(&mut self, scan: ImportedScan, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_comparison(cx);
         let ImportedScan { tree, scanned_at } = scan;
         let mut tree = tree;
         // A scan starts with its root row expanded so the top level is visible.

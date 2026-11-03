@@ -7,9 +7,9 @@
 //! - CSV is a flat table with one row per node:
 //!   `path,size,disk_size,items,files,folders,type,modified,modified_iso`.
 //! - JSON is a hierarchical snapshot of the subtree that
-//!   [`import_json`] can read back into a [`Tree`] (sizes, structure and
-//!   timestamps round-trip; UI-only flags such as expanded state, hard-link
-//!   markers and drive pseudo-item kinds do not).
+//!   [`import_json`] can read back into a [`Tree`] (sizes, structure,
+//!   timestamps and drive pseudo-item kinds round-trip; UI-only flags such as
+//!   expanded state and hard-link markers do not).
 //!
 //! Both formats honour [`ExportOptions`]: `max_depth` limits how far below
 //! the exported root rows are emitted (the root itself is depth 0), and
@@ -375,9 +375,20 @@ fn build_dir(node: &JsonNode, arena: &mut Arena) -> io::Result<Node> {
                 let dir = build_dir(child, arena)?;
                 builder.add_dir(&child.name, dir);
             }
-            // Drive pseudo-items and hard-link markers have no builder of
-            // their own; keep their bytes as plain files so totals survive.
-            _ => builder.add_file(&child.name, child.size, child.disk_size, child.modified),
+            // Hard-link markers have no builder of their own; keep their
+            // bytes as plain files so totals survive.
+            NodeKind::File => {
+                builder.add_file(&child.name, child.size, child.disk_size, child.modified)
+            }
+            kind @ (NodeKind::FreeSpace | NodeKind::Unknown) => {
+                builder.add_special(
+                    kind,
+                    &child.name,
+                    child.size,
+                    child.disk_size,
+                    child.modified,
+                );
+            }
         }
     }
     Ok(builder.commit(arena))
@@ -394,8 +405,8 @@ pub struct ImportedScan {
 /// Read back a [`export_json`] snapshot or a CLI `fastdir.scan` document into
 /// a [`Tree`], with the scan/export timestamp.
 ///
-/// Structure, sizes and timestamps round trip; extension stats are rebuilt
-/// from the imported names. Hard-link markers and drive pseudo-item kinds
+/// Structure, sizes, timestamps and drive pseudo-item kinds round trip;
+/// extension stats are rebuilt from the imported names. Hard-link markers
 /// become plain files, since [`DirBuilder`] has no builder for them: totals
 /// survive, but the UI can no longer tell those entries apart.
 pub fn import_json_with_meta(source: impl Read) -> io::Result<ImportedScan> {
@@ -607,6 +618,22 @@ mod tests {
         assert_eq!(back.name(node), "a.txt");
         // Extension stats are rebuilt on import.
         assert!(back.exts.iter().any(|e| &*e.name == ".txt"));
+    }
+
+    #[test]
+    fn json_round_trips_drive_pseudo_items() {
+        let mut tree = sample_tree();
+        tree.attach_volume_info(100, 40);
+        assert!(tree.is_drive_scan());
+        let mut buf = Vec::new();
+        export_json(&tree, &[], &ExportOptions::default(), &mut buf).unwrap();
+        let back = import_json(buf.as_slice()).unwrap();
+        assert!(back.is_drive_scan(), "free space and unknown kept their kind");
+        assert_eq!(back.free_bytes(), Some(40));
+        assert_eq!(back.unknown_bytes(), Some(10));
+        assert_eq!(back.scanned_bytes(), 50);
+        // They are still not real files for the item count.
+        assert_eq!(back.children(back.root()).len(), 4); // free, unknown, c.txt, sub
     }
 
     #[test]

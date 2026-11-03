@@ -67,6 +67,28 @@ impl FastDir {
         };
         let right: SharedString = match (&self.phase, &self.tree) {
             (Phase::Scanning { progress, .. }, _) => progress.current.lock().clone().into(),
+            (Phase::Ready, Some(_)) if self.compare.is_some() => {
+                let compare = self.compare.as_ref().expect("checked above");
+                let totals = compare.diff.totals();
+                let pct = if totals.old_size > 0 {
+                    self.signed_percent(totals.net(), totals.old_size)
+                } else {
+                    "—".to_string()
+                };
+                let mut text = self.tr_fmt(
+                    "status.compare",
+                    &[("delta", &self.signed_bytes(totals.net())), ("pct", &pct)],
+                );
+                if let Some(free) = totals.free_delta {
+                    text.push_str(
+                        &self.tr_fmt(
+                            "status.compare_free",
+                            &[("free", &self.signed_bytes(free))],
+                        ),
+                    );
+                }
+                text.into()
+            }
             (Phase::Ready, Some(_)) if self.saved.is_some() => {
                 let when = self
                     .saved

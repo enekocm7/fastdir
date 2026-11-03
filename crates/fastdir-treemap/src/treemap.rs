@@ -9,6 +9,7 @@
 //! and highlighting re-run the layout only along a single path instead of
 //! keeping millions of rectangles in memory.
 
+use fastdir_core::diff::ScanDiff;
 use fastdir_core::model::{NO_EXT, Node, NodeKind, NodePath, Tree};
 use rayon::prelude::*;
 
@@ -317,6 +318,40 @@ pub fn age_color(modified: i64, now: i64, palette: Palette) -> (u8, u8, u8) {
     age_bucket_color(age_bucket(modified, now), palette)
 }
 
+/// Neutral grey used by [`ColorMode::Change`] for unchanged data.
+pub const CHANGE_NEUTRAL_COLOR: (u8, u8, u8) = (120, 120, 120);
+/// Saturated green for data that shrank (the prompt's "free space" colour).
+pub const CHANGE_SHRANK_COLOR: (u8, u8, u8) = (46, 204, 113);
+/// Saturated red for data that grew.
+pub const CHANGE_GREW_COLOR: (u8, u8, u8) = (231, 76, 60);
+
+/// Diverging colour for a size change: green when `delta` is negative (the
+/// item shrank), red when positive (it grew), neutral at zero. The intensity
+/// follows the magnitude on a log scale, so 1 KB barely tints and 1 GB is
+/// fully saturated.
+pub fn change_color(delta: i64) -> (u8, u8, u8) {
+    if delta == 0 {
+        return CHANGE_NEUTRAL_COLOR;
+    }
+    let magnitude = delta.unsigned_abs().max(1) as f64;
+    let intensity = (magnitude.log10() / 9.0).clamp(0.18, 1.0);
+    let target = if delta < 0 {
+        CHANGE_SHRANK_COLOR
+    } else {
+        CHANGE_GREW_COLOR
+    };
+    let mix = |a: u8, b: u8| {
+        (a as f64 + (b as f64 - a as f64) * intensity)
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    (
+        mix(CHANGE_NEUTRAL_COLOR.0, target.0),
+        mix(CHANGE_NEUTRAL_COLOR.1, target.1),
+        mix(CHANGE_NEUTRAL_COLOR.2, target.2),
+    )
+}
+
 /// Bytes per age bucket for every real file under `root`, matching the
 /// treemap's size metric. Directories are traversed but not counted, so the
 /// totals add up to the files' bytes without double counting.
@@ -339,7 +374,12 @@ pub fn age_bucket_totals(
     std::array::from_fn(|i| (AgeBucket::ALL[i], totals[i]))
 }
 
-fn shade_node(tree: &Tree, node: &Node, opts: &RenderOptions) -> [f64; 3] {
+fn shade_node(
+    tree: &Tree,
+    node: &Node,
+    opts: &RenderOptions,
+    change: Option<&ScanDiff>,
+) -> [f64; 3] {
     let rgb = match node.kind() {
         NodeKind::FreeSpace => FREE_SPACE_COLOR,
         NodeKind::Unknown => UNKNOWN_COLOR,
@@ -347,8 +387,19 @@ fn shade_node(tree: &Tree, node: &Node, opts: &RenderOptions) -> [f64; 3] {
             ColorMode::Extension => ext_color_with(opts.palette, node.ext),
             ColorMode::Age => age_color(node.modified(), opts.now, opts.palette),
             ColorMode::Category => category_color(tree.ext_category(node.ext).index()),
+            ColorMode::Change => change_color(
+                change
+                    .and_then(|diff| diff.change(node))
+                    .map(|c| c.delta)
+                    .unwrap_or(0),
+            ),
         },
     };
+    // Change colours already carry their meaning in hue and intensity, so do
+    // not equalise their brightness like the extension palette.
+    if opts.color_mode == ColorMode::Change && !node.is_special() {
+        return [rgb.0 as f64, rgb.1 as f64, rgb.2 as f64];
+    }
     bright_color(rgb)
 }
 
@@ -483,6 +534,10 @@ pub enum ColorMode {
     Age,
     /// Colour by file-type category (video, images, archives, ...).
     Category,
+    /// Colour by size change against a saved scan (green shrank, red grew).
+    /// Only meaningful while a comparison is active; otherwise everything is
+    /// neutral grey.
+    Change,
 }
 
 /// Everything about how a treemap looks. Passed as one struct so new display
@@ -818,6 +873,7 @@ fn draw(
     t: Target,
     light: &Light,
     opts: &RenderOptions,
+    change: Option<&ScanDiff>,
 ) {
     if rc.w() <= 0.0 || rc.h() <= 0.0 {
         return;
@@ -835,7 +891,7 @@ fn draw(
         node.is_dir() && size > 0 && !children.is_empty() && rc.w() >= min && rc.h() >= min;
     if !subdivide {
         let ext = tree.dominant_ext(node);
-        let mut color = shade_node(tree, node, opts);
+        let mut color = shade_node(tree, node, opts, change);
         // A category highlight works in every colour mode. Otherwise
         // extension highlighting only applies when colouring by extension;
         // in age and category modes every leaf keeps its own colour.
@@ -886,6 +942,7 @@ fn draw(
                 t,
                 light,
                 opts,
+                change,
             );
         });
     } else {
@@ -908,6 +965,7 @@ fn draw(
                     t,
                     light,
                     opts,
+                    change,
                 );
             },
         );
@@ -926,6 +984,21 @@ pub fn render(
     h: u32,
     background: [u8; 3],
     opts: &RenderOptions,
+) -> Vec<u8> {
+    render_with_change(tree, root, w, h, background, opts, None)
+}
+
+/// [`render`] with a scan comparison, used by [`ColorMode::Change`] to colour
+/// leaves by how much they grew or shrank. Other modes ignore `change`.
+#[allow(clippy::too_many_arguments)]
+pub fn render_with_change(
+    tree: &Tree,
+    root: &Node,
+    w: u32,
+    h: u32,
+    background: [u8; 3],
+    opts: &RenderOptions,
+    change: Option<&ScanDiff>,
 ) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let mut buf = vec![0u8; w * h * 4];
@@ -963,6 +1036,7 @@ pub fn render(
         t,
         &light,
         opts,
+        change,
     );
     buf
 }
@@ -1212,7 +1286,7 @@ mod tests {
         let opts = RenderOptions {
             color_mode: ColorMode::Category,
             highlight_category: Some(
-                fastdir_core::categories::builtin_category("txt").index() as u8,
+                fastdir_core::categories::builtin_category("txt").index() as u8
             ),
             ..RenderOptions::default()
         };
@@ -1243,6 +1317,31 @@ mod tests {
     }
 
     #[test]
+    fn change_colours_diverge_around_neutral() {
+        assert_eq!(change_color(0), CHANGE_NEUTRAL_COLOR);
+        let grew = change_color(1 << 20);
+        let shrank = change_color(-(1 << 20));
+        assert!(grew.0 > CHANGE_NEUTRAL_COLOR.0, "growth is red");
+        assert!(grew.1 < CHANGE_NEUTRAL_COLOR.1);
+        assert!(shrank.1 > CHANGE_NEUTRAL_COLOR.1, "shrinking is green");
+        assert!(shrank.0 < CHANGE_NEUTRAL_COLOR.0);
+        // A tiny change stays close to neutral; a huge one saturates.
+        let tiny = change_color(1);
+        let huge = change_color(32 << 30);
+        let distance = |a: (u8, u8, u8), b: (u8, u8, u8)| {
+            (a.0 as i32 - b.0 as i32).abs()
+                + (a.1 as i32 - b.1 as i32).abs()
+                + (a.2 as i32 - b.2 as i32).abs()
+        };
+        assert!(
+            distance(tiny, CHANGE_NEUTRAL_COLOR) < distance(grew, CHANGE_NEUTRAL_COLOR)
+        );
+        assert!(
+            distance(huge, CHANGE_NEUTRAL_COLOR) > distance(grew, CHANGE_NEUTRAL_COLOR)
+        );
+    }
+
+    #[test]
     fn age_bucket_mapping_uses_fixed_boundaries() {
         let now = 1_800_000_000;
         assert_eq!(age_bucket(0, now), AgeBucket::Unknown);
@@ -1257,7 +1356,10 @@ mod tests {
         assert_eq!(age_bucket(now - HALF_YEAR, now), AgeBucket::Year);
         assert_eq!(age_bucket(now - (YEAR - 1), now), AgeBucket::Year);
         assert_eq!(age_bucket(now - YEAR, now), AgeBucket::ThreeYears);
-        assert_eq!(age_bucket(now - (THREE_YEARS - 1), now), AgeBucket::ThreeYears);
+        assert_eq!(
+            age_bucket(now - (THREE_YEARS - 1), now),
+            AgeBucket::ThreeYears
+        );
         assert_eq!(age_bucket(now - THREE_YEARS, now), AgeBucket::Older);
     }
 

@@ -35,6 +35,13 @@ culprit? Rename, move, recycle or delete it right there.
   older). The legend below the treemap totals each bucket, the colour-blind
   palette gets its own safe scale, and the file list can tint its *Last change*
   column to match.
+- **Compare two scans** – pick a saved scan of the same folder (`…` →
+  *Compare with a saved scan…*). The directory tree gains **Δ size**, **Δ %**
+  and **Status** columns (sorted grew-the-most first), a **Removed** tab lists
+  what disappeared, and the treemap can colour by change (green = shrank,
+  red = grew, with a legend). The status bar shows the net change and, for
+  drive scans, the change in free space. Only changed nodes are kept, so the
+  comparison does not double the memory of a large scan.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a
@@ -152,9 +159,10 @@ server, a NAS or another machine:
   path still exists on this machine. **Rescan** starts a real scan of the
   saved root (or asks for a folder when it no longer exists).
 
-JSON is a browsing snapshot: hard-link markers and drive pseudo-items
-(`<Free space>`, `<Unknown>`) come back as plain files, so their bytes are
-kept but the UI cannot tell them apart. Opening a truncated document
+JSON is a browsing snapshot: hard-link markers come back as plain files, so
+those bytes are kept but the UI cannot tell them apart. Drive pseudo-items
+(`<Free space>`, `<Unknown>`) keep their kind, which is what lets a later
+comparison report the change in free space. Opening a truncated document
 (`--max-depth` or `--no-files`) also means totals only reflect the entries
 that were written.
 
@@ -202,6 +210,29 @@ confirm = false
   anything runs. FastDir ships four disabled examples (open terminal here,
   open in VS Code, `cargo clean`, `git gc`) to copy from. Multi-select runs
   the action once per item through the same queue as deletes and moves.
+### Comparing two scans
+
+**Compare with a saved scan…** in the toolbar `…` menu diffs the current tree
+(possibly itself a saved scan) against a JSON scan opened from disk. Items are
+matched by their relative path under the root, so the saved scan does not have
+to come from this machine.
+
+- The tree gets **Δ size**, **Δ %** and **Status** (New / Grew / Shrank /
+  Unchanged) columns. Click them to sort; the initial order is the folder that
+  grew the most.
+- A **Removed** tab lists items that only exist in the baseline. A removed
+  folder is one row with its total size and item count, not one row per file.
+- `…` → *Colour treemap by change* switches the treemap to diverging colours
+  (green shrank, red grew, grey unchanged) with a legend; the intensity follows
+  the size of the change.
+- The status bar shows the net change and, when both documents are whole-drive
+  scans with volume data, the change in free space.
+- A root mismatch (the saved scan is of another folder) shows a warning but
+  still compares.
+
+The diff keeps only changed nodes plus the top-most removed entries, so a
+comparison starts quickly and does not keep a second copy of the whole tree in
+memory.
 
 ### Command line (for scripts and agents)
 

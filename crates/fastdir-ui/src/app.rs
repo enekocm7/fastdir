@@ -3,6 +3,7 @@
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::categories::{CategoryMap, FileCategory};
+use fastdir_core::diff::{ChangeStatus, ScanDiff};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
 use fastdir_core::filter::Filter;
@@ -99,6 +100,7 @@ actions!(
 );
 
 mod actions_ui;
+mod compare;
 mod context_menu;
 mod dialogs;
 mod export;
@@ -113,6 +115,7 @@ mod status;
 mod toolbar;
 mod update_ui;
 
+use self::compare::Comparison;
 use self::export::ExportForm;
 use self::filter::FilterForm;
 use self::open_scan::SavedScan;
@@ -223,6 +226,9 @@ const COL_ITEMS: f32 = 82.;
 const COL_FILES: f32 = 82.;
 const COL_DIRS: f32 = 74.;
 const COL_DATE: f32 = 128.;
+const COL_DELTA: f32 = 100.;
+const COL_DELTA_PCT: f32 = 70.;
+const COL_STATUS: f32 = 84.;
 
 /// Colours for the "subtree percentage" bars, one per depth (WinDirStat style).
 const DEPTH_COLORS: [u32; 8] = [
@@ -243,6 +249,7 @@ fn color_mode_of(m: TreemapColorMode) -> ColorMode {
         TreemapColorMode::Extension => ColorMode::Extension,
         TreemapColorMode::Age => ColorMode::Age,
         TreemapColorMode::Category => ColorMode::Category,
+        TreemapColorMode::Change => ColorMode::Change,
     }
 }
 
@@ -277,6 +284,8 @@ fn update_channel_of(channel: UpdateChannel) -> fastdir_updater::Channel {
 enum ListTab {
     Tree,
     TopFiles,
+    /// Items that only existed in the baseline scan of a comparison.
+    Removed,
 }
 
 /// One row of the extension panel: a category header or an extension below
@@ -381,6 +390,12 @@ pub struct FastDir {
     tree: Option<Arc<RwLock<Tree>>>,
     /// Set while the visible tree came from a saved JSON document.
     saved: Option<SavedScan>,
+    /// Set while the visible tree is compared with a saved scan.
+    compare: Option<Comparison>,
+    /// Sort order and cursor of the "Removed" tab.
+    removed_sort: (SortKey, bool),
+    removed_scroll: UniformListScrollHandle,
+    removed_selected: Option<usize>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
     /// Folders that could not be read in the last finished scan (access denied).
@@ -456,9 +471,27 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Change colours need a comparison; a config saved during one must
+        // not leave the next launch with a grey treemap.
+        let mut settings = settings;
+        if settings.treemap.color_mode == TreemapColorMode::Change {
+            settings.treemap.color_mode = TreemapColorMode::Extension;
+            settings.save();
+        }
         let sort = {
             let s = settings.effective_sort();
-            (s.column, s.descending)
+            // A comparison-only sort makes no sense for the next launch's
+            // fresh scan, so fall back to size and correct the saved value.
+            let column = match s.column {
+                SortKey::Delta | SortKey::Status => SortKey::Size,
+                other => other,
+            };
+            if column != s.column {
+                settings.list.sort.column = column;
+                settings.sort.column = column;
+                settings.save();
+            }
+            (column, s.descending)
         };
         apply_ui_scale(settings.appearance.ui_scale, cx);
         let decimal_sizes = settings.list.size_unit == SizeUnit::Decimal;
@@ -565,6 +598,10 @@ impl FastDir {
             home_drives,
             tree: None,
             saved: None,
+            compare: None,
+            removed_sort: (SortKey::Size, true),
+            removed_scroll: UniformListScrollHandle::new(),
+            removed_selected: None,
             scan_root: None,
             last_scan: None,
             last_errors: 0,
@@ -884,7 +921,8 @@ impl FastDir {
         let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
         let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
         let banner = self
-            .render_saved_banner(cx)
+            .render_compare_banner(cx)
+            .or_else(|| self.render_saved_banner(cx))
             .or_else(|| self.render_elevate_banner(cx));
         let lists = h_resizable("top-split")
             .with_state(&self.top_split)
