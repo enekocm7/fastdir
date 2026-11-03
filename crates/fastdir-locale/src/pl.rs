@@ -222,6 +222,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Foldery",
         "list.col_date" => "Ostatnia zmiana",
         "list.tree_tab" => "Drzewo katalogów",
+        "list.col_owner" => "Właściciel",
+        "list.owner_col" => "Właściciel",
+        "list.by_owner" => "Według właściciela",
+        "list.unknown_owner" => "(nieznany)",
         "list.top_tab" => "Największe pliki ({n})",
         "list.no_match" => "Żaden element nie pasuje do filtra",
         "list.empty" => "Ten folder jest pusty",
@@ -325,6 +329,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Wątki skanowania",
         "set.scan.threads_cap" => "Używane przez następne skanowanie (1-64).",
         "set.scan.partial" => "Pokaż wyniki częściowe podczas skanowania",
+        "set.scan.owners" => "Zbieraj właścicieli plików",
+        "set.scan.owners_cap" => "Zapisuje właściciela każdego pliku dla kolumny Właściciel i sum na użytkownika. Wolniejsze skanowanie.",
         "set.scan.partial_cap" => {
             "Ukończone foldery i podgląd treemapa pojawiają się przed końcem skanowania."
         }
@@ -373,6 +379,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Kolumna folderów",
         "set.list.modified_col" => "Kolumna ostatniej zmiany",
         "set.list.disk_col" => "Kolumna rozmiaru na dysku",
+        "set.list.owner_col" => "Kolumna Właściciel",
         "tb.menu_hide_empty" => "Ukryj puste foldery",
         "tb.tip_hide_empty" => "Ukryj puste foldery (bez plików)",
         "set.list.hide_empty" => "Ukryj puste foldery",

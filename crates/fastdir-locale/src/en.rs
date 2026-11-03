@@ -206,6 +206,10 @@ pub const KEYS: &[&str] = &[
     "list.col_files",
     "list.col_dirs",
     "list.col_date",
+    "list.col_owner",
+    "list.owner_col",
+    "list.by_owner",
+    "list.unknown_owner",
     "list.tree_tab",
     "list.top_tab",
     "list.no_match",
@@ -299,6 +303,8 @@ pub const KEYS: &[&str] = &[
     "set.scan.threads_cap",
     "set.scan.partial",
     "set.scan.partial_cap",
+    "set.scan.owners",
+    "set.scan.owners_cap",
     "set.tree.title",
     "set.tree.show",
     "set.tree.show_cap",
@@ -358,6 +364,7 @@ pub const KEYS: &[&str] = &[
     "set.list.folders_col",
     "set.list.modified_col",
     "set.list.disk_col",
+    "set.list.owner_col",
     "set.ops.title",
     "set.ops.confirm_recycle",
     "set.ops.confirm_perm",
@@ -707,6 +714,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_files" => "Files",
         "list.col_dirs" => "Folders",
         "list.col_date" => "Last Change",
+        "list.col_owner" => "Owner",
+        "list.owner_col" => "Owner",
+        "list.by_owner" => "By owner",
+        "list.unknown_owner" => "(unknown)",
         "list.tree_tab" => "Directory tree",
         "list.top_tab" => "Top files ({n})",
         "list.no_match" => "No items match the filter",
@@ -802,6 +813,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.partial_cap" => {
             "Finished folders and a treemap preview appear before the scan ends."
         }
+        "set.scan.owners" => "Collect file owners",
+        "set.scan.owners_cap" => {
+            "Record who owns each file, for the Owner column and per-user totals. Slower scans."
+        }
         "set.tree.title" => "Treemap",
         "set.tree.show" => "Show treemap",
         "set.tree.show_cap" => "Off gives a list-only layout.",
@@ -847,6 +862,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Folders column",
         "set.list.modified_col" => "Last change column",
         "set.list.disk_col" => "Size on disk column",
+        "set.list.owner_col" => "Owner column",
         "tb.menu_hide_empty" => "Hide empty folders",
         "tb.tip_hide_empty" => "Hide empty folders (folders with no files)",
         "set.list.hide_empty" => "Hide empty folders",

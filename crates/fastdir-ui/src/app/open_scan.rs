@@ -116,6 +116,7 @@ impl FastDir {
         self.marked.clear();
         self.anchor = None;
         self.selected_ext = None;
+        self.selected_owner = None;
         self.tab = ListTab::Tree;
         self.filter = Filter::default();
         self.filter_form = FilterForm::default();

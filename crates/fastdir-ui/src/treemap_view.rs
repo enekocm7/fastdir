@@ -52,6 +52,7 @@ struct Key {
     dark: bool,
     highlight: Option<u16>,
     highlight_category: Option<u8>,
+    highlight_owner: Option<u16>,
     /// Bumped whenever the zoom root changes.
     zoom: u64,
     /// Bumped whenever the comparison overlay changes.
@@ -77,6 +78,7 @@ impl Key {
         dark: bool,
         highlight: Option<u16>,
         highlight_category: Option<u8>,
+        highlight_owner: Option<u16>,
         zoom: u64,
         change: u64,
         opts: RenderOptions,
@@ -88,6 +90,7 @@ impl Key {
             dark,
             highlight,
             highlight_category,
+            highlight_owner,
             zoom,
             change,
             show_free: opts.show_free,
@@ -108,6 +111,8 @@ impl Key {
         RenderOptions {
             highlight: self.highlight,
             highlight_category: self.highlight_category,
+            highlight_owner: self.highlight_owner,
+            root_owner: fastdir_core::model::NO_OWNER,
             show_free: self.show_free,
             show_unknown: self.show_unknown,
             use_disk: self.use_disk_size,
@@ -137,6 +142,7 @@ pub struct TreemapView {
     selection: Vec<NodePath>,
     highlight: Option<u16>,
     highlight_category: Option<u8>,
+    highlight_owner: Option<u16>,
     /// Folder the treemap is rooted at (`[]` is the scan root).
     zoom: NodePath,
     /// File-system path of `zoom`, used to find it again after the tree
@@ -182,6 +188,7 @@ impl TreemapView {
             selection: Vec::new(),
             highlight: None,
             highlight_category: None,
+            highlight_owner: None,
             zoom: Vec::new(),
             zoom_fs: None,
             zoom_gen: 0,
@@ -248,6 +255,8 @@ impl TreemapView {
         RenderOptions {
             highlight: self.highlight,
             highlight_category: self.highlight_category,
+            highlight_owner: self.highlight_owner,
+            root_owner: fastdir_core::model::NO_OWNER,
             show_free: self.show_free,
             show_unknown: self.show_unknown,
             use_disk: self.use_disk_size,
@@ -278,6 +287,7 @@ impl TreemapView {
         self.selection.clear();
         self.highlight = None;
         self.highlight_category = None;
+        self.highlight_owner = None;
         self.zoom.clear();
         self.zoom_fs = None;
         self.zoom_gen += 1;
@@ -321,9 +331,13 @@ impl TreemapView {
     /// Highlight the leaves of one extension rank; `None` shows every leaf in
     /// full colour. Clears a category highlight.
     pub fn set_highlight(&mut self, highlight: Option<u16>, cx: &mut Context<Self>) {
-        if self.highlight != highlight || self.highlight_category.is_some() {
+        if self.highlight != highlight
+            || self.highlight_category.is_some()
+            || self.highlight_owner.is_some()
+        {
             self.highlight = highlight;
             self.highlight_category = None;
+            self.highlight_owner = None;
             cx.notify();
         }
     }
@@ -331,9 +345,27 @@ impl TreemapView {
     /// Highlight every leaf in one file-type category (index into
     /// `FileCategory::ALL`); `None` clears it. Clears an extension highlight.
     pub fn set_highlight_category(&mut self, highlight: Option<u8>, cx: &mut Context<Self>) {
-        if self.highlight_category != highlight || self.highlight.is_some() {
+        if self.highlight_category != highlight
+            || self.highlight.is_some()
+            || self.highlight_owner.is_some()
+        {
             self.highlight_category = highlight;
             self.highlight = None;
+            self.highlight_owner = None;
+            cx.notify();
+        }
+    }
+
+    /// Highlight every file owned by one account; `None` clears it. Clears an
+    /// extension and category highlight.
+    pub fn set_highlight_owner(&mut self, owner: Option<u16>, cx: &mut Context<Self>) {
+        if self.highlight_owner != owner
+            || self.highlight.is_some()
+            || self.highlight_category.is_some()
+        {
+            self.highlight_owner = owner;
+            self.highlight = None;
+            self.highlight_category = None;
             cx.notify();
         }
     }
@@ -455,12 +487,13 @@ impl TreemapView {
                     .timer(Duration::from_millis(40))
                     .await;
             }
-            let opts = key.opts();
+            let mut opts = key.opts();
             let (buf, totals) = cx
                 .background_executor()
                 .spawn(async move {
                     let t = tree.read();
                     let root = t.get(&zoom).unwrap_or(t.root());
+                    opts.root_owner = t.owner_at(&zoom);
                     let buf = treemap::render_with_change(
                         &t,
                         root,
@@ -626,6 +659,7 @@ impl Render for TreemapView {
         let image_key = self.image_key;
         let highlight = self.highlight;
         let highlight_category = self.highlight_category;
+        let highlight_owner = self.highlight_owner;
         let zoom = self.zoom_gen;
         let change_gen = self.change_gen;
         let zoom_path = self.zoom.clone();
@@ -649,6 +683,7 @@ impl Render for TreemapView {
                         dark,
                         highlight,
                         highlight_category,
+                        highlight_owner,
                         zoom,
                         change_gen,
                         render_opts,

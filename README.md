@@ -30,6 +30,16 @@ culprit? Rename, move, recycle or delete it right there.
 - **Hard links counted once** - files sharing a file ID (for example under
   `C:\Windows\WinSxS`) are counted the first time and marked as `hard link`
   afterwards, so totals are not inflated.
+- **File owners and per-user totals** - opt-in *Collect file owners* scan
+  setting (`--owners` in the CLI) records who owns each entry as
+  `DOMAIN\user` (the raw SID when the account cannot be resolved). An
+  **Owner** column can be shown in the tree and top-files lists, and a
+  *By owner* view totals size, size on disk and file count per account.
+  Click a user to highlight their files in the treemap and filter the list.
+  Off by default: Windows needs one security query per file, which can make
+  a scan several times slower, while Unix takes the uid from the listing it
+  already does. Memory and the default scan are unaffected (an owner is a
+  `u16` in a side array that only exists when the option is on).
 - **Colour by age** – switch the treemap from extension colours to a
   new-to-old scale (under a week, a month, six months, a year, three years,
   older). The legend below the treemap totals each bucket, the colour-blind
@@ -52,7 +62,8 @@ culprit? Rename, move, recycle or delete it right there.
   `…` → *Show partial results while scanning*.
 - **WinDirStat-style layout**
   - **Directory tree** with subtree-percentage bars, %, size, items, files,
-    folders and last change. Sort by any column.
+    folders, last change and (when owners are collected) owner. Sort by any
+    column.
   - **Search and filters** – `Ctrl+F` filters the tree by name or glob
     (`*.iso`), expanding to every match. Filter by minimum size, extension and
     modified date (`Ctrl+Shift+F`).
@@ -63,8 +74,9 @@ culprit? Rename, move, recycle or delete it right there.
     *By category / By extension* switch groups extensions into file-type
     categories (video, images, audio, archives, documents, code, executables,
     disk images, system and other), expandable to their extensions, with a
-    stacked share bar. Clicking a category highlights its files in the
-    treemap, which can also be coloured by category.
+    stacked share bar. The same panel switches to *By owner* when the scan
+    collected owners. Clicking a category (or an owner) highlights its files
+    in the treemap, which can also be coloured by category.
   - **Cushion treemap** (squarified, SequoiaView-style shading), rendered on
     the CPU in parallel and drawn as one image. Hover to see a path, click
     to find the item in the tree, double-click to open it. Zoom into any
@@ -162,7 +174,8 @@ server, a NAS or another machine:
 JSON is a browsing snapshot: hard-link markers come back as plain files, so
 those bytes are kept but the UI cannot tell them apart. Drive pseudo-items
 (`<Free space>`, `<Unknown>`) keep their kind, which is what lets a later
-comparison report the change in free space. Opening a truncated document
+comparison report the change in free space. Owner names, when the document
+has them, are kept and shown again. Opening a truncated document
 (`--max-depth` or `--no-files`) also means totals only reflect the entries
 that were written.
 
@@ -272,6 +285,7 @@ fastdir-cli top D:\ --limit 50 --format csv -o big-files.csv
 | `--follow-junctions` | scan, top | Descend into junctions / symlinked folders |
 | `--cross-volumes` | scan, top | With `--follow-junctions`, also enter other volumes |
 | `--skip-hidden` (`--skip-system`) | scan, top | Skip hidden and system entries |
+| `--owners` | scan, top | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top | Nothing on stderr except errors |
 
 The command line uses these flags only; it does not read `config.toml`.
@@ -315,6 +329,7 @@ bytes, and timestamps are ISO 8601 UTC (`null` when unknown).
     "modified": "2026-11-02T18:30:00Z",
     "error": false,                   // this folder could not be read
     "hard_link": false,               // extra hard link, bytes counted elsewhere
+    "owner": "DOMAIN\\user",          // only with --owners; omitted otherwise
     "truncated": false,               // dirs only: children cut off by --max-depth
     "children": [ /* entries, largest first; dirs only */ ]
   }
@@ -328,7 +343,8 @@ bytes, and timestamps are ISO 8601 UTC (`null` when unknown).
 `fastdir_version`, `root`, `scanned_at`, `elapsed_ms` and `errors` fields,
 plus `limit`, `total` (`size`, `disk_size`, `files`, `folders` of the whole
 scan) and `files`: a list of `{ name, path, extension, size, disk_size,
-modified }`, largest first. Hard links are listed once.
+modified, owner? }`, largest first. Hard links are listed once. `owner` is
+only present with `--owners`; CSV gains an `owner` column in the same case.
 
 ### MCP server
 

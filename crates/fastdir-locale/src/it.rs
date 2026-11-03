@@ -226,6 +226,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Cartelle",
         "list.col_date" => "Ultima modifica",
         "list.tree_tab" => "Albero delle cartelle",
+        "list.col_owner" => "Proprietario",
+        "list.owner_col" => "Proprietario",
+        "list.by_owner" => "Per proprietario",
+        "list.unknown_owner" => "(sconosciuto)",
         "list.top_tab" => "File principali ({n})",
         "list.no_match" => "Nessun elemento corrisponde al filtro",
         "list.empty" => "Questa cartella è vuota",
@@ -317,6 +321,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Thread di analisi",
         "set.scan.threads_cap" => "Usato dalla prossima analisi (1-64).",
         "set.scan.partial" => "Mostra risultati parziali durante l'analisi",
+        "set.scan.owners" => "Raccogli i proprietari dei file",
+        "set.scan.owners_cap" => "Registra il proprietario di ogni file per la colonna Proprietario e i totali per utente. Analisi più lente.",
         "set.scan.partial_cap" => {
             "Le cartelle completate e un'anteprima della mappa appaiono prima della fine."
         }
@@ -365,6 +371,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Colonna cartelle",
         "set.list.modified_col" => "Colonna ultima modifica",
         "set.list.disk_col" => "Colonna dimensione su disco",
+        "set.list.owner_col" => "Colonna Proprietario",
         "tb.menu_hide_empty" => "Nascondi le cartelle vuote",
         "tb.tip_hide_empty" => "Nascondi le cartelle vuote (senza file)",
         "set.list.hide_empty" => "Nascondi le cartelle vuote",

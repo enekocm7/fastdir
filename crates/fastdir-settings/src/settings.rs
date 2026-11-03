@@ -35,6 +35,7 @@ pub enum SortColumn {
     Files,
     Dirs,
     Modified,
+    Owner,
     /// Size change against a saved scan (comparison view only).
     Delta,
     /// Change status (comparison view only).
@@ -109,6 +110,8 @@ pub enum ExtGrouping {
     Extension,
     /// Expandable category rows, each listing its extensions.
     Category,
+    /// Per-user totals (only offered when the scan collected owners).
+    Owner,
 }
 
 /// What the Delete key does (Shift+Delete always does the other).
@@ -370,6 +373,9 @@ pub struct ScanSettings {
     pub thread_count: Option<u16>,
     /// Show finished top-level folders and a treemap preview while scanning.
     pub show_partial_results: bool,
+    /// Record the owning account of every entry. Off by default because on
+    /// Windows it needs one extra security query per file.
+    pub collect_owners: bool,
 }
 
 impl Default for ScanSettings {
@@ -381,6 +387,7 @@ impl Default for ScanSettings {
             cross_volumes: false,
             thread_count: None,
             show_partial_results: true,
+            collect_owners: false,
         }
     }
 }
@@ -453,6 +460,8 @@ pub struct ListSettings {
     pub show_folders: bool,
     pub show_modified: bool,
     pub show_disk: bool,
+    /// Show the Owner column (only meaningful when the scan collected owners).
+    pub show_owner: bool,
     /// Hide folders that contain no data (no files and zero size, recursively).
     pub hide_empty_folders: bool,
     /// Whether the extension panel lists extensions or file-type categories.
@@ -478,6 +487,7 @@ impl Default for ListSettings {
             show_folders: true,
             show_modified: true,
             show_disk: true,
+            show_owner: true,
             hide_empty_folders: false,
             ext_grouping: ExtGrouping::Extension,
         }
@@ -903,6 +913,11 @@ mod tests {
         assert!(!s.treemap.disk_size);
         assert!(s.scan.show_partial_results);
         assert!(!s.scan.cross_volumes);
+        assert!(
+            !s.scan.collect_owners,
+            "owner collection is opt-in because it is expensive"
+        );
+        assert!(s.list.show_owner);
         assert_eq!(s.appearance.ui_scale, 1.0);
         assert!(s.integration.context_menu);
         assert!(!s.integration.single_instance);
@@ -959,6 +974,7 @@ mod tests {
                 cross_volumes: false,
                 thread_count: Some(4),
                 show_partial_results: false,
+                collect_owners: true,
             },
             treemap: TreemapSettings {
                 show_free_space: true,
@@ -987,6 +1003,7 @@ mod tests {
                 show_folders: true,
                 show_modified: false,
                 show_disk: true,
+                show_owner: false,
                 hide_empty_folders: true,
                 ext_grouping: ExtGrouping::Category,
             },

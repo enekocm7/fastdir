@@ -228,6 +228,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "フォルダー数",
         "list.col_date" => "最終更新",
         "list.tree_tab" => "ディレクトリツリー",
+        "list.col_owner" => "所有者",
+        "list.owner_col" => "所有者",
+        "list.by_owner" => "所有者別",
+        "list.unknown_owner" => "(不明)",
         "list.top_tab" => "上位ファイル ({n})",
         "list.no_match" => "フィルターに一致する項目がありません",
         "list.empty" => "このフォルダーは空です",
@@ -319,6 +323,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "スキャンスレッド数",
         "set.scan.threads_cap" => "次回のスキャンで使用します (1-64)。",
         "set.scan.partial" => "スキャン中に部分結果を表示",
+        "set.scan.owners" => "ファイルの所有者を収集",
+        "set.scan.owners_cap" => "所有者列とユーザー別合計のために各ファイルの所有者を記録します。スキャンは遅くなります。",
         "set.scan.partial_cap" => {
             "スキャン終了前に完了したフォルダーとツリーマップのプレビューを表示します。"
         }
@@ -367,6 +373,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "フォルダー数列",
         "set.list.modified_col" => "最終更新列",
         "set.list.disk_col" => "ディスク上のサイズ列",
+        "set.list.owner_col" => "所有者列",
         "tb.menu_hide_empty" => "空のフォルダーを非表示",
         "tb.tip_hide_empty" => "空のフォルダーを非表示（ファイルを含まないフォルダー）",
         "set.list.hide_empty" => "空のフォルダーを非表示",
