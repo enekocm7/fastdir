@@ -355,6 +355,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Rozdzielone przecinkami nazwy do pominięcia (symbole wieloznaczne `*` i `?`).",
         "set.scan.skip_hidden" => "Pomijaj ukryte i systemowe pliki",
         "set.scan.skip_hidden_cap" => "Pomija także pliki z kropką w systemach Unix.",
+        "set.scan.skip_windows" => "Pomiń folder Windows",
+        "set.scan.skip_windows_cap" => "Pomija %SystemRoot% (zwykle C:\\Windows), dzięki czemu dysk systemowy skanuje się znacznie szybciej. Jego rozmiar trafia do <Nieznane>.",
         "set.scan.junctions" => "Podążaj za dowiązaniami i linkami symbolicznymi",
         "set.scan.junctions_cap" => "Może liczyć pliki podwójnie; każdy cel jest odwiedzany raz.",
         "set.scan.cross" => "Wchodź na inne woluminy",

@@ -325,6 +325,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Atlanacak virgülle ayrılmış adlar (`*` ve `?` jokerleri).",
         "set.scan.skip_hidden" => "Gizli ve sistem dosyalarını atla",
         "set.scan.skip_hidden_cap" => "Unix'te nokta dosyalarını da atlar.",
+        "set.scan.skip_windows" => "Windows klasörünü atla",
+        "set.scan.skip_windows_cap" => "%SystemRoot% (genellikle C:\\Windows) dışarıda bırakılır, böylece sistem sürücüsü çok daha hızlı taranır. Boyutu <Bilinmiyor> altında sayılır.",
         "set.scan.junctions" => "Bağlantıları ve simgesel bağları izle",
         "set.scan.junctions_cap" => "Dosyaları iki kez sayabilir; her hedef bir kez gezilir.",
         "set.scan.cross" => "Diğer birimlere geç",

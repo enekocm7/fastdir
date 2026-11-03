@@ -202,6 +202,7 @@ impl Server {
                         "exclude": { "type": "array", "items": { "type": "string" }, "description": "Names or globs to skip, e.g. node_modules or *.tmp" },
                         "follow_junctions": { "type": "boolean", "default": false },
                         "skip_hidden": { "type": "boolean", "default": false, "description": "Skip hidden and system entries" },
+                        "skip_windows": { "type": "boolean", "default": false, "description": "Skip the Windows folder (%SystemRoot%) for a faster system-drive scan" },
                         "threads": { "type": "integer", "minimum": 1, "maximum": 64 },
                     },
                     "required": ["path"],
@@ -434,6 +435,7 @@ impl Server {
             cross_volumes: false,
             threads,
             collect_owners: false,
+            skip_windows_dir: arg_bool(args, "skip_windows", false)?,
         };
         let options = crate::config::layer(&self.scan_defaults, &explicit);
         let i = self.scan(&path, &options)?;

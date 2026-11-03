@@ -61,6 +61,7 @@ pub struct ScanArgs {
     pub follow_junctions: bool,
     pub cross_volumes: bool,
     pub skip_hidden_system: bool,
+    pub skip_windows_dir: bool,
     pub collect_owners: bool,
     pub quiet: bool,
     /// `--config`: layer the `[scan]` section of a config file underneath
@@ -77,6 +78,7 @@ impl ScanArgs {
             cross_volumes: self.cross_volumes,
             threads: self.threads,
             collect_owners: self.collect_owners,
+            skip_windows_dir: self.skip_windows_dir,
         }
     }
 }
@@ -323,6 +325,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     let mut follow_junctions = false;
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
+    let mut skip_windows_dir = false;
     let mut collect_owners = false;
     let mut quiet = false;
     let mut config = None;
@@ -383,6 +386,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--follow-junctions" => follow_junctions = true,
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--skip-windows" => skip_windows_dir = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
@@ -449,6 +453,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
         follow_junctions,
         cross_volumes,
         skip_hidden_system,
+        skip_windows_dir,
         collect_owners,
         quiet,
         config,
@@ -483,6 +488,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut follow_junctions = false;
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
+    let mut skip_windows_dir = false;
     let mut quiet = false;
     let mut config = None;
     let mut format = Format::Json;
@@ -532,6 +538,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             "--follow-junctions" => follow_junctions = true,
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--skip-windows" => skip_windows_dir = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
@@ -568,6 +575,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             follow_junctions,
             cross_volumes,
             skip_hidden_system,
+            skip_windows_dir,
             collect_owners: false,
             quiet,
             config,
@@ -590,6 +598,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut follow_junctions = false;
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
+    let mut skip_windows_dir = false;
     let mut collect_owners = false;
     let mut quiet = false;
     let mut config = None;
@@ -637,6 +646,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--follow-junctions" => follow_junctions = true,
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--skip-windows" => skip_windows_dir = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
@@ -674,6 +684,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
         follow_junctions,
         cross_volumes,
         skip_hidden_system,
+        skip_windows_dir,
         collect_owners,
         quiet,
         config,
@@ -784,6 +795,8 @@ Scanning:
   --follow-junctions      descend into junctions and symlinked folders
   --cross-volumes         with --follow-junctions, also enter other volumes
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
+  --skip-windows          skip the Windows folder (%SystemRoot%) for a faster
+                          system-drive scan
   --owners                record each file's owner (Owner column, per-user totals)
   -q, --quiet             no progress or summary on stderr
   --config[=<file>]       use the [scan] section of config.toml (default file, or
@@ -807,7 +820,8 @@ Filtering (chooses which files are ranked):
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --owners, -q/--quiet, --config   as for `fastdir scan`
+  --skip-hidden, --skip-windows, --owners, -q/--quiet, --config
+                          as for `fastdir scan`
 ";
 
 pub const DUPLICATES_HELP: &str = "\
@@ -832,7 +846,7 @@ Duplicates:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, -q/--quiet, --config   as for `fastdir scan`
+  --skip-hidden, --skip-windows, -q/--quiet, --config   as for `fastdir scan`
 ";
 
 pub const DIFF_HELP: &str = "\
@@ -858,6 +872,8 @@ Scanning (only when <new> is a folder):
   --follow-junctions      descend into junctions and symlinked folders
   --cross-volumes         with --follow-junctions, also enter other volumes
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
+  --skip-windows          skip the Windows folder (%SystemRoot%) for a faster
+                          system-drive scan
   -q, --quiet             no progress or summary on stderr
   --config[=<file>]       use the [scan] section of config.toml (default file, or
                           <file>); flags override it, --exclude adds to it
@@ -886,7 +902,7 @@ find_duplicates, compare_scans, export_scan. With --allow-destructive,
 recycle_path and delete_path are also offered; they are off by default.
 
 --config[=<file>] applies the [scan] section of config.toml (exclusions,
-hidden/system skipping, junctions, volumes, threads) to every scan the server
+hidden/system and Windows-folder skipping, junctions, volumes, threads) to every scan the server
 runs, so the agent sees the same scan as the app. Per-call arguments add to
 or override it. A missing or invalid file stops the server with exit code 2.
 Without --config the file is ignored.
@@ -1032,6 +1048,7 @@ mod tests {
             "--follow-junctions",
             "--cross-volumes",
             "--skip-system",
+            "--skip-windows",
             "--owners",
             "-q",
             "--pretty",
@@ -1046,6 +1063,7 @@ mod tests {
         assert_eq!(c.scan.exclude, vec!["node_modules", "*.tmp"]);
         assert!(c.scan.follow_junctions && c.scan.cross_volumes);
         assert!(c.scan.skip_hidden_system && c.scan.quiet && c.scan.collect_owners);
+        assert!(c.scan.skip_windows_dir && c.scan.scan_options().skip_windows_dir);
         assert_eq!(c.scan.path, PathBuf::from("dir"));
         let opts = c.scan.scan_options();
         assert_eq!(opts.threads, Some(8));

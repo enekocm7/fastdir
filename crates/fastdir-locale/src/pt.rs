@@ -347,6 +347,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Nomes separados por vírgula para ignorar (curingas `*` e `?`).",
         "set.scan.skip_hidden" => "Ignorar arquivos ocultos e do sistema",
         "set.scan.skip_hidden_cap" => "Também ignora dot-files no Unix.",
+        "set.scan.skip_windows" => "Ignorar a pasta do Windows",
+        "set.scan.skip_windows_cap" => "Exclui %SystemRoot% (normalmente C:\\Windows) para que a unidade do sistema seja analisada muito mais rápido. O tamanho conta em <Desconhecido>.",
         "set.scan.junctions" => "Seguir junções e links simbólicos",
         "set.scan.junctions_cap" => "Pode contar arquivos duas vezes; cada destino é visitado uma vez.",
         "set.scan.cross" => "Entrar em outros volumes",

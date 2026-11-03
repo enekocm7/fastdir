@@ -321,12 +321,87 @@ pub struct ScanOptions {
     /// security query per file, which is expensive, while Unix gets the uid
     /// from the listing it already does.
     pub collect_owners: bool,
+    /// Skip the Windows installation folder (`%SystemRoot%`, usually
+    /// `C:\Windows`) when a scan reaches it. It holds hundreds of thousands
+    /// of small system files that are rarely worth inspecting, so leaving it
+    /// out makes a system-drive scan noticeably faster; its bytes then show
+    /// up in `<Unknown>`. Scanning that folder directly still works. No
+    /// effect on other platforms.
+    pub skip_windows_dir: bool,
 }
 
 impl ScanOptions {
     /// `true` when the entry `name` matches one of the exclusion patterns.
     pub fn is_excluded(&self, name: &str) -> bool {
         self.excluded_globs.iter().any(|p| matches_glob(p, name))
+    }
+}
+
+/// The Windows installation folder (`%SystemRoot%`), or `None` when it is
+/// unknown or the platform is not Windows.
+pub fn windows_dir() -> Option<PathBuf> {
+    if cfg!(not(windows)) {
+        return None;
+    }
+    ["SystemRoot", "windir"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|p| p.is_absolute())
+}
+
+/// A folder skipped by its full path, split into the comparison key of its
+/// parent and its name so a listing only pays for a name check.
+#[derive(Debug)]
+struct ExcludedDir {
+    parent: String,
+    name: String,
+}
+
+impl ExcludedDir {
+    fn new(dir: &Path) -> Option<Self> {
+        let name = dir.file_name()?.to_str()?;
+        Some(Self {
+            parent: path_key(dir.parent()?),
+            name: name_key(name),
+        })
+    }
+
+    /// `true` when the entry `name` listed in `parent` is this folder.
+    fn matches(&self, parent: &Path, name: &str) -> bool {
+        let same_name = if cfg!(windows) {
+            // Only a non-ASCII name pays for a lowercase copy.
+            self.name.eq_ignore_ascii_case(name)
+                || (!name.is_ascii() && name.to_lowercase() == self.name)
+        } else {
+            self.name == name
+        };
+        same_name && path_key(parent) == self.parent
+    }
+}
+
+/// Comparison form of an entry name (case-insensitive on Windows).
+fn name_key(name: &str) -> String {
+    if cfg!(windows) {
+        name.to_lowercase()
+    } else {
+        name.to_string()
+    }
+}
+
+/// Comparison form of a folder path: one separator style, no trailing
+/// separator, case-insensitive on Windows, so `C:\`, `C:` and `c:/` agree.
+fn path_key(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    if cfg!(windows) {
+        let s = s.replace('/', "\\").to_lowercase();
+        let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+        s.trim_end_matches('\\').to_string()
+    } else {
+        match s.trim_end_matches('/') {
+            "" => "/".into(),
+            t => t.to_string(),
+        }
     }
 }
 
@@ -428,6 +503,8 @@ struct ScanContext<'a> {
     volumes: Mutex<HashMap<String, Arc<Volume>>>,
     /// Owner resolution, present only when the scan collects owners.
     owners: Option<OwnerCollector>,
+    /// Folders skipped by full path (the Windows folder, when asked).
+    excluded_dirs: Vec<ExcludedDir>,
 }
 
 impl<'a> ScanContext<'a> {
@@ -450,7 +527,13 @@ impl<'a> ScanContext<'a> {
             root_info,
             volumes: Mutex::new(HashMap::new()),
             owners: options.collect_owners.then(OwnerCollector::new),
+            excluded_dirs: excluded_dirs(options),
         }
+    }
+
+    /// `true` when the folder `name` inside `parent` is skipped by path.
+    fn is_excluded_dir(&self, parent: &Path, name: &str) -> bool {
+        self.excluded_dirs.iter().any(|d| d.matches(parent, name))
     }
 
     /// Cached [`Volume`] facts for the volume `path` lives on.
@@ -492,6 +575,17 @@ impl<'a> ScanContext<'a> {
         let volume = self.volume_info(&canonical);
         self.visited.lock().insert(canonical).then_some(volume)
     }
+}
+
+/// The folders `options` skips by full path.
+fn excluded_dirs(options: &ScanOptions) -> Vec<ExcludedDir> {
+    let mut dirs = Vec::new();
+    if options.skip_windows_dir
+        && let Some(d) = windows_dir().as_deref().and_then(ExcludedDir::new)
+    {
+        dirs.push(d);
+    }
+    dirs
 }
 
 /// A pool sized for I/O: listing directories blocks in the kernel, so more
@@ -808,7 +902,7 @@ fn list_one(
             if hidden && options.skip_hidden_system {
                 return;
             }
-            if options.is_excluded(&name) {
+            if options.is_excluded(&name) || ctx.is_excluded_dir(path, &name) {
                 return;
             }
             let owner = owner_of(&name, uid);
@@ -836,7 +930,7 @@ fn list_one(
             if hidden && options.skip_hidden_system {
                 return;
             }
-            if options.is_excluded(&name) {
+            if options.is_excluded(&name) || ctx.is_excluded_dir(path, &name) {
                 return;
             }
             let owner = owner_of(&name, uid);
@@ -1763,6 +1857,71 @@ mod tests {
         assert!(result.tree.find(&dir.join("scratch.tmp")).is_none());
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn excluded_dirs_match_by_full_path_only() {
+        let root = temp_dir();
+        let windows = root.join("Windows");
+        let dir = ExcludedDir::new(&windows).unwrap();
+        assert!(dir.matches(&root, "Windows"));
+        // The same name elsewhere is kept.
+        assert!(!dir.matches(&root.join("Users"), "Windows"));
+        assert!(!dir.matches(&root, "Windows.old"));
+        // A trailing separator on the parent does not matter.
+        let mut with_sep = root.as_os_str().to_owned();
+        with_sep.push(std::path::MAIN_SEPARATOR_STR);
+        assert!(dir.matches(Path::new(&with_sep), "Windows"));
+        #[cfg(windows)]
+        {
+            assert!(dir.matches(&root, "WINDOWS"));
+            let d = ExcludedDir::new(Path::new(r"C:\Windows")).unwrap();
+            assert!(d.matches(Path::new(r"C:\"), "windows"));
+            assert!(d.matches(Path::new("c:"), "Windows"));
+            assert!(d.matches(Path::new("c:/"), "Windows"));
+            assert!(!d.matches(Path::new(r"D:\"), "Windows"));
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn excluded_dirs_are_skipped_during_a_scan() {
+        let root = temp_dir();
+        std::fs::create_dir_all(root.join("Windows/System32")).unwrap();
+        std::fs::write(root.join("Windows/System32/big.dll"), vec![0u8; 64]).unwrap();
+        std::fs::create_dir_all(root.join("Users/Windows")).unwrap();
+        std::fs::write(root.join("Users/Windows/keep.txt"), b"123").unwrap();
+
+        let options = ScanOptions::default();
+        let progress = Progress::default();
+        let links = LinkTracker::default();
+        let visited = Mutex::new(HashSet::new());
+        let mut ctx = ScanContext::for_scan(&root, &options, &visited);
+        ctx.excluded_dirs = vec![ExcludedDir::new(&root.join("Windows")).unwrap()];
+        let volume = Volume::for_path(&root);
+        let top = list_one(&root, 0, &progress, &links, &ctx, &volume);
+        let names: Vec<&str> = top.subdirs.iter().map(|d| &*d.name).collect();
+        assert_eq!(names, vec!["Users"]);
+        let nested = list_one(&root.join("Users"), 0, &progress, &links, &ctx, &volume);
+        assert_eq!(nested.subdirs.len(), 1);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn skip_windows_dir_targets_the_system_root() {
+        let dirs = excluded_dirs(&ScanOptions {
+            skip_windows_dir: true,
+            ..ScanOptions::default()
+        });
+        let win = windows_dir().expect("SystemRoot is set on Windows");
+        assert_eq!(dirs.len(), 1);
+        assert!(dirs[0].matches(
+            win.parent().unwrap(),
+            win.file_name().unwrap().to_str().unwrap()
+        ));
+        assert!(excluded_dirs(&ScanOptions::default()).is_empty());
     }
 
     #[test]

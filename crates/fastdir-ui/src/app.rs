@@ -822,6 +822,7 @@ impl FastDir {
             cross_volumes: s.cross_volumes,
             threads: s.thread_count.map(|n| (n as usize).clamp(1, 64)),
             collect_owners: s.collect_owners,
+            skip_windows_dir: s.skip_windows_dir,
         }
     }
 

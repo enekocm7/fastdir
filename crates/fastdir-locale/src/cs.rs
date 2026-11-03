@@ -349,6 +349,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Názvy oddělené čárkami, které se přeskočí (zástupné znaky `*` a `?`).",
         "set.scan.skip_hidden" => "Přeskakovat skryté a systémové soubory",
         "set.scan.skip_hidden_cap" => "Přeskakuje také tečkové soubory na Unixu.",
+        "set.scan.skip_windows" => "Přeskočit složku Windows",
+        "set.scan.skip_windows_cap" => "Vynechá %SystemRoot% (obvykle C:\\Windows), takže se systémová jednotka prohledá mnohem rychleji. Její velikost se započítá do <Neznámé>.",
         "set.scan.junctions" => "Sledovat křížení a symbolické odkazy",
         "set.scan.junctions_cap" => "Může počítat soubory dvakrát; každý cíl se navštíví jednou.",
         "set.scan.cross" => "Přecházet na jiné svazky",

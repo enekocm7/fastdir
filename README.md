@@ -116,7 +116,8 @@ culprit? Rename, move, recycle or delete it right there.
   dates, visible columns, percent base, treemap palettes (including a
   colour-blind-safe one), flat shading, cell borders, age-tinted dates,
   list-only mode, excluded
-    paths, hidden/system skipping, junction following (opt-in), thread count,
+    paths, hidden/system skipping, skipping the Windows folder (opt-in, makes
+  system-drive scans much faster), junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
   frequency, per-action delete confirmations, custom cleanup actions, whether
   the list stays on the current item after a delete (opt-in) and the default
@@ -329,6 +330,7 @@ row has its own sizes.
 | `--follow-junctions` | scan, top, duplicates, diff | Descend into junctions / symlinked folders |
 | `--cross-volumes` | scan, top, duplicates, diff | With `--follow-junctions`, also enter other volumes |
 | `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff | Skip hidden and system entries |
+| `--skip-windows` | scan, top, duplicates, diff | Skip the Windows folder (`%SystemRoot%`, usually `C:\Windows`) for a much faster system-drive scan; its bytes count as `<Unknown>` |
 | `--owners` | scan, top, diff | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top, duplicates, diff | Nothing on stderr except errors |
 | `--config[=<file>]` | scan, top, duplicates, diff, mcp | Use the `[scan]` section of `config.toml` (the default file, or `<file>`) |
@@ -347,8 +349,9 @@ flags only and never reads `config.toml`, which keeps scripts reproducible.
 Add `--config` to opt in: the `[scan]` section of
 `%APPDATA%\FastDir\config.toml` (or `--config=<file>`; a bare `--config
 <file>` also works when the file ends in `.toml`) becomes the base for the
-scan. It covers excluded names, hidden/system skipping, junction following,
-cross-volume and thread count. Explicit flags win over it: `--threads`
+scan. It covers excluded names, hidden/system skipping, Windows-folder
+skipping (`skip_windows_dir`), junction following, cross-volume and thread
+count. Explicit flags win over it: `--threads`
 replaces the configured count, `--exclude` adds to the configured exclusions,
 and switches such as `--follow-junctions` turn things on. A missing or
 invalid file is an error (exit code 2), never a silent fallback.

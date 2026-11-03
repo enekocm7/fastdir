@@ -337,6 +337,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Имена через запятую для пропуска (подстановки `*` и `?`).",
         "set.scan.skip_hidden" => "Пропускать скрытые и системные файлы",
         "set.scan.skip_hidden_cap" => "Также пропускает dot-файлы в Unix.",
+        "set.scan.skip_windows" => "Пропускать папку Windows",
+        "set.scan.skip_windows_cap" => "Исключает %SystemRoot% (обычно C:\\Windows), чтобы системный диск сканировался намного быстрее. Её размер учитывается в <Неизвестно>.",
         "set.scan.junctions" => "Следовать соединениям и симлинкам",
         "set.scan.junctions_cap" => "Может дважды посчитать файлы; каждая цель обходится один раз.",
         "set.scan.cross" => "Переходить в другие тома",

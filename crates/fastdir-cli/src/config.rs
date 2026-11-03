@@ -27,6 +27,7 @@ pub fn options_from(s: &ScanSettings) -> ScanOptions {
         cross_volumes: s.cross_volumes,
         threads: s.thread_count.map(usize::from),
         collect_owners: s.collect_owners,
+        skip_windows_dir: s.skip_windows_dir,
     }
 }
 
@@ -46,6 +47,7 @@ pub fn layer(base: &ScanOptions, over: &ScanOptions) -> ScanOptions {
         cross_volumes: base.cross_volumes || over.cross_volumes,
         threads: over.threads.or(base.threads),
         collect_owners: base.collect_owners || over.collect_owners,
+        skip_windows_dir: base.skip_windows_dir || over.skip_windows_dir,
     }
 }
 
@@ -61,6 +63,7 @@ pub fn apply(args: &mut ScanArgs) -> Result<(), String> {
     args.cross_volumes = merged.cross_volumes;
     args.threads = merged.threads;
     args.collect_owners = merged.collect_owners;
+    args.skip_windows_dir = merged.skip_windows_dir;
     Ok(())
 }
 
@@ -77,6 +80,7 @@ pub fn describe(opts: &ScanOptions, source: &str) -> serde_json::Value {
             "cross_volumes": opts.cross_volumes,
             "threads": opts.threads,
             "collect_owners": opts.collect_owners,
+            "skip_windows_dir": opts.skip_windows_dir,
         }
     })
 }
@@ -101,6 +105,7 @@ mod tests {
             follow_junctions: false,
             cross_volumes: false,
             skip_hidden_system: false,
+            skip_windows_dir: false,
             collect_owners: false,
             quiet: true,
             config,
@@ -132,12 +137,13 @@ mod tests {
     fn apply_uses_config_and_flags_override() {
         let p = temp_config(
             "apply.toml",
-            "[scan]\nexcluded = [\"*.tmp\"]\nskip_hidden_system = true\nthread_count = 3\n",
+            "[scan]\nexcluded = [\"*.tmp\"]\nskip_hidden_system = true\nskip_windows_dir = true\nthread_count = 3\n",
         );
         let mut a = args(Some(ConfigSource::File(p)));
         apply(&mut a).unwrap();
         assert_eq!(a.exclude, vec!["*.tmp", "flag"]);
         assert!(a.skip_hidden_system);
+        assert!(a.skip_windows_dir);
         assert_eq!(a.threads, Some(3));
 
         let p = temp_config("apply2.toml", "[scan]\nthread_count = 3\n");
