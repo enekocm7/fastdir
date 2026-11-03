@@ -7,7 +7,10 @@ members = [
     "crates/fastdir-settings",
     "crates/fastdir-ui",
     "crates/fastdir-locale",
+    "crates/fastdir-cli",
 ]
+# `cargo build` builds the GUI and the console `fastdir-cli` binary.
+default-members = [".", "crates/fastdir-cli"]
 
 [workspace.package]
 version = "0.2.0"
@@ -53,6 +56,7 @@ fastdir-updater = { path = "crates/fastdir-updater" }
 fastdir-settings = { path = "crates/fastdir-settings" }
 fastdir-ui = { path = "crates/fastdir-ui" }
 fastdir-locale = { path = "crates/fastdir-locale" }
+fastdir-cli = { path = "crates/fastdir-cli" }
 
 [package]
 name = "fastdir"
@@ -65,6 +69,7 @@ build = "build.rs"
 [dependencies]
 fastdir-ui.workspace = true
 fastdir-updater.workspace = true
+fastdir-cli.workspace = true
 
 [build-dependencies]
 resvg = { version = "0.45", default-features = false, features = [] }
@@ -93,6 +98,8 @@ codegen-units = 1
 [profile.release.package.fastdir-settings]
 codegen-units = 1
 [profile.release.package.fastdir-ui]
+codegen-units = 1
+[profile.release.package.fastdir-cli]
 codegen-units = 1
 
 # Keep debug builds usable: the scanner and treemap renderer are hot loops.

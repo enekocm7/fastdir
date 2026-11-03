@@ -88,7 +88,7 @@ Download the latest release from the
 | File | |
 |---|---|
 | `FastDir-<version>-setup-x64.exe` | Installer: Start menu shortcut, optional desktop icon and Explorer context menu, uninstaller. Installs per-user by default (no admin prompt). |
-| `FastDir-<version>-portable-x64.zip` | Just the executable, no installation needed. |
+| `FastDir-<version>-portable-x64.zip` | Just the executables (`FastDir.exe` and the console `fastdir-cli.exe`), no installation needed. |
 
 ### Updates
 
@@ -107,6 +107,135 @@ grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
 fastdir.exe              open the drive overview
 fastdir.exe D:\          scan a drive right away
 fastdir.exe "C:\Users"   scan a folder right away
+```
+
+### Command line (for scripts and agents)
+
+FastDir also runs headless: it scans, prints JSON or CSV and exits without
+opening a window. Use **`fastdir-cli`** (shipped next to `fastdir.exe`) from
+a terminal. `fastdir.exe` accepts the same commands, but it is a GUI program
+on Windows, so `cmd.exe` does not wait for it; it is fine when its output is
+piped or redirected.
+
+```text
+fastdir-cli scan <path> [options]   the tree under <path> (JSON by default)
+fastdir-cli top <path> [options]    the largest files under <path>
+fastdir-cli mcp                     MCP server on stdin/stdout (see below)
+fastdir-cli help [<command>]        help for a command
+fastdir-cli --version
+```
+
+```powershell
+# Ten largest folders directly under C:\Users
+fastdir-cli scan C:\Users --max-depth 1 --no-files |
+  jq '.tree.children | sort_by(-.size) | .[:10] | map({path, size})'
+
+# Fifty largest files on D:, as CSV
+fastdir-cli top D:\ --limit 50 --format csv -o big-files.csv
+```
+
+| Option | Commands | |
+|---|---|---|
+| `--format json\|csv` | scan, top | Output format (default `json`; CSV uses the export dialog's columns) |
+| `-o, --output <file\|->` | scan, top | Write to a file instead of stdout |
+| `--pretty` | scan, top | Indent the JSON |
+| `--max-depth <n>` | scan | List entries up to `<n>` levels below `<path>` (`0` = just the root). Sizes always count everything. |
+| `--no-files` | scan | List folders only |
+| `-n, --limit <n>` | top | How many files (default 20) |
+| `--threads <n>` | scan, top | Scan threads, 1–64 (default automatic) |
+| `--exclude <glob>` | scan, top | Skip entries whose name matches; repeatable |
+| `--follow-junctions` | scan, top | Descend into junctions / symlinked folders |
+| `--cross-volumes` | scan, top | With `--follow-junctions`, also enter other volumes |
+| `--skip-hidden` (`--skip-system`) | scan, top | Skip hidden and system entries |
+| `-q, --quiet` | scan, top | Nothing on stderr except errors |
+
+The command line uses these flags only; it does not read `config.toml`.
+
+**Output streams.** The result goes to stdout. stderr gets a live progress
+line (only when it is a terminal) and a one-line summary, unless `--quiet`.
+**Ctrl+C** stops the scan cleanly; nothing is written to stdout. A second
+Ctrl+C ends the process at once.
+
+**Exit codes.**
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Error while scanning or writing the output |
+| 2 | Invalid arguments |
+| 3 | Path not found or not a directory |
+| 4 | Permission denied |
+| 130 | Cancelled with Ctrl+C |
+
+#### JSON schema
+
+Each document has a `schema` name and a `version` (currently `1`). Within a
+version, fields may be added but are never renamed or removed. Sizes are
+bytes, and timestamps are ISO 8601 UTC (`null` when unknown).
+
+`fastdir scan` (`schema: "fastdir.scan"`):
+
+```jsonc
+{
+  "schema": "fastdir.scan", "version": 1, "fastdir_version": "0.2.0",
+  "root": "C:\\Users",               // absolute path that was scanned
+  "scanned_at": "2026-11-03T12:00:00Z",
+  "elapsed_ms": 1234,
+  "errors": 2,                        // folders that could not be read
+  "tree": {                           // an entry, see below
+    "name": "C:\\Users", "path": "C:\\Users", "type": "dir",
+    "size": 123456789,                // logical size
+    "disk_size": 130000000,           // allocated on disk
+    "items": 4567, "files": 4000, "folders": 567,
+    "modified": "2026-11-02T18:30:00Z",
+    "error": false,                   // this folder could not be read
+    "hard_link": false,               // extra hard link, bytes counted elsewhere
+    "truncated": false,               // dirs only: children cut off by --max-depth
+    "children": [ /* entries, largest first; dirs only */ ]
+  }
+}
+```
+
+`type` is `dir` or `file`. Files have the same fields without `truncated` and
+`children` (`files` is `1` and `items` is `1` for a file).
+
+`fastdir top` (`schema: "fastdir.top"`) has the same `schema`, `version`,
+`fastdir_version`, `root`, `scanned_at`, `elapsed_ms` and `errors` fields,
+plus `limit`, `total` (`size`, `disk_size`, `files`, `folders` of the whole
+scan) and `files`: a list of `{ name, path, extension, size, disk_size,
+modified }`, largest first. Hard links are listed once.
+
+### MCP server
+
+`fastdir-cli mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio, so agents such as Claude Code can query disk usage. Scans
+stay in memory (the four most recent folders), so follow-up questions do not
+rescan. A tool given a folder outside every cached scan scans it first.
+
+| Tool | |
+|---|---|
+| `scan_path` | Scan (or rescan) a folder or drive; returns its totals and largest entries |
+| `get_children` | Entries directly inside a folder, largest first |
+| `largest_files` | Largest files anywhere under a folder |
+| `search` | Find entries by name substring or glob, minimum size, extension or type |
+| `path_info` | One entry's sizes and counts, and its share of its parent and of the scan |
+| `export_scan` | Write a folder to a JSON (`fastdir.scan`) or CSV file |
+
+Only read-only tools are offered by default. Start the server with
+`--allow-destructive` to also offer `recycle_path` and `delete_path`
+(permanent; the tool requires `confirm: true`).
+
+Register it with Claude Code:
+
+```sh
+# Per-user install path; all-users installs live in C:\Program Files\FastDir
+claude mcp add fastdir -- "%LOCALAPPDATA%\Programs\FastDir\fastdir-cli.exe" mcp
+```
+
+Or in any client's JSON configuration:
+
+```json
+{ "mcpServers": { "fastdir": { "command": "fastdir-cli", "args": ["mcp"] } } }
 ```
 
 ### Keyboard shortcuts
@@ -156,20 +285,21 @@ logic lives in focused sub-crates so it can be built and tested without GPUI:
 
 | Crate | Contents |
 |---|---|
-| `fastdir` (root) | `src/main.rs`, `build.rs` (icon / resource embedding) |
+| `fastdir` (root) | `src/main.rs` (GUI, or the CLI for subcommands), `build.rs` (icon / resource embedding) |
 | `crates/fastdir-core` | Tree model, parallel scanner, drives, file-system ops, formatting |
 | `crates/fastdir-treemap` | Squarified cushion layout, hit-testing and CPU rendering |
 | `crates/fastdir-updater` | Release check, verified download and self-update |
 | `crates/fastdir-settings` | Persisted settings (`config.toml`) |
 | `crates/fastdir-ui` | GPUI window, list/treemap panels, dialogs and menus |
+| `crates/fastdir-cli` | Headless CLI (`fastdir-cli` binary), agent JSON schema and MCP server |
 
 Dependency direction is `ui -> treemap -> core`, `ui -> updater` and
-`ui -> settings`. Only `fastdir-ui` depends on GPUI.
+`ui -> settings`; `cli -> core`. Only `fastdir-ui` depends on GPUI.
 
 Run the GUI-free test suite with:
 
 ```sh
-cargo test -p fastdir-core -p fastdir-treemap -p fastdir-updater -p fastdir-settings
+cargo test -p fastdir-core -p fastdir-treemap -p fastdir-updater -p fastdir-settings -p fastdir-cli
 ```
 
 ### Building the installer locally

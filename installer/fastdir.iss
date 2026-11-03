@@ -1,11 +1,14 @@
 ; Inno Setup script for FastDir.
-; Build: iscc /DAppVersion=0.2.0 /DSourceExe=..\target\release\fastdir.exe /DIconFile=..\target\fastdir.ico fastdir.iss
+; Build: iscc /DAppVersion=0.2.0 /DSourceExe=..\target\release\fastdir.exe /DSourceCliExe=..\target\release\fastdir-cli.exe /DIconFile=..\target\fastdir.ico fastdir.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #ifndef SourceExe
   #define SourceExe "..\target\release\fastdir.exe"
+#endif
+#ifndef SourceCliExe
+  #define SourceCliExe "..\target\release\fastdir-cli.exe"
 #endif
 #ifndef IconFile
   #define IconFile "..\target\fastdir.ico"
@@ -58,6 +61,8 @@ Name: "contextmenu"; Description: "Add ""Analyze with FastDir"" to the folder ri
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; Flags: ignoreversion
+; Console build of the command line (`fastdir-cli scan ...`, `fastdir-cli mcp`).
+Source: "{#SourceCliExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

@@ -1527,9 +1527,22 @@ name = "fastdir"
 version = "0.2.0"
 dependencies = [
  "embed-resource",
+ "fastdir-cli",
  "fastdir-ui",
  "fastdir-updater",
  "resvg 0.45.1",
+]
+
+[[package]]
+name = "fastdir-cli"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "fastdir-core",
+ "libc",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
