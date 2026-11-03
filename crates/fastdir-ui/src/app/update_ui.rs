@@ -209,15 +209,15 @@ impl FastDir {
         let title = self.tr_fmt("upd.notes_title", &[("version", &release.version.to_string())]);
         let close_label = self.tr("action.close");
         let update_label = self.tr("upd.update_now");
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let entity = entity.clone();
             dialog
                 .title(title.clone())
-                .w(px(640.))
+                .w(sp(640.).to_pixels(window.rem_size()))
                 .child(
                     div()
                         .id("release-notes")
-                        .max_h(px(380.))
+                        .max_h(sp(380.))
                         .overflow_y_scroll()
                         .text_sm()
                         .text_color(cx.theme().foreground)
@@ -299,11 +299,11 @@ impl FastDir {
         window.open_dialog(cx, {
             let progress = progress.clone();
             let view = view.clone();
-            move |dialog, _, _| {
+            move |dialog, window, _| {
                 let progress = progress.clone();
                 dialog
                     .title(dlg_title)
-                    .w(px(460.))
+                    .w(sp(460.).to_pixels(window.rem_size()))
                     .close_button(false)
                     .overlay_closable(false)
                     .keyboard(false)

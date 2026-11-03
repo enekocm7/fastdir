@@ -190,7 +190,7 @@ impl FastDir {
         let entity = cx.entity().downgrade();
         let (min_clear, ext_clear) = (min_size.clone(), extension.clone());
         let (after_clear, before_clear) = (after.clone(), before.clone());
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let ok = apply.clone();
             let theme = cx.theme();
             let field = |label: &'static str, input: &Entity<InputState>| {
@@ -206,7 +206,7 @@ impl FastDir {
             };
             dialog
                 .title(title)
-                .w(px(480.))
+                .w(sp(480.).to_pixels(window.rem_size()))
                 .child(
                     v_flex()
                         .gap_3()
@@ -282,7 +282,7 @@ impl FastDir {
             .gap_1()
             .flex_shrink_0()
             .child(
-                div().w(px(240.)).child(
+                div().w(sp(240.)).child(
                     Input::new(&self.search)
                         .small()
                         .cleanable(true)

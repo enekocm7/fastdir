@@ -143,7 +143,7 @@ impl FastDir {
             _ => "".into(),
         };
         h_flex()
-            .h(px(26.))
+            .h(sp(26.))
             .flex_shrink_0()
             .px_3()
             .gap_4()

@@ -313,7 +313,7 @@ impl FastDir {
                 .size_full()
                 .overflow_y_scroll()
                 .items_center()
-                .pt(px(56.))
+                .pt(sp(56.))
                 .gap_6()
                 .child(
                     v_flex()
@@ -353,7 +353,7 @@ impl FastDir {
             };
             v_flex()
                 .id(("drive", i))
-                .w(px(300.))
+                .w(sp(300.))
                 .p_4()
                 .gap_3()
                 .rounded_lg()
@@ -368,7 +368,7 @@ impl FastDir {
                         .gap_3()
                         .child(
                             div()
-                                .size(px(40.))
+                                .size(sp(40.))
                                 .rounded_md()
                                 .bg(theme.primary.opacity(0.15))
                                 .flex()
@@ -416,7 +416,7 @@ impl FastDir {
             .size_full()
             .overflow_y_scroll()
             .items_center()
-            .pt(px(56.))
+            .pt(sp(56.))
             .gap_6()
             .child(
                 v_flex()
@@ -440,7 +440,7 @@ impl FastDir {
                     .flex_wrap()
                     .justify_center()
                     .gap_4()
-                    .max_w(px(960.))
+                    .max_w(sp(960.))
                     .children(cards),
             )
             .child(
@@ -505,7 +505,7 @@ impl FastDir {
         let pct = expected.map(|e| (bytes as f64 / e as f64 * 100.0).min(99.0) as f32);
         let stat = |label: &'static str, value: String| {
             v_flex()
-                .w(px(150.))
+                .w(sp(150.))
                 .p_3()
                 .gap_1()
                 .rounded_lg()
@@ -545,7 +545,7 @@ impl FastDir {
                     ),
             )
             .child(
-                div().w(px(640.)).child(
+                div().w(sp(640.)).child(
                     ProgressBar::new("scan-progress")
                         .when_some(pct, |p, v| p.value(v))
                         .when(pct.is_none(), |p| p.loading(true)),
@@ -562,7 +562,7 @@ impl FastDir {
             )
             .child(
                 div()
-                    .w(px(760.))
+                    .w(sp(760.))
                     .text_xs()
                     .text_center()
                     .text_color(theme.muted_foreground)

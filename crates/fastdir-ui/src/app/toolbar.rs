@@ -39,7 +39,7 @@ impl FastDir {
         let refreshing = self.is_refreshing();
 
         h_flex()
-            .h(px(42.))
+            .h(sp(42.))
             .flex_shrink_0()
             .px_2()
             .gap_1()
@@ -89,7 +89,7 @@ impl FastDir {
                 tool("open", IconName::FolderSearch, self.mod_tip("tb.tip_open"))
                     .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
             )
-            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(Separator::vertical().h(sp(20.)).mx_1())
             .child(
                 tool("rescan", IconName::RefreshCw, self.mod_tip("tb.tip_rescan"))
                     .disabled(self.scan_root.is_none() || scanning)
@@ -100,7 +100,7 @@ impl FastDir {
                     .disabled(!scanning)
                     .on_click(cx.listener(|this, _, w, cx| this.stop_scan(&StopScan, w, cx))),
             )
-            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(Separator::vertical().h(sp(20.)).mx_1())
             .child(
                 tool("up", IconName::ArrowUp, self.tr("tb.tip_parent"))
                     .disabled(!has_sel || is_root || multi)
@@ -136,7 +136,7 @@ impl FastDir {
                 .disabled(!ready || busy || self.tree.is_none())
                 .on_click(cx.listener(|this, _, w, cx| this.open_export(&ExportResults, w, cx))),
             )
-            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(Separator::vertical().h(sp(20.)).mx_1())
             .child(
                 tool("rename", IconName::Pencil, self.tr("tb.tip_rename"))
                     .disabled(!has_sel || is_root || busy || multi || special)
@@ -165,7 +165,7 @@ impl FastDir {
                     .disabled(!has_sel || is_root || refreshing || special)
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
-            .child(Separator::vertical().h(px(20.)).mx_1())
+            .child(Separator::vertical().h(sp(20.)).mx_1())
             .child(search)
             .child(
                 tool(
@@ -186,7 +186,7 @@ impl FastDir {
                         .gap_2()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .max_w(px(420.))
+                        .max_w(sp(420.))
                         .overflow_hidden()
                         .child(Spinner::new().small())
                         .child(
@@ -406,7 +406,7 @@ impl FastDir {
                 .px_2()
                 .text_xs()
                 .text_color(theme.muted_foreground)
-                .max_w(px(520.))
+                .max_w(sp(520.))
                 .overflow_hidden()
                 .child(Spinner::new().small())
                 .child(div().flex_shrink_0().child(if cancelling {
@@ -415,7 +415,7 @@ impl FastDir {
                     self.tr("tb.scanning")
                 }))
                 .child(
-                    div().w(px(120.)).flex_shrink_0().child(
+                    div().w(sp(120.)).flex_shrink_0().child(
                         ProgressBar::new("toolbar-scan-progress")
                             .when_some(pct, |p, v| p.value(v))
                             .when(pct.is_none(), |p| p.loading(true)),
@@ -476,7 +476,7 @@ impl FastDir {
             .gap_2()
             .text_xs()
             .text_color(theme.muted_foreground)
-            .max_w(px(640.))
+            .max_w(sp(640.))
             .overflow_hidden()
             .child(
                 div()
@@ -491,7 +491,7 @@ impl FastDir {
                     }),
             )
             .child(
-                div().w(px(140.)).flex_shrink_0().child(
+                div().w(sp(140.)).flex_shrink_0().child(
                     ProgressBar::new("op-progress")
                         .when_some(pct, |p, v| p.value(v))
                         .when(pct.is_none(), |p| p.loading(true)),
@@ -608,7 +608,7 @@ impl FastDir {
             h_flex().w_full().pr_2().justify_between().child(
                 h_flex()
                     .gap_2()
-                    .child(img(logo()).size(px(18.)))
+                    .child(img(logo()).size(sp(18.)))
                     .child(
                         div()
                             .text_sm()

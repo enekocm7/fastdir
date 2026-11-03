@@ -329,7 +329,7 @@ impl Render for SettingsView {
                                                                             v as f32 / 100.0;
                                                                         this.settings.save();
                                                                         this.apply_ui_scale(
-                                                                            window,
+                                                                            window, cx,
                                                                         );
                                                                     }
                                                                 }
@@ -1724,7 +1724,7 @@ impl FastDir {
         self.search
             .update(cx, |input, cx| input.set_placeholder(placeholder, window, cx));
         self.apply_theme(window, cx);
-        self.apply_ui_scale(window);
+        self.apply_ui_scale(window, cx);
         self.refresh_treemap_options(cx);
         cx.notify();
     }

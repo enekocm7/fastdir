@@ -36,6 +36,7 @@ pub fn run() {
             };
             Theme::change(mode, None, cx);
             app::apply_accent(cx);
+            app::apply_ui_scale(settings.appearance.ui_scale, cx);
             app::bind_keys(cx);
 
             let options = WindowOptions {
@@ -68,7 +69,6 @@ pub fn run() {
             };
             gpui_kit::open_window(options, cx, move |window, cx| {
                 window.set_window_title("FastDir");
-                window.set_rem_size(px(16.0 * settings.appearance.ui_scale.clamp(0.5, 2.0)));
                 let mut primary_listener = primary_listener;
                 let listener = primary_listener.take();
                 cx.new(|cx| app::FastDir::new(settings, initial_path, listener, window, cx))
