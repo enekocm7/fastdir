@@ -4,7 +4,7 @@
 
 use fastdir_core::format;
 use fastdir_core::model::{Node, NodePath, Tree};
-use fastdir_treemap::{self as treemap, ColorMode, Palette, RenderOptions};
+use fastdir_treemap::{self as treemap, AgeBucket, ColorMode, Palette, RenderOptions};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
@@ -121,6 +121,8 @@ pub struct TreemapView {
     image: Option<Arc<RenderImage>>,
     image_key: Option<Key>,
     pending: Option<Key>,
+    /// Bytes per age bucket for the current render, used by the age legend.
+    age_totals: Option<[(AgeBucket, u64); 7]>,
     stale: Rc<std::cell::RefCell<Vec<Arc<RenderImage>>>>,
     /// Every selected node; each one gets an outline.
     selection: Vec<NodePath>,
@@ -164,6 +166,7 @@ impl TreemapView {
             image: None,
             image_key: None,
             pending: None,
+            age_totals: None,
             stale: Default::default(),
             selection: Vec::new(),
             highlight: None,
@@ -213,6 +216,8 @@ impl TreemapView {
         changed |= set_if_diff(&mut self.min_cell, opts.min_cell);
         changed |= set_if_diff(&mut self.decimal_sizes, decimal_sizes);
         if changed {
+            // The legend (and its totals) belongs to the previous render.
+            self.age_totals = None;
             cx.notify();
         }
     }
@@ -271,6 +276,7 @@ impl TreemapView {
         }
         self.image_key = None;
         self.pending = None;
+        self.age_totals = None;
         cx.notify();
     }
 
@@ -319,6 +325,7 @@ impl TreemapView {
             if path != self.zoom {
                 self.zoom = path;
                 self.zoom_gen += 1;
+                self.age_totals = None;
             }
             self.zoom_fs = Some(p);
         }
@@ -369,6 +376,7 @@ impl TreemapView {
         self.zoom_fs = fs;
         self.zoom_gen += 1;
         self.hover = None;
+        self.age_totals = None;
         cx.notify();
     }
 
@@ -415,12 +423,17 @@ impl TreemapView {
                     .timer(Duration::from_millis(40))
                     .await;
             }
-            let buf = cx
+            let opts = key.opts();
+            let (buf, totals) = cx
                 .background_executor()
                 .spawn(async move {
                     let t = tree.read();
                     let root = t.get(&zoom).unwrap_or(t.root());
-                    treemap::render(&t, root, key.w, key.h, background, &key.opts())
+                    let buf = treemap::render(&t, root, key.w, key.h, background, &opts);
+                    let totals = (opts.color_mode == ColorMode::Age).then(|| {
+                        treemap::age_bucket_totals(&t, root, opts.now, opts.use_disk)
+                    });
+                    (buf, totals)
                 })
                 .await;
             let Some(img) = RgbaImage::from_raw(key.w, key.h, buf) else {
@@ -436,6 +449,7 @@ impl TreemapView {
                 }
                 this.image_key = Some(key);
                 this.pending = None;
+                this.age_totals = totals;
                 this.rendering = false;
                 cx.notify();
             })
@@ -508,7 +522,7 @@ impl TreemapView {
                     text.truncate(text.len() - tail.len());
                     text.push_str(local);
                 }
-                fastdir_locale::fmt(
+                let mut label = fastdir_locale::fmt(
                     &self.lang,
                     "tree.hover",
                     &[
@@ -516,7 +530,17 @@ impl TreemapView {
                         ("size", &format::bytes_with(size, self.decimal_sizes)),
                         ("link", link),
                     ],
-                )
+                );
+                let age = format::date_with_in(node.modified(), true, &self.lang);
+                if !age.is_empty() {
+                    label.push_str("  ·  ");
+                    label.push_str(&fastdir_locale::fmt(
+                        &self.lang,
+                        "tree.hover_age",
+                        &[("age", &age)],
+                    ));
+                }
+                label
             };
             Some((p, label.into()))
         });
@@ -531,6 +555,19 @@ fn set_if_diff<T: PartialEq>(slot: &mut T, value: T) -> bool {
     } else {
         *slot = value;
         true
+    }
+}
+
+/// Locale key for an age bucket's legend label.
+fn age_bucket_key(bucket: AgeBucket) -> &'static str {
+    match bucket {
+        AgeBucket::Week => "age.under_week",
+        AgeBucket::Month => "age.under_month",
+        AgeBucket::SixMonths => "age.under_6_months",
+        AgeBucket::Year => "age.under_year",
+        AgeBucket::ThreeYears => "age.under_3_years",
+        AgeBucket::Older => "age.older",
+        AgeBucket::Unknown => "age.unknown",
     }
 }
 
@@ -651,6 +688,7 @@ impl Render for TreemapView {
         let popover = theme.popover;
         let fg = theme.popover_foreground;
         let breadcrumb = has_tree.then(|| self.render_breadcrumb(cx));
+        let legend = self.render_age_legend(cx);
 
         let body = div()
             .id("treemap")
@@ -714,11 +752,62 @@ impl Render for TreemapView {
                 )
             });
 
-        v_flex().size_full().children(breadcrumb).child(body)
+        v_flex()
+            .size_full()
+            .children(breadcrumb)
+            .child(body)
+            .children(legend)
     }
 }
 
 impl TreemapView {
+    /// Bytes in each age bucket under the zoomed folder, shown while
+    /// [`ColorMode::Age`] is active.
+    fn render_age_legend(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.color_mode != ColorMode::Age {
+            return None;
+        }
+        let totals = self.age_totals?;
+        let theme = cx.theme();
+        Some(
+            h_flex()
+                .w_full()
+                .flex_shrink_0()
+                .flex_wrap()
+                .gap_3()
+                .px_2()
+                .py_1()
+                .border_t_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .children(
+                    totals
+                        .into_iter()
+                        .filter(|(bucket, bytes)| *bucket != AgeBucket::Unknown || *bytes > 0)
+                        .map(|(bucket, bytes)| {
+                            let (r, g, b) = treemap::age_bucket_color(bucket, self.palette);
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .size(px(9.))
+                                        .rounded_sm()
+                                        .bg(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32)),
+                                )
+                                .child(div().child(format!(
+                                    "{}  {}",
+                                    fastdir_locale::t(&self.lang, age_bucket_key(bucket)),
+                                    format::bytes_with(bytes, self.decimal_sizes)
+                                )))
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// `C:\ > Users > me > AppData`, one clickable part per folder.
     fn render_breadcrumb(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let theme = cx.theme();

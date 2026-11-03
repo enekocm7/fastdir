@@ -115,7 +115,7 @@ impl FastDir {
                         &[("show", self.reveal_label()), ("mod", platform::mod_key())],
                     ),
                 )
-                .disabled(!has_sel || multi || special)
+                .disabled(!has_sel || multi || special || !self.can_touch_selected())
                 .on_click(cx.listener(|this, _, w, cx| this.reveal_selected(&RevealItem, w, cx))),
             )
             .child(
@@ -124,7 +124,7 @@ impl FastDir {
                     IconName::RotateCw,
                     self.tr("tb.tip_refresh"),
                 )
-                .disabled(!has_sel || busy || multi || special)
+                .disabled(!has_sel || busy || multi || special || !self.can_touch_selected())
                 .on_click(cx.listener(|this, _, w, cx| this.refresh_item(&RefreshItem, w, cx))),
             )
             .child(
@@ -139,12 +139,14 @@ impl FastDir {
             .child(Separator::vertical().h(sp(20.)).mx_1())
             .child(
                 tool("rename", IconName::Pencil, self.tr("tb.tip_rename"))
-                    .disabled(!has_sel || is_root || busy || multi || special)
+                    .disabled(
+                        !has_sel || is_root || busy || multi || special || !self.can_touch_selected(),
+                    )
                     .on_click(cx.listener(|this, _, w, cx| this.rename_item(&RenameItem, w, cx))),
             )
             .child(
                 tool("move", IconName::FolderInput, self.mod_tip("tb.tip_move"))
-                    .disabled(!has_sel || is_root || refreshing || special)
+                    .disabled(!has_sel || is_root || refreshing || special || !self.can_touch_selected())
                     .on_click(cx.listener(|this, _, w, cx| this.move_item(&MoveItem, w, cx))),
             )
             .child(
@@ -153,7 +155,7 @@ impl FastDir {
                     IconName::Recycle,
                     self.tr_fmt("tb.tip_recycle", &[("trash", self.trash_name())]),
                 )
-                .disabled(!has_sel || is_root || refreshing || special)
+                .disabled(!has_sel || is_root || refreshing || special || !self.can_touch_selected())
                 .on_click(cx.listener(|this, _, w, cx| this.trash_item(&TrashItem, w, cx))),
             )
             .child(
@@ -162,7 +164,7 @@ impl FastDir {
                     .ghost()
                     .icon(Icon::new(IconName::Trash).text_color(theme.danger))
                     .tooltip(self.tr("tb.tip_delete"))
-                    .disabled(!has_sel || is_root || refreshing || special)
+                    .disabled(!has_sel || is_root || refreshing || special || !self.can_touch_selected())
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
             .child(Separator::vertical().h(sp(20.)).mx_1())
@@ -259,16 +261,19 @@ impl FastDir {
                 let show_free = self.settings.treemap.show_free_space;
                 let show_unknown = self.settings.treemap.show_unknown;
                 let treemap_disk = self.settings.treemap.disk_size;
+                let color_by_age = self.settings.treemap.color_mode == TreemapColorMode::Age;
                 let show_partial = self.settings.scan.show_partial_results;
                 let show_treemap = self.settings.treemap.show;
                 let hide_empty = self.settings.list.hide_empty_folders;
                 let entity = update_entity.clone();
+                let menu_open_scan = self.tr("menu.open_scan");
                 let menu_settings = self.tr("tb.menu_settings");
                 let menu_check = self.tr("tb.menu_check");
                 let menu_auto = self.tr("tb.menu_auto");
                 let menu_free = self.tr("tb.menu_free");
                 let menu_unknown = self.tr("tb.menu_unknown");
                 let menu_disk = self.tr("tb.menu_disk");
+                let menu_age = self.tr("tb.menu_age");
                 let menu_partial = self.tr("tb.menu_partial");
                 let menu_treemap = self.tr("tb.menu_treemap");
                 let menu_hide_empty = self.tr("tb.menu_hide_empty");
@@ -282,7 +287,21 @@ impl FastDir {
                     let e6 = entity.clone();
                     let e7 = entity.clone();
                     let e8 = entity.clone();
+                    let e9 = entity.clone();
+                    let e_open = entity.clone();
                     menu.item(
+                        gpui_kit::component::menu::PopupMenuItem::new(menu_open_scan)
+                            .icon(IconName::FileText)
+                            .on_click(move |_, window, cx| {
+                                e_open
+                                    .update(cx, |this, cx| {
+                                        this.open_scan(&OpenScan, window, cx)
+                                    })
+                                    .ok();
+                            }),
+                    )
+                    .separator()
+                    .item(
                         gpui_kit::component::menu::PopupMenuItem::new(menu_settings)
                             .icon(IconName::Settings)
                             .on_click(move |_, window, cx| {
@@ -335,6 +354,14 @@ impl FastDir {
                             .checked(treemap_disk)
                             .on_click(move |_, window, cx| {
                                 e5.update(cx, |this, cx| this.toggle_treemap_disk_size(window, cx))
+                                    .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(menu_age)
+                            .checked(color_by_age)
+                            .on_click(move |_, _, cx| {
+                                e9.update(cx, |this, cx| this.toggle_treemap_age_colors(cx))
                                     .ok();
                             }),
                     )
@@ -599,6 +626,10 @@ impl FastDir {
                 )
                 .into(),
             ),
+            Phase::Ready if self.saved.is_some() => self.scan_root.as_ref().map(|r| {
+                self.tr_fmt("saved.title", &[("path", &r.display().to_string())])
+                    .into()
+            }),
             Phase::Ready => self
                 .scan_root
                 .as_ref()

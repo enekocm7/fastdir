@@ -176,6 +176,7 @@ impl Render for SettingsView {
         let size_unit_owner = self.owner.clone();
         let percent_owner = self.owner.clone();
         let date_owner = self.owner.clone();
+        let age_tint_owner = self.owner.clone();
         let col_items_owner = self.owner.clone();
         let col_files_owner = self.owner.clone();
         let col_folders_owner = self.owner.clone();
@@ -1048,6 +1049,34 @@ impl Render for SettingsView {
                                         tr("set.list.datefmt_cap")
                                             .to_string(),
                                     )),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(div().text_xs().child(tr("set.list.age_tint")))
+                                            .child(caption(
+                                                tr("set.list.age_tint_cap").to_string(),
+                                            )),
+                                    )
+                                    .child(
+                                        Switch::new("settings-age-tint")
+                                            .checked(list.age_tint)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    age_tint_owner.update(cx, |this, cx| {
+                                                        this.settings.list.age_tint = *checked;
+                                                        this.settings.save();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    ),
                             )
                             .child(
                                 h_flex()

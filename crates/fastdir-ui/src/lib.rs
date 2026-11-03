@@ -44,7 +44,7 @@ pub fn run() {
                 window_min_size: Some(size(px(900.), px(600.))),
                 ..TitleBar::window_options()
             };
-            let initial_path = cli_scan_path();
+            let initial_path = cli_open_path();
             let primary_listener = if settings.integration.single_instance {
                 match fastdir_core::integration::try_claim(
                     fastdir_core::integration::SINGLE_INSTANCE_PORT,
@@ -78,14 +78,19 @@ pub fn run() {
         });
 }
 
-/// `fastdir <path>` argument, when it points at a directory.
-fn cli_scan_path() -> Option<PathBuf> {
+/// `fastdir <path>` argument: a folder to scan or a saved `.json` scan to
+/// open.
+fn cli_open_path() -> Option<PathBuf> {
     std::env::args_os().nth(1).and_then(|arg| {
         let mut arg = arg.to_string_lossy().trim().trim_matches('"').to_string();
         if arg.ends_with(':') {
             arg.push(std::path::MAIN_SEPARATOR);
         }
         let path = PathBuf::from(arg);
-        path.is_dir().then_some(path)
+        let is_json = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+        (path.is_dir() || is_json).then_some(path)
     })
 }

@@ -30,6 +30,11 @@ culprit? Rename, move, recycle or delete it right there.
 - **Hard links counted once** - files sharing a file ID (for example under
   `C:\Windows\WinSxS`) are counted the first time and marked as `hard link`
   afterwards, so totals are not inflated.
+- **Colour by age** – switch the treemap from extension colours to a
+  new-to-old scale (under a week, a month, six months, a year, three years,
+  older). The legend below the treemap totals each bucket, the colour-blind
+  palette gets its own safe scale, and the file list can tint its *Last change*
+  column to match.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a
@@ -70,7 +75,8 @@ culprit? Rename, move, recycle or delete it right there.
   remembered between launches: window geometry, panel sizes, sort order, the
   last scanned path, size units (binary / decimal), relative or absolute
   dates, visible columns, percent base, treemap palettes (including a
-  colour-blind-safe one), flat shading, cell borders, list-only mode, excluded
+  colour-blind-safe one), flat shading, cell borders, age-tinted dates,
+  list-only mode, excluded
     paths, hidden/system skipping, junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
   frequency, per-action delete confirmations, whether the list stays on the
@@ -120,7 +126,30 @@ documents = ["pdf", "txt", "my-notes"]
 fastdir.exe              open the drive overview
 fastdir.exe D:\          scan a drive right away
 fastdir.exe "C:\Users"   scan a folder right away
+fastdir.exe scan.json    open a scan saved earlier
 ```
+
+### Opening a saved scan
+
+A scan exported from the GUI (JSON) or written by `fastdir-cli scan` can be
+opened again without rescanning, which is handy when the data came from a
+server, a NAS or another machine:
+
+- **Open scan…** in the toolbar `…` menu or on the drive overview
+  (`Ctrl+Shift+O`), with a `.json` file picker.
+- Pass the file on the command line (`fastdir.exe scan.json`) or drop it on
+  the window.
+- A banner marks the tree as a **saved scan** and shows the root and the time
+  it was scanned.
+- Rename, move, recycle, delete, open and reveal only work when the selected
+  path still exists on this machine. **Rescan** starts a real scan of the
+  saved root (or asks for a folder when it no longer exists).
+
+JSON is a browsing snapshot: hard-link markers and drive pseudo-items
+(`<Free space>`, `<Unknown>`) come back as plain files, so their bytes are
+kept but the UI cannot tell them apart. Opening a truncated document
+(`--max-depth` or `--no-files`) also means totals only reflect the entries
+that were written.
 
 ### Command line (for scripts and agents)
 
@@ -314,6 +343,38 @@ Run the GUI-free test suite with:
 ```sh
 cargo test -p fastdir-core -p fastdir-treemap -p fastdir-updater -p fastdir-settings -p fastdir-cli
 ```
+
+### Benchmarks
+
+Scanner, tree-building and treemap benchmarks use
+[criterion](https://github.com/bheisler/criterion.rs) and work on Windows,
+Linux and macOS:
+
+```sh
+cargo bench -p fastdir-core       # scan (default, exclusions, 1 vs all threads), arena build, sorting
+cargo bench -p fastdir-treemap    # squarify layout for 1k / 10k / 100k nodes, CPU render
+```
+
+The scan benchmarks use a synthetic tree (200k files, 20k directories, a few
+huge folders, fixed seed) that is generated once in `target/fastdir-bench-tree`
+and reused; delete that folder to regenerate it. Throughput is reported in
+items per second next to the time. Run on an otherwise idle machine; these are
+**warm-cache** numbers.
+
+To check a change against a baseline:
+
+```sh
+git checkout main
+cargo bench -p fastdir-core -- --save-baseline main
+git checkout my-branch
+cargo bench -p fastdir-core -- --baseline main
+```
+
+For a **cold-cache** run before a release, scan a real folder after dropping the
+OS file cache: reboot (or on Linux `sync; echo 3 | sudo tee /proc/sys/vm/drop_caches`,
+on macOS `sudo purge`), then run
+`cargo run --release -p fastdir-cli -- scan <path>` once and note the time.
+Subsequent runs are warm.
 
 ### Building the installer locally
 

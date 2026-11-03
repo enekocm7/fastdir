@@ -11,18 +11,20 @@ impl FastDir {
         let can_zoom_in = self.can_zoom_in(cx);
         let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
         let no_ops = is_root || special;
+        // A saved scan may not touch items that are gone from this machine.
+        let offline = !self.can_touch_selected();
         menu.action_context(self.focus.clone())
             .menu_with_icon_and_disabled(
                 self.tr("menu.open"),
                 IconName::ExternalLink,
                 Box::new(OpenItem),
-                multi || special,
+                multi || special || offline,
             )
             .menu_with_icon_and_disabled(
                 self.reveal_label(),
                 IconName::FolderOpen,
                 Box::new(RevealItem),
-                multi || special,
+                multi || special || offline,
             )
             .menu_with_icon_and_disabled(self.tr("menu.copy_path"), IconName::Copy, Box::new(CopyPath), special)
             .menu_with_icon_and_disabled(self.tr("menu.copy_name"), IconName::Copy, Box::new(CopyName), special)
@@ -44,19 +46,19 @@ impl FastDir {
                 self.tr("menu.rename"),
                 IconName::Pencil,
                 Box::new(RenameItem),
-                is_root || multi || special,
+                is_root || multi || special || offline,
             )
             .menu_with_icon_and_disabled(
                 self.tr("menu.move_to"),
                 IconName::FolderInput,
                 Box::new(MoveItem),
-                no_ops,
+                no_ops || offline,
             )
             .menu_with_icon_and_disabled(
                 self.tr("menu.refresh"),
                 IconName::RefreshCw,
                 Box::new(RefreshItem),
-                !is_dir,
+                !is_dir || offline,
             )
             .separator()
             .menu_with_icon_and_disabled(
@@ -70,13 +72,13 @@ impl FastDir {
                 self.tr_fmt("menu.recycle", &[("trash", self.trash_name())]),
                 IconName::Recycle,
                 Box::new(TrashItem),
-                no_ops,
+                no_ops || offline,
             )
             .menu_with_icon_and_disabled(
                 self.tr("menu.delete_perm"),
                 IconName::Trash,
                 Box::new(DeleteItem),
-                no_ops,
+                no_ops || offline,
             )
     }
 

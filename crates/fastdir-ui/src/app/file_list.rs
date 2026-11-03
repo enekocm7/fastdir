@@ -308,6 +308,7 @@ impl FastDir {
         let theme = cx.theme();
         let selected = self.selected;
         let filtering = self.filter.is_active();
+        let age_now = treemap::RenderOptions::default().now;
         let fg = theme.foreground;
         let muted = theme.muted_foreground;
         let primary = theme.primary;
@@ -369,6 +370,12 @@ impl FastDir {
             let depth = row.depth as f32;
             let bar_color = rgb(DEPTH_COLORS[row.depth as usize % DEPTH_COLORS.len()]);
             let palette = palette_of(self.settings.treemap.palette);
+            let date_tint = if self.settings.list.age_tint {
+                let (r, g, b) = treemap::age_color(node.modified(), age_now, palette);
+                Some(((r as u32) << 16) | ((g as u32) << 8) | b as u32)
+            } else {
+                None
+            };
             let icon = if node.is_special() {
                 let (r, g, b) = treemap::node_color_with(palette, node);
                 Icon::new(IconName::HardDrive)
@@ -547,7 +554,10 @@ impl FastDir {
                     )
                 })
                 .when(show_modified, |d| {
-                    d.child(num(COL_DATE, date_s).text_color(muted))
+                    d.child(match date_tint {
+                        Some(color) => num(COL_DATE, date_s).text_color(rgb(color)),
+                        None => num(COL_DATE, date_s).text_color(muted),
+                    })
                 });
             out.push(el.into_any_element());
         }
