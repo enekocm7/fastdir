@@ -11,6 +11,7 @@
 //! double its memory.
 
 use fastdir_core::duplicates::{DuplicateOptions, DuplicateReport};
+use fastdir_core::filter::FilterView;
 use fastdir_core::model::{FileEntry, Node, NodeKind, Tree};
 use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
@@ -63,11 +64,25 @@ pub struct EntryView<'a> {
     /// Owner index in `tree.owners()` ([`fastdir_core::model::NO_OWNER`] when
     /// unknown or not collected).
     pub owner: u16,
+    /// When set, only matches and their ancestors are written.
+    pub filter: Option<&'a FilterView<'a>>,
 }
 
 impl EntryView<'_> {
     fn lists_children(&self) -> bool {
         self.shape.max_depth.is_none_or(|max| self.depth < max)
+    }
+
+    /// Whether this folder has any child that would be written.
+    fn has_visible_children(&self) -> bool {
+        match self.filter {
+            Some(view) => self
+                .tree
+                .children(self.node)
+                .iter()
+                .any(|child| view.shows(self.tree, child)),
+            None => self.node.has_children(),
+        }
     }
 }
 
@@ -94,7 +109,7 @@ impl Serialize for EntryView<'_> {
             let lists = self.lists_children();
             // Truncated: the folder has entries that were cut off by
             // `max_depth` (not by `--no-files`, which is an explicit filter).
-            st.serialize_field("truncated", &(!lists && node.has_children()))?;
+            st.serialize_field("truncated", &(!lists && self.has_visible_children()))?;
             st.serialize_field(
                 "children",
                 &Children {
@@ -123,6 +138,9 @@ impl Serialize for Children<'_, '_> {
             if !child.is_dir() && !p.shape.include_files {
                 continue;
             }
+            if p.filter.is_some_and(|view| !view.shows(p.tree, child)) {
+                continue;
+            }
             seq.serialize_element(&EntryView {
                 tree: p.tree,
                 node: child,
@@ -130,6 +148,7 @@ impl Serialize for Children<'_, '_> {
                 depth: p.depth + 1,
                 shape: p.shape,
                 owner: p.tree.child_owner(p.node, i),
+                filter: p.filter,
             })?;
         }
         seq.end()
@@ -153,6 +172,9 @@ pub struct ScanDoc<'a> {
     /// in the document is that folder's path.
     pub subtree: &'a [u32],
     pub shape: TreeShape,
+    /// When set, only matches and their ancestors are written. Folder totals
+    /// still describe the whole subtree.
+    pub filter: Option<&'a FilterView<'a>>,
 }
 
 impl Serialize for ScanDoc<'_> {
@@ -182,6 +204,7 @@ impl Serialize for ScanDoc<'_> {
                 depth: 0,
                 shape: self.shape,
                 owner: self.tree.owner_at(self.subtree),
+                filter: self.filter,
             },
         )?;
         st.end()
@@ -381,6 +404,7 @@ pub(crate) mod tests {
             tree: &tree,
             subtree: &[],
             shape,
+            filter: None,
         })
         .unwrap()
     }
@@ -519,6 +543,43 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn filter_keeps_matches_and_ancestors() {
+        let tree = sample_tree();
+        let filter = fastdir_core::filter::Filter::parse("*.md", "", "", "", "").unwrap();
+        let view = FilterView::new(&tree, &filter);
+        let meta = meta();
+        let doc = serde_json::to_value(ScanDoc {
+            meta: &meta,
+            tree: &tree,
+            subtree: &[],
+            shape: FULL,
+            filter: Some(&view),
+        })
+        .unwrap();
+        let children = doc["tree"]["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0]["name"], "docs");
+        assert_eq!(children[0]["children"][0]["name"], "b.md");
+        // Folder totals still describe the whole subtree.
+        assert_eq!(doc["tree"]["size"], 1150);
+        assert_eq!(children[0]["size"], 150);
+        assert_eq!(children[0]["files"], 2);
+
+        let doc = serde_json::to_value(ScanDoc {
+            meta: &meta,
+            tree: &tree,
+            subtree: &[],
+            shape: TreeShape {
+                max_depth: Some(0),
+                include_files: true,
+            },
+            filter: Some(&view),
+        })
+        .unwrap();
+        assert_eq!(doc["tree"]["truncated"], true);
+    }
+
+    #[test]
     fn top_document_shape() {
         let tree = sample_tree();
         let files = tree.top_files(2);
@@ -570,6 +631,7 @@ pub(crate) mod tests {
             tree: &tree,
             subtree: &[],
             shape: FULL,
+            filter: None,
         })
         .unwrap();
         assert_eq!(doc["tree"]["owner"], r"DOMAIN\alice");
@@ -590,6 +652,7 @@ pub(crate) mod tests {
             tree: &plain,
             subtree: &[],
             shape: FULL,
+            filter: None,
         })
         .unwrap();
         assert!(doc["tree"].get("owner").is_none());

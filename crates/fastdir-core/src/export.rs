@@ -16,6 +16,7 @@
 //! the exported root rows are emitted (the root itself is depth 0), and
 //! `include_files == false` exports folders only.
 
+use crate::filter::{Filter, FilterView};
 use crate::model::{
     Arena, DirBuilder, NO_OWNER, Node, NodeKind, NodePath, OwnerTable, Subtree, Tree,
 };
@@ -113,9 +114,15 @@ struct Row {
     fs_path: PathBuf,
 }
 
-/// Pre-order walk of the subtree at `root`, honouring `options`.
+/// Pre-order walk of the subtree at `root`, honouring `options` and, when
+/// given, `view` (which keeps matches plus their ancestors).
 /// Children keep the tree's order (largest first).
-fn collect_rows(tree: &Tree, root: &[u32], options: &ExportOptions) -> io::Result<Vec<Row>> {
+fn collect_rows(
+    tree: &Tree,
+    root: &[u32],
+    options: &ExportOptions,
+    view: Option<&FilterView<'_>>,
+) -> io::Result<Vec<Row>> {
     if tree.get(root).is_none() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -143,6 +150,9 @@ fn collect_rows(tree: &Tree, root: &[u32], options: &ExportOptions) -> io::Resul
             let children = tree.children(tree.get(&path).expect("path still valid"));
             for i in (0..children.len()).rev() {
                 let child = &children[i];
+                if view.is_some_and(|view| !view.shows(tree, child)) {
+                    continue;
+                }
                 let mut child_path = path.clone();
                 child_path.push(i as u32);
                 let mut child_fs = fs_path.clone();
@@ -160,9 +170,22 @@ pub fn export_csv(
     tree: &Tree,
     root: &[u32],
     options: &ExportOptions,
+    out: impl Write,
+) -> io::Result<usize> {
+    export_csv_filtered(tree, root, options, None, out)
+}
+
+/// Like [`export_csv`], but keeps only entries that match `filter` plus their
+/// ancestors. The exported root row is always written.
+pub fn export_csv_filtered(
+    tree: &Tree,
+    root: &[u32],
+    options: &ExportOptions,
+    filter: Option<&Filter>,
     mut out: impl Write,
 ) -> io::Result<usize> {
-    let rows = collect_rows(tree, root, options)?;
+    let view = filter.map(|filter| FilterView::new(tree, filter));
+    let rows = collect_rows(tree, root, options, view.as_ref())?;
     // The owner column only exists for scans that collected owners, so the
     // default export keeps its existing shape.
     let with_owner = tree.has_owners();
@@ -558,6 +581,27 @@ mod tests {
         let cells: Vec<&str> = sub_line.split(',').collect();
         assert_eq!(cells[1], "20");
         assert_eq!(cells[4], "2");
+    }
+
+    #[test]
+    fn csv_can_filter_matches_and_ancestors() {
+        let tree = sample_tree();
+        let filter = Filter::parse("*.bin", "", "", "", "").unwrap();
+        let mut out = Vec::new();
+        let rows = export_csv_filtered(
+            &tree,
+            &[],
+            &ExportOptions::default(),
+            Some(&filter),
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(rows, 3); // root, sub and b.bin
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("b.bin"));
+        assert!(text.contains("sub"));
+        assert!(!text.contains("a.txt"));
+        assert!(!text.contains("c.txt"));
     }
 
     #[test]

@@ -19,7 +19,8 @@ use args::{
     TopCommand,
 };
 use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
-use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
+use fastdir_core::export::{ExportOptions, export_csv_filtered, import_json_with_meta};
+use fastdir_core::filter::FilterView;
 use fastdir_core::format;
 use fastdir_core::model::Tree;
 use fastdir_core::scanner::{self, Progress};
@@ -273,6 +274,8 @@ fn write_json(out: &OutputArgs, value: &impl serde::Serialize) -> Result<(), Cli
 
 fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
     let scanned = scan_with_progress(&c.scan)?;
+    let filter = c.filter.is_active().then_some(&c.filter);
+    let view = filter.map(|filter| FilterView::new(&scanned.tree, filter));
     match c.out.format {
         Format::Json => write_json(
             &c.out,
@@ -284,6 +287,7 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
                     max_depth: c.max_depth,
                     include_files: c.include_files,
                 },
+                filter: view.as_ref(),
             },
         ),
         Format::Csv => {
@@ -292,7 +296,7 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
                 max_depth: c.max_depth,
                 include_files: c.include_files,
             };
-            export_csv(&scanned.tree, &[], &options, &mut w).map_err(io_error)?;
+            export_csv_filtered(&scanned.tree, &[], &options, filter, &mut w).map_err(io_error)?;
             w.flush().map_err(io_error)
         }
     }
@@ -300,7 +304,11 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
 
 fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
     let scanned = scan_with_progress(&c.scan)?;
-    let files = scanned.tree.top_files(c.limit);
+    let files = scanned
+        .tree
+        .top_files_in_where(&[], c.limit, |node, name, ext| {
+            c.filter.matches(name, node, ext)
+        });
     match c.out.format {
         Format::Json => write_json(
             &c.out,
@@ -652,6 +660,90 @@ mod tests {
         assert_eq!(doc["tree"]["files"], 2);
         assert_eq!(doc["tree"]["folders"], 1);
         assert_eq!(doc["tree"]["children"][0]["name"], "sub");
+        let _ = std::fs::remove_file(&out);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_filters_keep_matches_and_ancestors() {
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-filter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("a.iso"), vec![0u8; 3000]).unwrap();
+        std::fs::write(dir.join("sub").join("b.txt"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.join("c.iso"), vec![0u8; 2000]).unwrap();
+        std::fs::write(dir.join("d.txt"), vec![0u8; 5000]).unwrap();
+        let out =
+            std::env::temp_dir().join(format!("fastdir-cli-filter-{}.json", std::process::id()));
+        assert_eq!(
+            run(vec![
+                "scan".into(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "--name".into(),
+                "*.iso".into(),
+                "--min-size".into(),
+                "1KB".into(),
+                "-o".into(),
+                out.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+        let tree = &doc["tree"];
+        // Folder totals still count every file below them.
+        assert_eq!(tree["size"], 10_010);
+        assert_eq!(tree["files"], 4);
+        let names: Vec<&str> = tree["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["sub", "c.iso"]);
+        let sub = &tree["children"][0];
+        assert_eq!(sub["size"], 3_010);
+        assert_eq!(sub["files"], 2);
+        assert_eq!(sub["children"].as_array().unwrap().len(), 1);
+        assert_eq!(sub["children"][0]["name"], "a.iso");
+        let _ = std::fs::remove_file(&out);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn top_filters_choose_which_files_are_ranked() {
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-top-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("a.iso"), vec![0u8; 3000]).unwrap();
+        std::fs::write(dir.join("sub").join("b.txt"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.join("c.iso"), vec![0u8; 2000]).unwrap();
+        std::fs::write(dir.join("d.txt"), vec![0u8; 5000]).unwrap();
+        let out = std::env::temp_dir().join(format!("fastdir-cli-top-{}.json", std::process::id()));
+        assert_eq!(
+            run(vec![
+                "top".into(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "--ext".into(),
+                ".iso".into(),
+                "-n".into(),
+                "10".into(),
+                "-o".into(),
+                out.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+        let names: Vec<&str> = doc["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["a.iso", "c.iso"]);
+        // The totals still describe the whole scan.
+        assert_eq!(doc["total"]["size"], 10_010);
         let _ = std::fs::remove_file(&out);
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -284,6 +284,9 @@ fastdir-cli duplicates D:\ --min-size 100MB --ext .mp4 --pretty
 
 # What grew on D: since Monday's saved scan (saved.json)?
 fastdir-cli diff saved.json D:\ --min-change 1GB
+
+# ISO files over 1 GB that were not touched this year
+fastdir-cli top D:\ --ext .iso --min-size 1GB --older-than 1y
 ```
 
 `diff` takes a saved scan as `<old>` and either another saved scan or a
@@ -300,6 +303,11 @@ row has its own sizes.
 | `--max-depth <n>` | scan | List entries up to `<n>` levels below `<path>` (`0` = just the root). Sizes always count everything. |
 | `--max-depth <n>` | diff | Only list changed entries up to `<n>` levels below the root (`0` = the root row) |
 | `--no-files` | scan | List folders only |
+| `--name <text\|glob>` | scan, top | Keep entries whose name contains `<text>`, or matches the glob when it contains `*`/`?` (case-insensitive) |
+| `--min-size <size>` | scan, top | Keep entries at least this large (`500MB`, `1.5 GiB`) |
+| `--ext <ext>` | scan, top | Keep only files with this extension; repeatable |
+| `--newer-than <date\|age>` | scan, top | Keep entries modified on/after a date (`2026-01-01`) or within an age (`30d`, `6m`, `1y`) |
+| `--older-than <date\|age>` | scan, top | Keep entries modified on/before a date, or older than an age |
 | `-n, --limit <n>` | top | How many files (default 20) |
 | `-n, --limit <n>` | diff | Cap the number of changed entries (largest \|change\| first) |
 | `--min-change <size>` | diff | Hide changes smaller than `<size>` (e.g. `20GB`, `500MB`) |
@@ -313,6 +321,12 @@ row has its own sizes.
 | `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff | Skip hidden and system entries |
 | `--owners` | scan, top, diff | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top, duplicates, diff | Nothing on stderr except errors |
+
+`scan` filters work like the GUI's filtered tree: matching entries and the
+ancestors needed to reach them are kept, while every folder's totals still
+count everything below it. `top` filters choose which files are ranked. Ages
+use `d` (days), `w` (weeks), `m` (30 days) and `y` (365 days); dates are local
+and include the whole day.
 
 Scan options apply to `diff` only when `<new>` is a folder; comparing two
 saved scans does not scan anything.
@@ -374,6 +388,8 @@ plus `limit`, `total` (`size`, `disk_size`, `files`, `folders` of the whole
 scan) and `files`: a list of `{ name, path, extension, size, disk_size,
 modified, owner? }`, largest first. Hard links are listed once. `owner` is
 only present with `--owners`; CSV gains an `owner` column in the same case.
+With filter options, `files` contains only matching files while `total` still
+describes the whole scan.
 
 `fastdir diff` (`schema: "fastdir.diff"`):
 
@@ -468,12 +484,16 @@ rescan. A tool given a folder outside every cached scan scans it first.
 |---|---|
 | `scan_path` | Scan (or rescan) a folder or drive; returns its totals and largest entries |
 | `get_children` | Entries directly inside a folder, largest first |
-| `largest_files` | Largest files anywhere under a folder |
-| `search` | Find entries by name substring or glob, minimum size, extension or type |
+| `largest_files` | Largest files anywhere under a folder, optionally filtered by name, minimum size, extension or modified date |
+| `search` | Find entries by name substring or glob, minimum size, extension, modified date or type |
 | `path_info` | One entry's sizes and counts, and its share of its parent and of the scan |
 | `find_duplicates` | Groups of identical files under a folder and the space they waste; reuses the cached scan |
 | `compare_scans` | What changed since a cached scan or a saved JSON scan (`fastdir.diff`) |
 | `export_scan` | Write a folder to a JSON (`fastdir.scan`) or CSV file |
+
+`largest_files` and `search` take the same optional filter fields as the
+command line: `query` (or `name`), `min_size`, `extension` (a string or a
+list), `newer_than` and `older_than` (`2026-01-01` or an age such as `30d`).
 
 `compare_scans` takes `old` (a scan root cached in this session, or a saved
 JSON scan file) and `new` (a folder scanned now, or a saved JSON scan file),

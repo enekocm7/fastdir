@@ -206,6 +206,13 @@ impl Node {
         self.block != NO_BLOCK
     }
 
+    /// Identity of this directory's child block, used to cache filtered views.
+    /// Only meaningful for directories that have children.
+    #[inline]
+    pub(crate) fn block_id(&self) -> u32 {
+        self.block
+    }
+
     /// Items below this node (files + directories).
     #[inline]
     pub fn items(&self) -> u64 {
@@ -1171,6 +1178,15 @@ impl Tree {
     /// (empty when `root` does not exist or is a file). Paths in the result
     /// are absolute index paths into the whole tree.
     pub fn top_files_in(&self, root: &[u32], limit: usize) -> Vec<FileEntry> {
+        self.top_files_in_where(root, limit, |_, _, _| true)
+    }
+
+    /// Like [`Tree::top_files_in`], but only files for which `keep` returns
+    /// true are ranked. `keep` receives the file's node, name and extension.
+    pub fn top_files_in_where<F>(&self, root: &[u32], limit: usize, mut keep: F) -> Vec<FileEntry>
+    where
+        F: FnMut(&Node, &str, Option<&str>) -> bool,
+    {
         let Some(start) = self.get(root) else {
             return Vec::new();
         };
@@ -1190,6 +1206,9 @@ impl Tree {
                         stack.push((child_path, child));
                     }
                     NodeKind::File if !child.hard_link() => {
+                        if !keep(child, self.name(child), self.ext_name(child)) {
+                            continue;
+                        }
                         // Skip the (many) files that cannot beat the current
                         // cutoff before cloning their name and path.
                         let worth = heap.len() < limit
