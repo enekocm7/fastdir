@@ -6,6 +6,7 @@ members = [
     "crates/fastdir-updater",
     "crates/fastdir-settings",
     "crates/fastdir-ui",
+    "crates/fastdir-locale",
 ]
 
 [workspace.package]
@@ -35,6 +36,7 @@ zip = { version = "9.2.2", default-features = false, features = ["deflate"] }
 # Windows APIs
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Registry",
@@ -47,6 +49,7 @@ fastdir-treemap = { path = "crates/fastdir-treemap" }
 fastdir-updater = { path = "crates/fastdir-updater" }
 fastdir-settings = { path = "crates/fastdir-settings" }
 fastdir-ui = { path = "crates/fastdir-ui" }
+fastdir-locale = { path = "crates/fastdir-locale" }
 
 [package]
 name = "fastdir"

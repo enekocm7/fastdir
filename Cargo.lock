@@ -1537,6 +1537,7 @@ name = "fastdir-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "fastdir-locale",
  "parking_lot",
  "rayon",
  "trash",
@@ -1544,9 +1545,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastdir-locale"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "fastdir-settings"
 version = "0.1.0"
 dependencies = [
+ "fastdir-locale",
  "serde",
  "serde_json",
  "toml 0.8.23",
@@ -1565,6 +1575,7 @@ name = "fastdir-ui"
 version = "0.1.0"
 dependencies = [
  "fastdir-core",
+ "fastdir-locale",
  "fastdir-settings",
  "fastdir-treemap",
  "fastdir-updater",

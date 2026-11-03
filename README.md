@@ -70,6 +70,12 @@ culprit? Rename, move, recycle or delete it right there.
   startup mode, single-instance mode, interface scale, update channel and
   frequency, per-action delete confirmations
   and the default delete action.
+- **Localized UI** (Settings → Language, applies immediately): English,
+  Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian,
+  Ukrainian, Turkish, Chinese, Japanese, Korean, Arabic and Czech. New
+  installs follow the Windows display language; numbers and dates (digit
+  grouping, decimal separator, date order, relative times like
+  "3 days ago") follow the selected locale too.
 - **Explorer integration** (optional, from the installer): right-click any
   folder or drive → *Analyze with FastDir*. It can also be toggled per-user
   under Settings → Integration (all-users installs stay installer-managed).
@@ -93,7 +99,7 @@ newer version exists, a notification and a toolbar button offer **Update now**
 this version**. Use the toolbar's `…` menu to check manually or to turn the
 automatic check off. All settings live in `%APPDATA%\FastDir\config.toml`,
 grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
-`[appearance]` sections (older config files migrate automatically).
+`[appearance]`, `[integration]` and `[locale]` sections (older config files migrate automatically).
 
 ## Usage
 

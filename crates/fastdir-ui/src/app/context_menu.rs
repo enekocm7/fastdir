@@ -13,59 +13,59 @@ impl FastDir {
         let no_ops = is_root || special;
         menu.action_context(self.focus.clone())
             .menu_with_icon_and_disabled(
-                "Open",
+                self.tr("menu.open"),
                 IconName::ExternalLink,
                 Box::new(OpenItem),
                 multi || special,
             )
             .menu_with_icon_and_disabled(
-                "Show in Explorer",
+                self.tr("menu.show_explorer"),
                 IconName::FolderOpen,
                 Box::new(RevealItem),
                 multi || special,
             )
-            .menu_with_icon_and_disabled("Copy path", IconName::Copy, Box::new(CopyPath), special)
+            .menu_with_icon_and_disabled(self.tr("menu.copy_path"), IconName::Copy, Box::new(CopyPath), special)
             .separator()
             .menu_with_icon_and_disabled(
-                "Zoom in",
+                self.tr("menu.zoom_in"),
                 IconName::ZoomIn,
                 Box::new(ZoomIn),
                 !can_zoom_in,
             )
             .menu_with_icon_and_disabled(
-                "Zoom out",
+                self.tr("menu.zoom_out"),
                 IconName::ZoomOut,
                 Box::new(ZoomOut),
                 !can_zoom_out,
             )
             .separator()
             .menu_with_icon_and_disabled(
-                "Rename…",
+                self.tr("menu.rename"),
                 IconName::Pencil,
                 Box::new(RenameItem),
                 is_root || multi || special,
             )
             .menu_with_icon_and_disabled(
-                "Move to…",
+                self.tr("menu.move_to"),
                 IconName::FolderInput,
                 Box::new(MoveItem),
                 no_ops,
             )
             .menu_with_icon_and_disabled(
-                "Refresh",
+                self.tr("menu.refresh"),
                 IconName::RefreshCw,
                 Box::new(RefreshItem),
                 !is_dir,
             )
             .separator()
             .menu_with_icon_and_disabled(
-                "Move to Recycle Bin",
+                self.tr("menu.recycle"),
                 IconName::Recycle,
                 Box::new(TrashItem),
                 no_ops,
             )
             .menu_with_icon_and_disabled(
-                "Delete permanently",
+                self.tr("menu.delete_perm"),
                 IconName::Trash,
                 Box::new(DeleteItem),
                 no_ops,

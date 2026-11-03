@@ -8,6 +8,8 @@ use fastdir_updater::{self as updater, DownloadProgress, InstallKind, Release, U
 struct DownloadView {
     version: String,
     progress: Arc<DownloadProgress>,
+    /// Resolved language code, captured when the download starts.
+    lang: String,
 }
 
 impl Render for DownloadView {
@@ -16,13 +18,24 @@ impl Render for DownloadView {
         let done = self.progress.downloaded.load(Ordering::Relaxed);
         let total = self.progress.total.load(Ordering::Relaxed);
         let detail = if total > 0 {
-            format!("{} of {}", format::bytes(done), format::bytes(total))
+            fastdir_locale::fmt(
+                &self.lang,
+                "upd.progress",
+                &[
+                    ("done", &format::bytes(done)),
+                    ("total", &format::bytes(total)),
+                ],
+            )
         } else {
             format::bytes(done)
         };
         v_flex()
             .gap_2()
-            .child(div().text_sm().child(format!("Downloading FastDir v{}…", self.version)))
+            .child(div().text_sm().child(fastdir_locale::fmt(
+                &self.lang,
+                "upd.downloading",
+                &[("version", &self.version)],
+            )))
             .child(
                 ProgressBar::new("update-progress")
                     .when_some(pct, |p, v| p.value(v))
@@ -46,7 +59,10 @@ impl FastDir {
             self.settings.save();
             if previous.as_deref().is_some_and(|prev| updater::is_newer(prev, current)) {
                 window.push_notification(
-                    Notification::success(format!("Updated to v{current}")).title("FastDir updated"),
+                    Notification::success(
+                        self.tr_fmt("upd.updated_body", &[("current", current)]),
+                    )
+                    .title(self.tr("upd.updated_title")),
                     cx,
                 );
             }
@@ -113,8 +129,10 @@ impl FastDir {
             Err(e) => {
                 if manual {
                     window.push_notification(
-                        Notification::error(format!("Could not check for updates: {e}"))
-                            .title("Update check failed"),
+                        Notification::error(
+                            self.tr_fmt("upd.check_fail_body", &[("error", &e.to_string())]),
+                        )
+                        .title(self.tr("upd.check_fail_title")),
                         cx,
                     );
                 }
@@ -124,8 +142,11 @@ impl FastDir {
         let Some(release) = release else {
             if manual {
                 window.push_notification(
-                    Notification::success(format!("FastDir v{} is the latest version.", updater::CURRENT_VERSION))
-                        .title("You're up to date"),
+                    Notification::success(self.tr_fmt(
+                        "upd.uptodate_body",
+                        &[("version", &updater::CURRENT_VERSION.to_string())],
+                    ))
+                    .title(self.tr("upd.uptodate_title")),
                     cx,
                 );
             }
@@ -149,24 +170,30 @@ impl FastDir {
 
     fn notify_available(&self, version: &str, window: &mut Window, cx: &mut Context<Self>) {
         let entity = cx.entity().downgrade();
+        let body = self.tr_fmt(
+            "upd.avail_body",
+            &[
+                ("version", version),
+                ("current", &updater::CURRENT_VERSION.to_string()),
+            ],
+        );
+        let title = self.tr("upd.avail_title");
+        let label = self.tr("upd.update_now");
         window.push_notification(
-            Notification::info(format!(
-                "FastDir v{version} is available (you have v{}).",
-                updater::CURRENT_VERSION
-            ))
-            .title("Update available")
-            .action(move |_, _, cx| {
-                let entity = entity.clone();
-                Button::new("update-now")
-                    .primary()
-                    .label("Update now")
-                    .on_click(cx.listener(move |note, _, window, cx| {
-                        note.dismiss(window, cx);
-                        entity
-                            .update(cx, |this, cx| this.start_update(window, cx))
-                            .ok();
-                    }))
-            }),
+            Notification::info(body)
+                .title(title)
+                .action(move |_, _, cx| {
+                    let entity = entity.clone();
+                    Button::new("update-now")
+                        .primary()
+                        .label(label)
+                        .on_click(cx.listener(move |note, _, window, cx| {
+                            note.dismiss(window, cx);
+                            entity
+                                .update(cx, |this, cx| this.start_update(window, cx))
+                                .ok();
+                        }))
+                }),
             cx,
         );
     }
@@ -175,11 +202,13 @@ impl FastDir {
         let Some(release) = self.available.clone() else { return };
         let entity = cx.entity().downgrade();
         let notes: SharedString = if release.notes.trim().is_empty() {
-            "No release notes were published for this version.".into()
+            self.tr("upd.no_notes").into()
         } else {
             release.notes.clone().into()
         };
-        let title = format!("FastDir v{} — release notes", release.version);
+        let title = self.tr_fmt("upd.notes_title", &[("version", &release.version.to_string())]);
+        let close_label = self.tr("action.close");
+        let update_label = self.tr("upd.update_now");
         window.open_dialog(cx, move |dialog, _, cx| {
             let entity = entity.clone();
             dialog
@@ -202,13 +231,13 @@ impl FastDir {
                         .child(
                             Button::new("notes-close")
                                 .outline()
-                                .label("Close")
+                                .label(close_label)
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("notes-update")
                                 .primary()
-                                .label("Update now")
+                                .label(update_label)
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
                                     entity
@@ -226,7 +255,10 @@ impl FastDir {
         self.settings.updates.skipped_version = Some(version.clone());
         self.settings.save();
         window.push_notification(
-            Notification::info(format!("You won't be reminded about v{version} again.")).title("Version skipped"),
+            Notification::info(
+                self.tr_fmt("upd.skip_body", &[("version", &version)]),
+            )
+            .title(self.tr("upd.skip_title")),
             cx,
         );
         cx.notify();
@@ -247,8 +279,7 @@ impl FastDir {
         let kind = updater::detect_kind();
         if release.asset_for(kind).is_none() {
             window.push_notification(
-                Notification::error("This release has no download for your type of install.")
-                    .title("Update failed"),
+                Notification::error(self.tr("upd.no_asset")).title(self.tr("upd.fail_title")),
                 cx,
             );
             return;
@@ -257,17 +288,21 @@ impl FastDir {
         cx.notify();
 
         let progress = Arc::new(DownloadProgress::default());
+        let lang = self.settings.locale.language.clone();
         let view = cx.new(|_| DownloadView {
             version: release.version.to_string(),
             progress: progress.clone(),
+            lang: fastdir_locale::resolve(&lang).to_string(),
         });
+        let dlg_title = self.tr("upd.updating_title");
+        let dlg_cancel = self.tr("action.cancel");
         window.open_dialog(cx, {
             let progress = progress.clone();
             let view = view.clone();
             move |dialog, _, _| {
                 let progress = progress.clone();
                 dialog
-                    .title("Updating FastDir")
+                    .title(dlg_title)
                     .w(px(460.))
                     .close_button(false)
                     .overlay_closable(false)
@@ -277,7 +312,7 @@ impl FastDir {
                         h_flex().w_full().justify_end().child(
                             Button::new("update-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(dlg_cancel)
                                 .on_click(move |_, window, cx| {
                                     progress.cancel.store(true, Ordering::Relaxed);
                                     window.close_dialog(cx);
@@ -337,12 +372,15 @@ impl FastDir {
             Ok(path) if !cancelled => path,
             Ok(_) | Err(UpdateError::Cancelled) => {
                 updater::discard_downloads();
-                window.push_notification(Notification::info("The update was cancelled."), cx);
+                window.push_notification(
+                    Notification::info(self.tr("upd.cancelled_body")),
+                    cx,
+                );
                 return;
             }
             Err(e) => {
                 window.push_notification(
-                    Notification::error(e.to_string()).title("Update failed"),
+                    Notification::error(e.to_string()).title(self.tr("upd.fail_title")),
                     cx,
                 );
                 return;
@@ -352,20 +390,21 @@ impl FastDir {
         let version = release.version.to_string();
         if matches!(self.phase, Phase::Scanning { .. }) || self.is_busy() {
             let entity = cx.entity().downgrade();
+            let alert_title = self.tr("upd.restart_title");
+            let alert_body = self.tr_fmt("upd.restart_body", &[("version", &version)]);
+            let alert_ok = self.tr("upd.restart_now");
+            let alert_cancel = self.tr("upd.later");
             window.open_alert_dialog(cx, move |alert, _, _| {
                 let entity = entity.clone();
                 let path = path.clone();
                 alert
-                    .title("Restart to finish updating?")
-                    .description(format!(
-                        "FastDir v{version} is ready to install. A scan or file operation is still running and \
-                         will be lost when FastDir restarts."
-                    ))
+                    .title(alert_title)
+                    .description(alert_body.clone())
                     .confirm()
                     .button_props(
                         DialogButtonProps::default()
-                            .ok_text("Restart now")
-                            .cancel_text("Later")
+                            .ok_text(alert_ok)
+                            .cancel_text(alert_cancel)
                             .on_cancel(|_, _, _| {
                                 updater::discard_downloads();
                                 true
@@ -393,7 +432,10 @@ impl FastDir {
             Err(e) => {
                 updater::discard_downloads();
                 window.push_notification(
-                    Notification::error(format!("Could not install the update: {e}")).title("Update failed"),
+                    Notification::error(
+                        self.tr_fmt("upd.install_fail", &[("error", &e.to_string())]),
+                    )
+                    .title(self.tr("upd.fail_title")),
                     cx,
                 );
             }

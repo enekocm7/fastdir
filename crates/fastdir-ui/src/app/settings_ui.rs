@@ -112,6 +112,41 @@ impl Render for SettingsView {
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
 
+        // Every label resolves to `&'static str`, so these can be moved into
+        // the `'static` dialog/button closures below.
+        let lang_setting: String = self.owner.read(cx).settings.locale.language.clone();
+        let tr = |key: &'static str| -> &'static str { fastdir_locale::t(&lang_setting, key) };
+        // Precompute `'static` strings + owned language clones for the
+        // `'static` closures below (`open_alert_dialog`, `cx.listener`).
+        let reset_title = tr("set.reset.title");
+        let reset_body = tr("set.reset.body");
+        let reset_ok = tr("set.reset.ok");
+        let reset_cancel = tr("action.cancel");
+        let fail_title = tr("set.integration.fail_title");
+        let lang_for_menu_fail: String = lang_setting.clone();
+        let lang_current = fastdir_locale::resolve(&lang_setting);
+        // `system` first, then every supported language by code.
+        let lang_codes: Vec<&'static str> = {
+            let mut codes = vec!["system"];
+            codes.extend(fastdir_locale::SUPPORTED.iter().map(|(c, _)| *c));
+            codes
+        };
+        let lang_selected = if lang_setting == "system" {
+            0
+        } else {
+            lang_codes.iter().position(|c| *c == lang_current).unwrap_or(0)
+        };
+        let lang_names: Vec<&'static str> = lang_codes
+            .iter()
+            .map(|c| {
+                if *c == "system" {
+                    tr("set.language.system")
+                } else {
+                    fastdir_locale::native_name(c)
+                }
+            })
+            .collect();
+
         let theme_owner = self.owner.clone();
         let auto_owner = self.owner.clone();
         let check_owner = self.owner.clone();
@@ -158,6 +193,7 @@ impl Render for SettingsView {
         let channel_owner = self.owner.clone();
         let frequency_owner = self.owner.clone();
         let reset_owner = self.owner.clone();
+        let lang_owner = self.owner.clone();
 
         let divider = || div().h(px(1.)).w_full().bg(border);
         let title = |text: &'static str| {
@@ -181,14 +217,42 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_2()
                             .w_full()
-                            .child(title("Appearance"))
-                            .child(div().text_xs().text_color(muted).child("Theme"))
+                            .child(title(tr("set.language.title")))
+                            .child(caption(tr("set.language.caption").to_string()))
+                            .child({
+                                let radios: Vec<Radio> = lang_codes
+                                    .iter()
+                                    .zip(lang_names.iter())
+                                    .map(|(code, name)| Radio::new(*code).label(*name))
+                                    .collect();
+                                RadioGroup::vertical("settings-language")
+                                    .selected_index(Some(lang_selected))
+                                    .children(radios)
+                                    .on_change(cx.listener(
+                                        move |_, ix: &usize, window, cx| {
+                                            if let Some(code) = lang_codes.get(*ix) {
+                                                let code = *code;
+                                                lang_owner.update(cx, |this, cx| {
+                                                    this.set_language(code, window, cx)
+                                                });
+                                            }
+                                        },
+                                    ))
+                            }),
+                    )
+                    .child(divider())
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(title(tr("set.appearance.title")))
+                            .child(div().text_xs().text_color(muted).child(tr("set.theme.label")))
                             .child(
                                 RadioGroup::horizontal("settings-theme")
                                     .selected_index(Some(theme_ix))
-                                    .child(Radio::new("theme-system").label("System"))
-                                    .child(Radio::new("theme-light").label("Light"))
-                                    .child(Radio::new("theme-dark").label("Dark"))
+                                    .child(Radio::new("theme-system").label(tr("set.theme.system")))
+                                    .child(Radio::new("theme-light").label(tr("set.theme.light")))
+                                    .child(Radio::new("theme-dark").label(tr("set.theme.dark")))
                                     .on_change(cx.listener(move |_, ix: &usize, window, cx| {
                                         let theme = match ix {
                                             1 => ThemePreference::Light,
@@ -202,16 +266,16 @@ impl Render for SettingsView {
                             )
                             .child(
                                 div().text_xs().text_color(muted).child(
-                                    "System follows the Windows light / dark setting.",
+                                    tr("set.theme.caption"),
                                 ),
                             )
                             .child(
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Interface scale"))
+                                    .child(div().text_xs().child(tr("set.scale.label")))
                                     .child(caption(
-                                        "Percent of normal size (50-200). Separate from Windows DPI."
+                                        tr("set.scale.caption")
                                             .to_string(),
                                     ))
                                     .child(
@@ -226,7 +290,7 @@ impl Render for SettingsView {
                                                 Button::new("settings-scale-apply")
                                                     .outline()
                                                     .small()
-                                                    .label("Apply")
+                                                    .label(tr("action.apply"))
                                                     .on_click(cx.listener(
                                                         move |_, _, window, cx| {
                                                             let text = scale_input
@@ -259,14 +323,14 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_3()
                             .w_full()
-                            .child(title("Scanning"))
+                            .child(title(tr("set.scan.title")))
                             .child(
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Excluded names"))
+                                    .child(div().text_xs().child(tr("set.scan.excluded")))
                                     .child(caption(
-                                        "Comma-separated names to skip (`*` and `?` wildcards)."
+                                        tr("set.scan.excluded_cap")
                                             .to_string(),
                                     ))
                                     .child(
@@ -281,7 +345,7 @@ impl Render for SettingsView {
                                                 Button::new("settings-excluded-apply")
                                                     .outline()
                                                     .small()
-                                                    .label("Apply")
+                                                    .label(tr("action.apply"))
                                                     .on_click(cx.listener(
                                                         move |_, _, _window, cx| {
                                                             let text = excluded_input
@@ -314,10 +378,10 @@ impl Render for SettingsView {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .child("Skip hidden and system files"),
+                                                    .child(tr("set.scan.skip_hidden")),
                                             )
                                             .child(caption(
-                                                "Also skips dot-files on Unix.".to_string(),
+                                                tr("set.scan.skip_hidden_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -347,10 +411,10 @@ impl Render for SettingsView {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .child("Follow junctions and symlinks"),
+                                                    .child(tr("set.scan.junctions")),
                                             )
                                             .child(caption(
-                                                "May double-count files; each target is entered once."
+                                                tr("set.scan.junctions_cap")
                                                     .to_string(),
                                             )),
                                     )
@@ -379,10 +443,10 @@ impl Render for SettingsView {
                                         v_flex()
                                             .gap_1()
                                             .child(
-                                                div().text_xs().child("Cross into other volumes"),
+                                                div().text_xs().child(tr("set.scan.cross")),
                                             )
                                             .child(caption(
-                                                "Follow mount points on other drives.".to_string(),
+                                                tr("set.scan.cross_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -409,10 +473,10 @@ impl Render for SettingsView {
                                         v_flex()
                                             .gap_1()
                                             .child(
-                                                div().text_xs().child("Automatic thread count"),
+                                                div().text_xs().child(tr("set.scan.auto_threads")),
                                             )
                                             .child(caption(
-                                                "Off lets you fix the number of scan threads."
+                                                tr("set.scan.auto_threads_cap")
                                                     .to_string(),
                                             )),
                                     )
@@ -445,9 +509,9 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Scan threads"))
+                                    .child(div().text_xs().child(tr("set.scan.threads")))
                                     .child(caption(
-                                        "Used by the next scan (1-64).".to_string(),
+                                        tr("set.scan.threads_cap").to_string(),
                                     ))
                                     .child(
                                         h_flex()
@@ -461,7 +525,7 @@ impl Render for SettingsView {
                                                 Button::new("settings-threads-apply")
                                                     .outline()
                                                     .small()
-                                                    .label("Apply")
+                                                    .label(tr("action.apply"))
                                                     .on_click(cx.listener(
                                                         move |_, _, _window, cx| {
                                                             let text = thread_input
@@ -495,10 +559,10 @@ impl Render for SettingsView {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .child("Show partial results while scanning"),
+                                                    .child(tr("set.scan.partial")),
                                             )
                                             .child(caption(
-                                                "Finished folders and a treemap preview appear before the scan ends."
+                                                tr("set.scan.partial_cap")
                                                     .to_string(),
                                             )),
                                     )
@@ -520,7 +584,7 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_3()
                             .w_full()
-                            .child(title("Treemap"))
+                            .child(title(tr("set.tree.title")))
                             .child(
                                 h_flex()
                                     .justify_between()
@@ -530,9 +594,9 @@ impl Render for SettingsView {
                                     .child(
                                         v_flex()
                                             .gap_1()
-                                            .child(div().text_xs().child("Show treemap"))
+                                            .child(div().text_xs().child(tr("set.tree.show")))
                                             .child(caption(
-                                                "Off gives a list-only layout.".to_string(),
+                                                tr("set.tree.show_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -559,9 +623,9 @@ impl Render for SettingsView {
                                     .child(
                                         v_flex()
                                             .gap_1()
-                                            .child(div().text_xs().child("Show free space"))
+                                            .child(div().text_xs().child(tr("set.tree.free")))
                                             .child(caption(
-                                                "Adds the <Free space> block.".to_string(),
+                                                tr("set.tree.free_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -589,9 +653,9 @@ impl Render for SettingsView {
                                     .child(
                                         v_flex()
                                             .gap_1()
-                                            .child(div().text_xs().child("Show unknown"))
+                                            .child(div().text_xs().child(tr("set.tree.unknown")))
                                             .child(caption(
-                                                "Adds the <Unknown> block.".to_string(),
+                                                tr("set.tree.unknown_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -620,10 +684,10 @@ impl Render for SettingsView {
                                         v_flex()
                                             .gap_1()
                                             .child(
-                                                div().text_xs().child("Size cells by disk usage"),
+                                                div().text_xs().child(tr("set.tree.disk")),
                                             )
                                             .child(caption(
-                                                "Use allocated bytes instead of file sizes."
+                                                tr("set.tree.disk_cap")
                                                     .to_string(),
                                             )),
                                     )
@@ -646,16 +710,16 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Palette"))
+                                    .child(div().text_xs().child(tr("set.tree.palette")))
                                     .child(
                                         RadioGroup::horizontal("settings-palette")
                                             .selected_index(Some(palette_ix))
-                                            .child(Radio::new("palette-default").label("Default"))
+                                            .child(Radio::new("palette-default").label(tr("set.tree.palette_default")))
                                             .child(
                                                 Radio::new("palette-color-blind")
-                                                    .label("Color-blind"),
+                                                    .label(tr("set.tree.palette_colorblind")),
                                             )
-                                            .child(Radio::new("palette-mono").label("Mono"))
+                                            .child(Radio::new("palette-mono").label(tr("set.tree.palette_mono")))
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let palette = match ix {
@@ -677,15 +741,15 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Colour by"))
+                                    .child(div().text_xs().child(tr("set.tree.colorby")))
                                     .child(
                                         RadioGroup::horizontal("settings-color-mode")
                                             .selected_index(Some(color_mode_ix))
                                             .child(
                                                 Radio::new("colormode-extension")
-                                                    .label("Extension"),
+                                                    .label(tr("set.tree.colorby_ext")),
                                             )
-                                            .child(Radio::new("colormode-age").label("Age"))
+                                            .child(Radio::new("colormode-age").label(tr("set.tree.colorby_age")))
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let mode = match ix {
@@ -702,7 +766,7 @@ impl Render for SettingsView {
                                             )),
                                     )
                                     .child(caption(
-                                        "Extension list keeps extension colours.".to_string(),
+                                        tr("set.tree.colorby_cap").to_string(),
                                     )),
                             )
                             .child(
@@ -714,9 +778,9 @@ impl Render for SettingsView {
                                     .child(
                                         v_flex()
                                             .gap_1()
-                                            .child(div().text_xs().child("Cushion shading"))
+                                            .child(div().text_xs().child(tr("set.tree.cushion")))
                                             .child(caption(
-                                                "Pillow shading, or flat rectangles.".to_string(),
+                                                tr("set.tree.cushion_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -738,8 +802,8 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Cushion strength"))
-                                    .child(caption("0.0-2.0.".to_string()))
+                                    .child(div().text_xs().child(tr("set.tree.strength")))
+                                    .child(caption(tr("set.tree.strength_cap").to_string()))
                                     .child(
                                         h_flex()
                                             .gap_2()
@@ -752,7 +816,7 @@ impl Render for SettingsView {
                                                 Button::new("settings-cushion-apply")
                                                     .outline()
                                                     .small()
-                                                    .label("Apply")
+                                                    .label(tr("action.apply"))
                                                     .on_click(cx.listener(
                                                         move |_, _, _window, cx| {
                                                             let text = cushion_input
@@ -792,9 +856,9 @@ impl Render for SettingsView {
                                     .child(
                                         v_flex()
                                             .gap_1()
-                                            .child(div().text_xs().child("Cell borders"))
+                                            .child(div().text_xs().child(tr("set.tree.borders")))
                                             .child(caption(
-                                                "Leave a 1px gap between cells.".to_string(),
+                                                tr("set.tree.borders_cap").to_string(),
                                             )),
                                     )
                                     .child(
@@ -816,9 +880,9 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Smallest cell"))
+                                    .child(div().text_xs().child(tr("set.tree.mincell")))
                                     .child(caption(
-                                        "Stop subdividing below this size, in pixels (0.5-16)."
+                                        tr("set.tree.mincell_cap")
                                             .to_string(),
                                     ))
                                     .child(
@@ -833,7 +897,7 @@ impl Render for SettingsView {
                                                 Button::new("settings-mincell-apply")
                                                     .outline()
                                                     .small()
-                                                    .label("Apply")
+                                                    .label(tr("action.apply"))
                                                     .on_click(cx.listener(
                                                         move |_, _, _window, cx| {
                                                             let text = min_cell_input
@@ -866,17 +930,17 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_3()
                             .w_full()
-                            .child(title("File list"))
+                            .child(title(tr("set.list.title")))
                             .child(
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Size unit"))
+                                    .child(div().text_xs().child(tr("set.list.sizeunit")))
                                     .child(
                                         RadioGroup::horizontal("settings-size-unit")
                                             .selected_index(Some(size_unit_ix))
-                                            .child(Radio::new("size-binary").label("Binary"))
-                                            .child(Radio::new("size-decimal").label("Decimal"))
+                                            .child(Radio::new("size-binary").label(tr("set.list.binary")))
+                                            .child(Radio::new("size-decimal").label(tr("set.list.decimal")))
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let unit = match ix {
@@ -893,7 +957,7 @@ impl Render for SettingsView {
                                             )),
                                     )
                                     .child(caption(
-                                        "Binary uses 1024-based sizes, Decimal 1000-based."
+                                        tr("set.list.binary_cap")
                                             .to_string(),
                                     )),
                             )
@@ -901,16 +965,16 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Percentage base"))
+                                    .child(div().text_xs().child(tr("set.list.pctbase")))
                                     .child(
                                         RadioGroup::horizontal("settings-percent-base")
                                             .selected_index(Some(percent_base_ix))
                                             .child(
                                                 Radio::new("percent-parent")
-                                                    .label("Parent folder"),
+                                                    .label(tr("set.list.parent")),
                                             )
                                             .child(
-                                                Radio::new("percent-total").label("Whole scan"),
+                                                Radio::new("percent-total").label(tr("set.list.total")),
                                             )
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
@@ -927,19 +991,19 @@ impl Render for SettingsView {
                                             )),
                                     )
                                     .child(caption(
-                                        "What the % column is relative to.".to_string(),
+                                        tr("set.list.pctbase_cap").to_string(),
                                     )),
                             )
                             .child(
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Date format"))
+                                    .child(div().text_xs().child(tr("set.list.datefmt")))
                                     .child(
                                         RadioGroup::horizontal("settings-date-format")
                                             .selected_index(Some(date_format_ix))
-                                            .child(Radio::new("date-absolute").label("Absolute"))
-                                            .child(Radio::new("date-relative").label("Relative"))
+                                            .child(Radio::new("date-absolute").label(tr("set.list.absolute")))
+                                            .child(Radio::new("date-relative").label(tr("set.list.relative")))
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let format = match ix {
@@ -955,7 +1019,7 @@ impl Render for SettingsView {
                                             )),
                                     )
                                     .child(caption(
-                                        "Absolute timestamps vs. relative ones (3 days ago)."
+                                        tr("set.list.datefmt_cap")
                                             .to_string(),
                                     )),
                             )
@@ -965,7 +1029,7 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child("Items column"))
+                                    .child(div().text_xs().child(tr("set.list.items_col")))
                                     .child(
                                         Switch::new("settings-col-items")
                                             .checked(list.show_items)
@@ -986,7 +1050,7 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child("Files column"))
+                                    .child(div().text_xs().child(tr("set.list.files_col")))
                                     .child(
                                         Switch::new("settings-col-files")
                                             .checked(list.show_files)
@@ -1007,7 +1071,7 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child("Folders column"))
+                                    .child(div().text_xs().child(tr("set.list.folders_col")))
                                     .child(
                                         Switch::new("settings-col-folders")
                                             .checked(list.show_folders)
@@ -1028,7 +1092,7 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child("Last change column"))
+                                    .child(div().text_xs().child(tr("set.list.modified_col")))
                                     .child(
                                         Switch::new("settings-col-modified")
                                             .checked(list.show_modified)
@@ -1049,7 +1113,7 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child("Size on disk column"))
+                                    .child(div().text_xs().child(tr("set.list.disk_col")))
                                     .child(
                                         Switch::new("settings-col-disk")
                                             .checked(list.show_disk)
@@ -1070,7 +1134,7 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_3()
                             .w_full()
-                            .child(title("File operations"))
+                            .child(title(tr("set.ops.title")))
                             .child(
                                 h_flex()
                                     .justify_between()
@@ -1080,7 +1144,7 @@ impl Render for SettingsView {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .child("Confirm moving to the Recycle Bin"),
+                                            .child(tr("set.ops.confirm_recycle")),
                                     )
                                     .child(
                                         Switch::new("settings-confirm-recycle")
@@ -1103,7 +1167,7 @@ impl Render for SettingsView {
                                     .w_full()
                                     .gap_4()
                                     .child(
-                                        div().text_xs().child("Confirm permanent deletion"),
+                                        div().text_xs().child(tr("set.ops.confirm_perm")),
                                     )
                                     .child(
                                         Switch::new("settings-confirm-permanent")
@@ -1129,7 +1193,7 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child("Confirm moving files"))
+                                    .child(div().text_xs().child(tr("set.ops.confirm_move")))
                                     .child(
                                         Switch::new("settings-confirm-move")
                                             .checked(ops.confirm_move)
@@ -1148,14 +1212,14 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Delete key does"))
+                                    .child(div().text_xs().child(tr("set.ops.deletekey")))
                                     .child(
                                         RadioGroup::horizontal("settings-default-delete")
                                             .selected_index(Some(default_delete_ix))
-                                            .child(Radio::new("delete-recycle").label("Recycle"))
+                                            .child(Radio::new("delete-recycle").label(tr("set.ops.recycle")))
                                             .child(
                                                 Radio::new("delete-permanent")
-                                                    .label("Delete permanently"),
+                                                    .label(tr("set.ops.perm")),
                                             )
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
@@ -1172,7 +1236,7 @@ impl Render for SettingsView {
                                             )),
                                     )
                                     .child(caption(
-                                        "Shift+Delete always does the other.".to_string(),
+                                        tr("set.ops.deletekey_cap").to_string(),
                                     )),
                             )
                             .child(
@@ -1187,12 +1251,12 @@ impl Render for SettingsView {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .child("Last move destination"),
+                                                    .child(tr("set.ops.lastdest")),
                                             )
                                             .child(caption(
                                                 last_dest
                                                     .as_deref()
-                                                    .unwrap_or("Not set yet")
+                                                    .unwrap_or(tr("set.ops.notset"))
                                                     .to_string(),
                                             )),
                                     )
@@ -1200,7 +1264,7 @@ impl Render for SettingsView {
                                         Button::new("settings-clear-dest")
                                             .ghost()
                                             .small()
-                                            .label("Clear")
+                                            .label(tr("action.clear"))
                                             .disabled(last_dest.is_none())
                                             .on_click(cx.listener(
                                                 move |_, _, _window, cx| {
@@ -1219,16 +1283,16 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_2()
                             .w_full()
-                            .child(title("Startup"))
-                            .child(div().text_xs().text_color(muted).child("Show on launch"))
+                            .child(title(tr("set.startup.title")))
+                            .child(div().text_xs().text_color(muted).child(tr("set.startup.showonlaunch")))
                             .child(
                                 RadioGroup::horizontal("settings-startup")
                                     .selected_index(Some(startup_ix))
-                                    .child(Radio::new("startup-drives").label("Drive overview"))
+                                    .child(Radio::new("startup-drives").label(tr("set.startup.drives")))
                                     .child(
-                                        Radio::new("startup-last").label("Re-scan last path"),
+                                        Radio::new("startup-last").label(tr("set.startup.last")),
                                     )
-                                    .child(Radio::new("startup-empty").label("Open nothing"))
+                                    .child(Radio::new("startup-empty").label(tr("set.startup.empty")))
                                     .on_change(cx.listener(
                                         move |_, ix: &usize, _window, cx| {
                                             let mode = match ix {
@@ -1245,7 +1309,7 @@ impl Render for SettingsView {
                                     )),
                             )
                             .child(caption(
-                                "A `fastdir <path>` argument always wins.".to_string(),
+                                tr("set.startup.hint").to_string(),
                             )),
                     )
                     .child(divider())
@@ -1253,8 +1317,9 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_3()
                             .w_full()
-                            .child(title("Integration"))
+                            .child(title(tr("set.integration.title")))
                             .when(cfg!(windows), |d| {
+                                let lang_fail: String = lang_for_menu_fail.clone();
                                 d.child(
                                     h_flex()
                                         .justify_between()
@@ -1267,17 +1332,16 @@ impl Render for SettingsView {
                                                 .child(
                                                     div()
                                                         .text_xs()
-                                                        .child("Explorer context menu"),
+                                                        .child(tr("set.integration.ctxmenu")),
                                                 )
-                                                .child(caption(
-                                                    if machine_managed {
-                                                        "Installed for all users; change it from the installer."
-                                                            .to_string()
+                                                .child({
+                                                    let ctx_cap: &'static str = if machine_managed {
+                                                        tr("set.integration.machine")
                                                     } else {
-                                                        "Right-click any folder or drive \u{2192} Analyze with FastDir."
-                                                            .to_string()
-                                                    },
-                                                )),
+                                                        tr("set.integration.ctxmenu_cap")
+                                                    };
+                                                    caption(ctx_cap.to_string())
+                                                }),
                                         )
                                         .child(
                                             Switch::new("settings-context-menu")
@@ -1298,10 +1362,17 @@ impl Render for SettingsView {
                                                             }
                                                             Err(e) => {
                                                                 window.push_notification(
-                                                                    Notification::error(format!(
-                                                                        "Could not update the context menu: {e}"
-                                                                    ))
-                                                                    .title("Integration failed"),
+                                                                    Notification::error(
+                                                                        fastdir_locale::fmt(
+                                                                            &lang_fail,
+                                                                            "set.integration.ctxmenu_fail",
+                                                                            &[(
+                                                                                "error",
+                                                                                &e.to_string(),
+                                                                            )],
+                                                                        ),
+                                                                    )
+                                                                    .title(fail_title),
                                                                     cx,
                                                                 );
                                                                 cx.notify();
@@ -1322,10 +1393,10 @@ impl Render for SettingsView {
                                         v_flex()
                                             .gap_1()
                                             .child(
-                                                div().text_xs().child("Single instance"),
+                                                div().text_xs().child(tr("set.integration.single")),
                                             )
                                             .child(caption(
-                                                "Second launches send their folder to this window. Takes effect on next launch."
+                                                tr("set.integration.single_cap")
                                                     .to_string(),
                                             )),
                                     )
@@ -1350,7 +1421,7 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_3()
                             .w_full()
-                            .child(title("Updates"))
+                            .child(title(tr("set.updates.title")))
                             .child(
                                 h_flex()
                                     .justify_between()
@@ -1363,10 +1434,10 @@ impl Render for SettingsView {
                                             .child(
                                                 div()
                                                     .text_xs()
-                                                    .child("Check for updates automatically"),
+                                                    .child(tr("set.updates.auto")),
                                             )
                                             .child(caption(
-                                                "Looks for a newer release on GitHub when FastDir starts."
+                                                tr("set.updates.auto_cap")
                                                     .to_string(),
                                             )),
                                     )
@@ -1386,14 +1457,14 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Release channel"))
+                                    .child(div().text_xs().child(tr("set.updates.channel")))
                                     .child(
                                         RadioGroup::horizontal("settings-channel")
                                             .selected_index(Some(channel_ix))
-                                            .child(Radio::new("channel-stable").label("Stable"))
+                                            .child(Radio::new("channel-stable").label(tr("set.updates.stable")))
                                             .child(
                                                 Radio::new("channel-prerelease")
-                                                    .label("Pre-releases"),
+                                                    .label(tr("set.updates.prerelease")),
                                             )
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
@@ -1414,16 +1485,16 @@ impl Render for SettingsView {
                                 v_flex()
                                     .gap_1()
                                     .w_full()
-                                    .child(div().text_xs().child("Check frequency"))
+                                    .child(div().text_xs().child(tr("set.updates.freq")))
                                     .child(
                                         RadioGroup::horizontal("settings-frequency")
                                             .selected_index(Some(frequency_ix))
                                             .child(
                                                 Radio::new("frequency-start")
-                                                    .label("Every start"),
+                                                    .label(tr("set.updates.everystart")),
                                             )
-                                            .child(Radio::new("frequency-daily").label("Daily"))
-                                            .child(Radio::new("frequency-weekly").label("Weekly"))
+                                            .child(Radio::new("frequency-daily").label(tr("set.updates.daily")))
+                                            .child(Radio::new("frequency-weekly").label(tr("set.updates.weekly")))
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let frequency = match ix {
@@ -1449,7 +1520,7 @@ impl Render for SettingsView {
                                             .outline()
                                             .small()
                                             .icon(IconName::RefreshCw)
-                                            .label("Check now")
+                                            .label(tr("set.updates.checknow"))
                                             .disabled(busy)
                                             .on_click(cx.listener(
                                                 move |_, _, window, cx| {
@@ -1461,15 +1532,19 @@ impl Render for SettingsView {
                                     )
                                     .when_some(skipped, |this, version| {
                                         this.child(
-                                            div().text_xs().text_color(muted).child(format!(
-                                                "Skipping v{version}"
-                                            )),
+                                            div().text_xs().text_color(muted).child(
+                                                fastdir_locale::fmt(
+                                                    &lang_setting,
+                                                    "set.updates.skipping",
+                                                    &[("version", &version)],
+                                                ),
+                                            ),
                                         )
                                         .child(
                                             Button::new("settings-clear-skip")
                                                 .ghost()
                                                 .small()
-                                                .label("Clear skipped version")
+                                                .label(tr("set.updates.clearskip"))
                                                 .on_click(cx.listener(
                                                     move |_, _, window, cx| {
                                                         clear_owner.update(cx, |this, cx| {
@@ -1493,11 +1568,12 @@ impl Render for SettingsView {
                         v_flex()
                             .gap_2()
                             .w_full()
-                            .child(title("Advanced"))
+                            .child(title(tr("set.advanced.title")))
                             .when_some(config_path(), |this, path| {
-                                this.child(caption(format!(
-                                    "Settings are saved in {}",
-                                    path.display()
+                                this.child(caption(fastdir_locale::fmt(
+                                    &lang_setting,
+                                    "set.advanced.savedin",
+                                    &[("path", &path.display().to_string())],
                                 )))
                             })
                             .child(
@@ -1506,7 +1582,7 @@ impl Render for SettingsView {
                                         .outline()
                                         .small()
                                         .icon(IconName::FolderOpen)
-                                        .label("Open settings file")
+                                        .label(tr("set.advanced.openfile"))
                                         .disabled(config_path().is_none())
                                         .on_click(cx.listener(move |_, _, _window, _cx| {
                                             if let Some(path) = config_path() {
@@ -1517,7 +1593,7 @@ impl Render for SettingsView {
                                     Button::new("settings-reset")
                                         .outline()
                                         .small()
-                                        .label("Reset to defaults")
+                                        .label(tr("set.advanced.reset"))
                                         .on_click(cx.listener(move |_, _, window, cx| {
                                             let entity = reset_owner.downgrade();
                                             window.open_alert_dialog(
@@ -1525,16 +1601,16 @@ impl Render for SettingsView {
                                                 move |alert, _, _| {
                                                     let entity = entity.clone();
                                                     alert
-                                                        .title("Reset all settings?")
+                                                        .title(reset_title)
                                                         .description(
-                                                            "Every setting returns to its default. The window position and panel sizes are kept.",
+                                                            reset_body,
                                                         )
                                                         .confirm()
                                                         .button_props(
                                                             DialogButtonProps::default()
-                                                                .ok_text("Reset")
+                                                                .ok_text(reset_ok)
                                                                 .ok_variant(ButtonVariant::Danger)
-                                                                .cancel_text("Cancel"),
+                                                                .cancel_text(reset_cancel),
                                                         )
                                                         .on_ok(move |_, window, cx| {
                                                             entity
@@ -1567,6 +1643,11 @@ impl FastDir {
         self.sort = (sort.column, sort.descending);
         self.home_drives = self.settings.startup.mode != StartupMode::Empty;
         self.settings.save();
+        let lang = self.lang();
+        self.treemap.update(cx, |t, cx| t.set_language(lang, cx));
+        let placeholder = self.tr("search.placeholder");
+        self.search
+            .update(cx, |input, cx| input.set_placeholder(placeholder, window, cx));
         self.apply_theme(window, cx);
         self.apply_ui_scale(window);
         self.refresh_treemap_options(cx);
@@ -1601,6 +1682,8 @@ impl FastDir {
             cx.new(|cx| InputState::new(window, cx).default_value(min_cell_text));
         let scale_input = cx.new(|cx| InputState::new(window, cx).default_value(scale_text));
         let owner = cx.entity();
+        let dlg_title = self.tr("set.title");
+        let dlg_close = self.tr("action.close");
         let view = cx.new(|cx| {
             SettingsView::new(
                 owner,
@@ -1614,14 +1697,14 @@ impl FastDir {
         });
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
-                .title("Settings")
+                .title(dlg_title)
                 .w(px(640.))
                 .child(view.clone())
                 .footer(
                     h_flex().w_full().justify_end().child(
                         Button::new("settings-close")
                             .outline()
-                            .label("Close")
+                            .label(dlg_close)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )

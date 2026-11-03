@@ -47,9 +47,9 @@ impl FastDir {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         window.push_notification(
             if targets.len() > 1 {
-                "Paths copied to clipboard"
+                self.tr("dlg.copied_many")
             } else {
-                "Path copied to clipboard"
+                self.tr("dlg.copied_one")
             },
             cx,
         );
@@ -94,7 +94,7 @@ impl FastDir {
             window.push_notification(
                 (
                     NotificationType::Warning,
-                    "The scan root itself cannot be deleted here.",
+                    self.tr("dlg.root_note"),
                 ),
                 cx,
             );
@@ -118,39 +118,48 @@ impl FastDir {
                     .as_ref()
                     .and_then(|tree| tree.read().get(&t.path).map(Node::items))
                     .unwrap_or(0);
-                format!(
-                    "the folder \"{}\" ({}, {} items)",
-                    t.fs.display(),
-                    self.bytes(t.size),
-                    format::count(items)
+                self.tr_fmt(
+                    "dlg.what_folder",
+                    &[
+                        ("name", &t.fs.display().to_string()),
+                        ("size", &self.bytes(t.size)),
+                        ("items", &self.count(items)),
+                    ],
                 )
             } else {
-                format!(
-                    "the file \"{}\" ({})",
-                    t.fs.display(),
-                    self.bytes(t.size)
+                self.tr_fmt(
+                    "dlg.what_file",
+                    &[
+                        ("name", &t.fs.display().to_string()),
+                        ("size", &self.bytes(t.size)),
+                    ],
                 )
             }
         } else {
             let folders = targets.iter().filter(|t| t.is_dir).count();
-            format!(
-                "{} selected items ({} folders, {} files) totalling {}",
-                targets.len(),
-                folders,
-                targets.len() - folders,
-                self.bytes(targets.iter().map(|t| t.size).sum())
+            self.tr_fmt(
+                "dlg.what_multi",
+                &[
+                    ("n", &targets.len().to_string()),
+                    ("dirs", &folders.to_string()),
+                    ("files", &(targets.len() - folders).to_string()),
+                    ("size", &self.bytes(targets.iter().map(|t| t.size).sum())),
+                ],
             )
         };
         let description: SharedString = if permanent {
-            format!("Permanently delete {what}? This cannot be undone.").into()
+            self.tr_fmt("dlg.confirm_perm", &[("what", &what)]).into()
         } else {
-            format!("Move {what} to the Recycle Bin?").into()
+            self.tr_fmt("dlg.confirm_recycle", &[("what", &what)]).into()
         };
         let title = if permanent {
-            "Delete permanently"
+            self.tr("dlg.title_perm")
         } else {
-            "Move to Recycle Bin"
+            self.tr("dlg.title_recycle")
         };
+        let ok_delete = self.tr("dlg.ok_delete");
+        let ok_recycle = self.tr("dlg.title_recycle");
+        let cancel = self.tr("action.cancel");
         let entity = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let entity = entity.clone();
@@ -161,13 +170,9 @@ impl FastDir {
                 .confirm()
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text(if permanent {
-                            "Delete"
-                        } else {
-                            "Move to Recycle Bin"
-                        })
+                        .ok_text(if permanent { ok_delete } else { ok_recycle })
                         .ok_variant(ButtonVariant::Danger)
-                        .cancel_text("Cancel"),
+                        .cancel_text(cancel),
                 )
                 .on_ok(move |_, window, cx| {
                     let targets = targets.clone();
@@ -189,11 +194,22 @@ impl FastDir {
         cx: &mut Context<Self>,
     ) {
         let total = targets.len();
+        let lang = self.settings.locale.language.clone();
         let label = match targets.as_slice() {
-            [one] if permanent => format!("Deleting {}", one.fs.display()),
-            [one] => format!("Recycling {}", one.fs.display()),
-            _ if permanent => format!("Deleting {total} items"),
-            _ => format!("Recycling {total} items"),
+            [one] if permanent => fastdir_locale::fmt(
+                &lang,
+                "dlg.op_deleting",
+                &[("name", &one.fs.display().to_string())],
+            ),
+            [one] => fastdir_locale::fmt(
+                &lang,
+                "dlg.op_recycling",
+                &[("name", &one.fs.display().to_string())],
+            ),
+            _ if permanent => {
+                fastdir_locale::fmt(&lang, "dlg.op_deleting_n", &[("total", &total.to_string())])
+            }
+            _ => fastdir_locale::fmt(&lang, "dlg.op_recycling_n", &[("total", &total.to_string())]),
         };
         let progress = self.begin_op(
             label,
@@ -254,39 +270,49 @@ impl FastDir {
                     cx.notify();
                 }
                 let verb = if permanent {
-                    "Deleted"
+                    this.tr("dlg.done_deleted")
                 } else {
-                    "Moved to the Recycle Bin:"
+                    this.tr("dlg.done_recycled")
                 };
                 if cancelled {
                     let msg = if done.is_empty() {
-                        "Nothing was fully deleted. Anything already removed is gone from the list."
-                            .to_string()
+                        this.tr("dlg.cancel_none").to_string()
                     } else {
-                        format!("{verb} {} of {total} items before cancelling.", done.len())
+                        this.tr_fmt(
+                            "dlg.cancel_some",
+                            &[
+                                ("verb", verb),
+                                ("done", &done.len().to_string()),
+                                ("total", &total.to_string()),
+                            ],
+                        )
                     };
                     window.push_notification(
-                        Notification::warning(msg).title("Delete cancelled"),
+                        Notification::warning(msg).title(this.tr("dlg.cancel_title")),
                         cx,
                     );
                 } else if !done.is_empty() {
                     let msg = match done.as_slice() {
-                        [one] => format!("{verb} {}", one.display()),
-                        _ => format!("{verb} {} items", done.len()),
+                        [one] => this.tr_fmt(
+                            "dlg.done_one",
+                            &[("verb", verb), ("name", &one.display().to_string())],
+                        ),
+                        _ => this.tr_fmt(
+                            "dlg.done_multi",
+                            &[("verb", verb), ("n", &done.len().to_string())],
+                        ),
                     };
                     window.push_notification(Notification::success(msg), cx);
                 }
                 if !failed.is_empty() {
                     let title = if failed.len() == 1 {
-                        "Could not delete 1 item".to_string()
+                        this.tr("dlg.fail_one").to_string()
                     } else {
-                        format!(
-                            "Could not delete {} items",
-                            format::count(failed.len() as u64)
-                        )
+                        this.tr_fmt("dlg.fail_multi", &[("n", &this.count(failed.len() as u64))])
                     };
+                    let lang = this.settings.locale.language.clone();
                     window.push_notification(
-                        Notification::error(failure_list(&failed)).title(title),
+                        Notification::error(failure_list_in(&failed, &lang)).title(title),
                         cx,
                     );
                 }
@@ -420,6 +446,10 @@ impl FastDir {
         });
         self._rename_sub = Some(sub);
         let first = Cell::new(true);
+        let dlg_title = self.tr("rename.title");
+        let dlg_in = self.tr_fmt("rename.in_folder", &[("path", &fs.parent().map(|p| p.display().to_string()).unwrap_or_default())]);
+        let dlg_cancel = self.tr("action.cancel");
+        let dlg_ok = self.tr("rename.ok");
         window.open_dialog(cx, move |dialog, window, cx| {
             if first.replace(false) {
                 input.focus_handle(cx).focus(window, cx);
@@ -427,7 +457,7 @@ impl FastDir {
             }
             let ok = submit.clone();
             dialog
-                .title("Rename")
+                .title(dlg_title)
                 .w(px(460.))
                 .child(
                     v_flex()
@@ -436,12 +466,7 @@ impl FastDir {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!(
-                                    "in {}",
-                                    fs.parent()
-                                        .map(|p| p.display().to_string())
-                                        .unwrap_or_default()
-                                )),
+                                .child(dlg_in.clone()),
                         )
                         .child(Input::new(&input)),
                 )
@@ -453,10 +478,10 @@ impl FastDir {
                         .child(
                             Button::new("rename-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(dlg_cancel)
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
-                        .child(Button::new("rename-ok").primary().label("Rename").on_click(
+                        .child(Button::new("rename-ok").primary().label(dlg_ok).on_click(
                             move |_, window, cx| {
                                 if ok(window, cx) {
                                     window.close_dialog(cx);
@@ -493,13 +518,18 @@ impl FastDir {
                 self.treemap.update(cx, |t, _| t.path_moved(&fs, &dest));
                 self.tree_changed(new_path, cx);
                 window.push_notification(
-                    Notification::success(format!("Renamed to {}", dest.display())),
+                    Notification::success(
+                        self.tr_fmt("rename.done", &[("name", &dest.display().to_string())]),
+                    ),
                     cx,
                 );
                 true
             }
             Err(e) => {
-                window.push_notification(Notification::error(e).title("Rename failed"), cx);
+                window.push_notification(
+                    Notification::error(e).title(self.tr("rename.failed")),
+                    cx,
+                );
                 false
             }
         }
@@ -514,11 +544,12 @@ impl FastDir {
             return;
         }
         let srcs = targets;
+        let move_here = self.tr("move.picker");
         let rx = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Move here".into()),
+            prompt: Some(move_here.into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = rx.await else {
@@ -552,26 +583,32 @@ impl FastDir {
             self.run_move(srcs, dest_dir, window, cx);
             return;
         }
-        let description: SharedString = format!(
-            "Move {} selected items ({}) to \"{}\"?",
-            srcs.len(),
-            self.bytes(srcs.iter().map(|t| t.size).sum()),
-            dest_dir.display()
-        )
-        .into();
+        let description: SharedString = self
+            .tr_fmt(
+                "move.desc",
+                &[
+                    ("n", &srcs.len().to_string()),
+                    ("size", &self.bytes(srcs.iter().map(|t| t.size).sum())),
+                    ("dest", &dest_dir.display().to_string()),
+                ],
+            )
+            .into();
+        let title = self.tr("move.title");
+        let ok = self.tr("move.ok");
+        let cancel = self.tr("action.cancel");
         let entity = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let entity = entity.clone();
             let srcs = srcs.clone();
             let dest_dir = dest_dir.clone();
             alert
-                .title("Move items")
+                .title(title)
                 .description(description.clone())
                 .confirm()
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Move")
-                        .cancel_text("Cancel"),
+                        .ok_text(ok)
+                        .cancel_text(cancel),
                 )
                 .on_ok(move |_, window, cx| {
                     let (srcs, dest_dir) = (srcs.clone(), dest_dir.clone());
@@ -591,9 +628,24 @@ impl FastDir {
         cx: &mut Context<Self>,
     ) {
         let total = srcs.len();
+        let lang = self.settings.locale.language.clone();
         let label = match srcs.as_slice() {
-            [one] => format!("Moving {} → {}", one.fs.display(), dest_dir.display()),
-            _ => format!("Moving {total} items → {}", dest_dir.display()),
+            [one] => fastdir_locale::fmt(
+                &lang,
+                "move.op_one",
+                &[
+                    ("src", &one.fs.display().to_string()),
+                    ("dest", &dest_dir.display().to_string()),
+                ],
+            ),
+            _ => fastdir_locale::fmt(
+                &lang,
+                "move.op_many",
+                &[
+                    ("n", &total.to_string()),
+                    ("dest", &dest_dir.display().to_string()),
+                ],
+            ),
         };
         let progress = self.begin_op(
             label,
@@ -678,21 +730,32 @@ impl FastDir {
                 }
                 if cancelled {
                     let msg = if moved.is_empty() {
-                        "Nothing was moved. Any partial copy was removed.".to_string()
+                        this.tr("move.cancel_none").to_string()
                     } else {
-                        format!(
-                            "Moved {} of {total} items to {} before cancelling. \
-                             Any partial copy was removed.",
-                            moved.len(),
-                            dest_dir.display()
+                        this.tr_fmt(
+                            "move.cancel_some",
+                            &[
+                                ("done", &moved.len().to_string()),
+                                ("total", &total.to_string()),
+                                ("dest", &dest_dir.display().to_string()),
+                            ],
                         )
                     };
                     window
-                        .push_notification(Notification::warning(msg).title("Move cancelled"), cx);
+                        .push_notification(Notification::warning(msg).title(this.tr("move.cancel_title")), cx);
                 } else if !moved.is_empty() {
                     let msg = match moved.as_slice() {
-                        [one] => format!("Moved to {}", one.display()),
-                        _ => format!("Moved {} items to {}", moved.len(), dest_dir.display()),
+                        [one] => this.tr_fmt(
+                            "move.done_one",
+                            &[("dest", &one.display().to_string())],
+                        ),
+                        _ => this.tr_fmt(
+                            "move.done_many",
+                            &[
+                                ("n", &moved.len().to_string()),
+                                ("dest", &dest_dir.display().to_string()),
+                            ],
+                        ),
                     };
                     window.push_notification(Notification::success(msg), cx);
                 }
@@ -700,19 +763,25 @@ impl FastDir {
                     let msg = if total == 1 {
                         failed[0].1.clone()
                     } else {
-                        failure_list(&failed)
+                        failure_list_in(&failed, &this.settings.locale.language)
                     };
                     let title = if total == 1 {
-                        "Move failed".to_string()
+                        this.tr("move.failed_title").to_string()
                     } else {
-                        format!("Could not move {} of {total} items", failed.len())
+                        this.tr_fmt(
+                            "move.failed_body",
+                            &[("done", &failed.len().to_string()), ("total", &total.to_string())],
+                        )
                     };
                     window.push_notification(Notification::error(msg).title(title), cx);
                 }
                 if !leftover.is_empty() {
                     window.push_notification(
-                        Notification::error(failure_list(&leftover))
-                            .title("Copied, but some originals could not be removed"),
+                        Notification::error(failure_list_in(
+                            &leftover,
+                            &this.settings.locale.language,
+                        ))
+                        .title(this.tr("move.partial_title")),
                         cx,
                     );
                 }
@@ -742,7 +811,7 @@ impl FastDir {
         if !is_dir {
             return;
         }
-        self.busy = Some(format!("Refreshing {}…", fs.display()).into());
+        self.busy = Some(self.tr_fmt("move.refreshing", &[("name", &fs.display().to_string())]).into());
         cx.notify();
         let target = fs.clone();
         let options = self.scan_options();
@@ -823,17 +892,18 @@ fn measure(path: &std::path::Path, options: &scanner::ScanOptions) -> Subtree {
 }
 
 /// The first few failed paths with their reasons, one per line.
-fn failure_list(failed: &[(PathBuf, String)]) -> String {
+fn failure_list_in(failed: &[(PathBuf, String)], lang: &str) -> String {
     const SHOWN: usize = 5;
     let mut lines: Vec<String> = failed
         .iter()
         .take(SHOWN)
-        .map(|(p, e)| format!("{}: {e}", p.display()))
+        .map(|(p, e)| fastdir_locale::fmt(lang, "dlg.fail_line", &[("name", &p.display().to_string()), ("error", e)]))
         .collect();
     if failed.len() > SHOWN {
-        lines.push(format!(
-            "…and {} more",
-            format::count((failed.len() - SHOWN) as u64)
+        lines.push(fastdir_locale::fmt(
+            lang,
+            "dlg.more",
+            &[("n", &fastdir_locale::format_count((failed.len() - SHOWN) as u64, lang))],
         ));
     }
     lines.join("\n")

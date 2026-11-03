@@ -387,10 +387,10 @@ impl FastDir {
                                 .when(filtering && row.matched, |d| {
                                     d.font_weight(FontWeight::SEMIBOLD)
                                 })
-                                .child(SharedString::from(tree.name(node).to_string())),
+                                .child(SharedString::from(self.display_name(tree.name(node)).to_string())),
                         )
                         .when(node.hard_link(), |d| {
-                            d.child(div().flex_shrink_0().text_color(muted).child("hard link"))
+                            d.child(div().flex_shrink_0().text_color(muted).child(self.tr("list.hard_link")))
                         }),
                 )
                 .child(
@@ -412,7 +412,7 @@ impl FastDir {
                         num(
                             COL_ITEMS,
                             if is_dir {
-                                format::count(node.items())
+                                self.count(node.items())
                             } else {
                                 String::new()
                             },
@@ -425,7 +425,7 @@ impl FastDir {
                         num(
                             COL_FILES,
                             if is_dir {
-                                format::count(node.files as u64)
+                                self.count(node.files as u64)
                             } else {
                                 String::new()
                             },
@@ -438,7 +438,7 @@ impl FastDir {
                         num(
                             COL_DIRS,
                             if is_dir {
-                                format::count(node.dirs as u64)
+                                self.count(node.dirs as u64)
                             } else {
                                 String::new()
                             },
@@ -544,18 +544,18 @@ impl FastDir {
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme.muted_foreground)
-            .child(head("h-name", "Name", SortKey::Name, None, false, cx))
+            .child(head("h-name", self.tr("list.col_name"), SortKey::Name, None, false, cx))
             .child(
                 div()
                     .w(px(COL_BAR))
                     .flex_shrink_0()
                     .px_2()
-                    .child("Subtree %"),
+                    .child(self.tr("list.col_subtree")),
             )
-            .child(head("h-pct", "%", SortKey::Size, Some(COL_PCT), true, cx))
+            .child(head("h-pct", self.tr("list.col_pct"), SortKey::Size, Some(COL_PCT), true, cx))
             .child(head(
                 "h-size",
-                "Size",
+                self.tr("list.col_size"),
                 SortKey::Size,
                 Some(COL_SIZE),
                 true,
@@ -564,7 +564,7 @@ impl FastDir {
             .when(show_disk, |d| {
                 d.child(head(
                     "h-disk",
-                    "Size on disk",
+                    self.tr("list.col_disk"),
                     SortKey::Disk,
                     Some(COL_DISK),
                     true,
@@ -574,7 +574,7 @@ impl FastDir {
             .when(show_items, |d| {
                 d.child(head(
                     "h-items",
-                    "Items",
+                    self.tr("list.col_items"),
                     SortKey::Items,
                     Some(COL_ITEMS),
                     true,
@@ -584,7 +584,7 @@ impl FastDir {
             .when(show_files, |d| {
                 d.child(head(
                     "h-files",
-                    "Files",
+                    self.tr("list.col_files"),
                     SortKey::Files,
                     Some(COL_FILES),
                     true,
@@ -594,7 +594,7 @@ impl FastDir {
             .when(show_folders, |d| {
                 d.child(head(
                     "h-dirs",
-                    "Folders",
+                    self.tr("list.col_dirs"),
                     SortKey::Dirs,
                     Some(COL_DIRS),
                     true,
@@ -604,7 +604,7 @@ impl FastDir {
             .when(show_modified, |d| {
                 d.child(head(
                     "h-date",
-                    "Last Change",
+                    self.tr("list.col_date"),
                     SortKey::Modified,
                     Some(COL_DATE),
                     true,
@@ -669,14 +669,14 @@ impl FastDir {
             .bg(head)
             .child(tab(
                 "tab-tree",
-                "Directory tree".to_string(),
+                self.tr("list.tree_tab").to_string(),
                 tree_tab,
                 ListTab::Tree,
                 cx,
             ))
             .child(tab(
                 "tab-top-files",
-                format!("Top files ({})", format::count(self.top_files.len() as u64)),
+                self.tr_fmt("list.top_tab", &[("n", &self.count(self.top_files.len() as u64))]),
                 top_tab,
                 ListTab::TopFiles,
                 cx,
@@ -698,9 +698,9 @@ impl FastDir {
                 .text_xs()
                 .text_color(theme.muted_foreground)
                 .child(if self.filter.is_active() {
-                    "No items match the filter"
+                    self.tr("list.no_match")
                 } else {
-                    "This folder is empty"
+                    self.tr("list.empty")
                 })
                 .into_any_element()
         } else {
@@ -853,6 +853,16 @@ impl FastDir {
         };
         let limit = self.settings.list.top_files_limit.clamp(1, 100_000);
         let entity = cx.entity().downgrade();
+        let top_labels: Vec<(usize, String)> = [100usize, 500, 1000, 5000]
+            .iter()
+            .map(|&n| {
+                (
+                    n,
+                    self.tr_fmt("list.top_n", &[("n", &self.count(n as u64))]),
+                )
+            })
+            .collect();
+        let top_button = self.tr_fmt("list.top_n", &[("n", &self.count(limit as u64))]);
         h_flex()
             .h(px(28.))
             .w_full()
@@ -863,10 +873,10 @@ impl FastDir {
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme.muted_foreground)
-            .child(head("top-name", "Name", SortKey::Name, None, false, cx))
+            .child(head("top-name", self.tr("list.col_name"), SortKey::Name, None, false, cx))
             .child(head(
                 "top-size",
-                "Size",
+                self.tr("list.col_size"),
                 SortKey::Size,
                 Some(COL_SIZE),
                 true,
@@ -874,7 +884,7 @@ impl FastDir {
             ))
             .child(head(
                 "top-disk",
-                "Size on disk",
+                self.tr("list.col_disk"),
                 SortKey::Disk,
                 Some(COL_DISK),
                 true,
@@ -882,7 +892,7 @@ impl FastDir {
             ))
             .child(head(
                 "top-date",
-                "Last Change",
+                self.tr("list.col_date"),
                 SortKey::Modified,
                 Some(COL_DATE),
                 true,
@@ -892,21 +902,19 @@ impl FastDir {
                 Button::new("top-limit")
                     .ghost()
                     .small()
-                    .label(format!("Top {}", format::count(limit as u64)))
+                    .label(top_button)
                     .dropdown_caret(true)
                     .dropdown_menu(move |menu, _, _| {
                         let mut menu = menu;
-                        for n in [100usize, 500, 1000, 5000] {
+                        for (n, label) in top_labels.iter() {
+                            let n = *n;
                             let entity = entity.clone();
                             menu = menu.item(
-                                gpui_kit::component::menu::PopupMenuItem::new(format!(
-                                    "Top {}",
-                                    format::count(n as u64)
-                                ))
-                                .checked(limit == n)
-                                .on_click(move |_, _, cx| {
-                                    entity.update(cx, |this, cx| this.set_top_limit(n, cx)).ok();
-                                }),
+                                gpui_kit::component::menu::PopupMenuItem::new(label.clone())
+                                    .checked(limit == n)
+                                    .on_click(move |_, _, cx| {
+                                        entity.update(cx, |this, cx| this.set_top_limit(n, cx)).ok();
+                                    }),
                             );
                         }
                         menu
@@ -928,7 +936,7 @@ impl FastDir {
                 .justify_center()
                 .text_xs()
                 .text_color(theme.muted_foreground)
-                .child("No files to show")
+                .child(self.tr("list.no_files"))
                 .into_any_element()
         } else {
             div()
@@ -1059,7 +1067,7 @@ impl FastDir {
                     )
                     .child(num(COL_SIZE, format::bytes(entry.size)).font_weight(FontWeight::MEDIUM))
                     .child(num(COL_DISK, format::bytes(entry.disk_size)))
-                    .child(num(COL_DATE, format::date(entry.modified)).text_color(muted))
+                    .child(num(COL_DATE, self.date(entry.modified)).text_color(muted))
                     .into_any_element(),
             );
         }
@@ -1145,14 +1153,18 @@ impl FastDir {
                             .w(px(48.))
                             .text_right()
                             .text_color(muted)
-                            .child(format::percent(e.bytes, total)),
+                            .child(format::percent_in(
+                                e.bytes,
+                                total,
+                                &self.settings.locale.language,
+                            )),
                     )
                     .child(
                         div()
                             .w(px(64.))
                             .text_right()
                             .text_color(muted)
-                            .child(format::count(e.files)),
+                            .child(self.count(e.files)),
                     )
                     .into_any_element(),
             );
@@ -1180,10 +1192,10 @@ impl FastDir {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.muted_foreground)
                     .child(div().w(px(10.)))
-                    .child(div().flex_1().min_w(px(50.)).child("Extension"))
-                    .child(div().w(px(70.)).text_right().child("Bytes"))
-                    .child(div().w(px(48.)).text_right().child("%"))
-                    .child(div().w(px(64.)).text_right().child("Files")),
+                    .child(div().flex_1().min_w(px(50.)).child(self.tr("list.ext_col")))
+                    .child(div().w(px(70.)).text_right().child(self.tr("list.bytes_col")))
+                    .child(div().w(px(48.)).text_right().child(self.tr("list.col_pct")))
+                    .child(div().w(px(64.)).text_right().child(self.tr("list.files_col"))),
             )
             .child(
                 div()

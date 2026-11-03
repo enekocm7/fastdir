@@ -6,7 +6,9 @@ impl FastDir {
     pub(super) fn render_status(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let left: SharedString = match &self.phase {
-            Phase::Home => format!("{} drives detected", self.drives.len()).into(),
+            Phase::Home => self
+                .tr_fmt("status.drives", &[("n", &self.count(self.drives.len() as u64))])
+                .into(),
             Phase::Scanning {
                 progress,
                 started,
@@ -18,28 +20,35 @@ impl FastDir {
                 let rate = files as f64 / elapsed.as_secs_f64().max(0.001);
                 let bytes = progress.bytes.load(Ordering::Relaxed);
                 let pct = expected.map(|e| (bytes as f64 / e as f64 * 100.0).min(99.0));
+                let elapsed_s = format::duration(elapsed);
                 match pct {
-                    Some(pct) => format!(
-                        "Scanning… {:.0}% · {}/s · {}",
-                        pct,
-                        format::count(rate as u64),
-                        format::duration(elapsed)
-                    ),
-                    None => format!(
-                        "Scanning… {}/s · {}",
-                        format::count(rate as u64),
-                        format::duration(elapsed)
-                    ),
+                    Some(pct) => self
+                        .tr_fmt(
+                            "status.scanning_pct",
+                            &[
+                                ("pct", &format!("{pct:.0}")),
+                                ("rate", &self.count(rate as u64)),
+                                ("elapsed", &elapsed_s),
+                            ],
+                        )
+                        .into(),
+                    None => self
+                        .tr_fmt(
+                            "status.scanning",
+                            &[
+                                ("rate", &self.count(rate as u64)),
+                                ("elapsed", &elapsed_s),
+                            ],
+                        )
+                        .into(),
                 }
-                .into()
             }
             Phase::Ready if self.is_multi() => {
                 // Folders inside a selected folder are not counted twice.
                 let size: u64 = self.targets().iter().map(|t| t.size).sum();
-                format!(
-                    "{} items selected  ·  {}",
-                    format::count(self.marked.len() as u64),
-                    self.bytes(size)
+                self.tr_fmt(
+                    "status.selected",
+                    &[("n", &self.count(self.marked.len() as u64)), ("size", &self.bytes(size))],
                 )
                 .into()
             }
@@ -51,7 +60,7 @@ impl FastDir {
                         .as_ref()
                         .and_then(|t| t.read().get(&p).map(|n| n.size))
                         .unwrap_or(0);
-                    format!("{}  ·  {}", fs.display(), self.bytes(size))
+                    format!("{}  ·  {}", self.display_fs_path(&fs), self.bytes(size))
                 })
                 .unwrap_or_default()
                 .into(),
@@ -67,26 +76,33 @@ impl FastDir {
                     let free = t.free_bytes().unwrap_or(0);
                     let unknown = t.unknown_bytes().unwrap_or(0);
                     let disk = t.scanned_disk_bytes();
+                    let root = t.root();
+                    let files = self.count(root.files as u64);
+                    let folders = self.count(root.dirs as u64);
                     if unknown > 0 {
-                        format!(
-                            "{} files · {} folders · {} scanned of {} used ({} on disk, {} free, {} unknown)",
-                            format::count(t.root().files as u64),
-                            format::count(t.root().dirs as u64),
-                            self.bytes(scanned),
-                            self.bytes(used),
-                            self.bytes(disk),
-                            self.bytes(free),
-                            self.bytes(unknown),
+                        self.tr_fmt(
+                            "status.drive_full",
+                            &[
+                                ("files", &files),
+                                ("folders", &folders),
+                                ("scanned", &self.bytes(scanned)),
+                                ("used", &self.bytes(used)),
+                                ("disk", &self.bytes(disk)),
+                                ("free", &self.bytes(free)),
+                                ("unknown", &self.bytes(unknown)),
+                            ],
                         )
                     } else {
-                        format!(
-                            "{} files · {} folders · {} scanned of {} used ({} on disk, {} free)",
-                            format::count(t.root().files as u64),
-                            format::count(t.root().dirs as u64),
-                            self.bytes(scanned),
-                            self.bytes(used),
-                            self.bytes(disk),
-                            self.bytes(free),
+                        self.tr_fmt(
+                            "status.drive",
+                            &[
+                                ("files", &files),
+                                ("folders", &folders),
+                                ("scanned", &self.bytes(scanned)),
+                                ("used", &self.bytes(used)),
+                                ("disk", &self.bytes(disk)),
+                                ("free", &self.bytes(free)),
+                            ],
                         )
                     }
                 } else {
@@ -94,23 +110,32 @@ impl FastDir {
                         .drives
                         .iter()
                         .find(|d| t.root_path.starts_with(&d.path));
-                    format!(
-                        "{} files · {} folders · {} ({} on disk){}",
-                        format::count(t.root().files as u64),
-                        format::count(t.root().dirs as u64),
-                        self.bytes(t.root().size),
-                        self.bytes(t.root().disk_size),
-                        drive
-                            .map(|d| format!(" · {} free", self.bytes(d.free)))
-                            .unwrap_or_default(),
+                    let suffix = drive
+                        .map(|d| {
+                            self.tr_fmt("status.free_suffix", &[("free", &self.bytes(d.free))])
+                        })
+                        .unwrap_or_default();
+                    self.tr_fmt(
+                        "status.dir",
+                        &[
+                            ("files", &self.count(t.root().files as u64)),
+                            ("folders", &self.count(t.root().dirs as u64)),
+                            ("size", &self.bytes(t.root().size)),
+                            ("disk", &self.bytes(t.root().disk_size)),
+                            ("suffix", &suffix),
+                        ],
                     )
+                };
+                let suffix = if cancelled {
+                    self.tr("status.incomplete")
+                } else {
+                    ""
                 };
                 format!(
                     "{summary}{}",
-                    format!(
-                        " · scanned in {}{}",
-                        format::duration(elapsed),
-                        if cancelled { " (incomplete)" } else { "" }
+                    self.tr_fmt(
+                        "status.scanned_in",
+                        &[("dur", &format::duration(elapsed)), ("suffix", suffix)],
                     )
                 )
                 .into()
