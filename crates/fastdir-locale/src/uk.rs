@@ -347,6 +347,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "До кошика",
         "set.ops.perm" => "Видалити назавжди",
         "set.ops.deletekey_cap" => "Shift+Delete завжди робить інше.",
+        "set.ops.keep_view" => "Залишатися на поточному елементі після видалення",
+        "set.ops.keep_view_cap" => "Після завершення видалення залишати курсор і прокручення на місці, а не переходити до папки видаленого елемента.",
         "set.ops.lastdest" => "Останнє призначення переміщення",
         "set.ops.notset" => "Ще не задано",
         "set.startup.title" => "Запуск",

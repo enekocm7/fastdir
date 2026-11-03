@@ -361,6 +361,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Přesunout do koše",
         "set.ops.perm" => "Odstranit trvale",
         "set.ops.deletekey_cap" => "Shift+Delete vždy dělá to druhé.",
+        "set.ops.keep_view" => "Zůstat na aktuální položce po smazání",
+        "set.ops.keep_view_cap" => "Po dokončení mazání nechte kurzor a pozici posunutí tam, kde jsou, místo přesunu do složky smazané položky.",
         "set.ops.lastdest" => "Poslední cíl přesunu",
         "set.ops.notset" => "Zatím nenastaveno",
         "set.startup.title" => "Spuštění",

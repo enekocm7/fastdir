@@ -359,6 +359,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Papierkorb",
         "set.ops.perm" => "Endgültig löschen",
         "set.ops.deletekey_cap" => "Shift+Entf bewirkt immer das andere.",
+        "set.ops.keep_view" => "Nach dem Löschen beim aktuellen Element bleiben",
+        "set.ops.keep_view_cap" => "Wenn ein Löschen endet, Cursor und Bildlaufposition dort lassen, statt zum Ordner des gelöschten Elements zu springen.",
         "set.ops.lastdest" => "Letztes Verschiebeziel",
         "set.ops.notset" => "Noch nicht festgelegt",
         "set.startup.title" => "Start",

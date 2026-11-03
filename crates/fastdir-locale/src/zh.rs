@@ -361,6 +361,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "回收",
         "set.ops.perm" => "永久删除",
         "set.ops.deletekey_cap" => "Shift+Delete 始终执行另一操作。",
+        "set.ops.keep_view" => "删除后停留在当前项目",
+        "set.ops.keep_view_cap" => "删除完成后，保持光标和滚动位置不变，而不是跳到已删除项目所在的文件夹。",
         "set.ops.lastdest" => "上次移动目标",
         "set.ops.notset" => "尚未设置",
         "set.startup.title" => "启动",

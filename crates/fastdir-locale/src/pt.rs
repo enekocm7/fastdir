@@ -359,6 +359,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Lixeira",
         "set.ops.perm" => "Excluir permanentemente",
         "set.ops.deletekey_cap" => "Shift+Delete sempre faz o outro.",
+        "set.ops.keep_view" => "Ficar no item atual após excluir",
+        "set.ops.keep_view_cap" => "Quando uma exclusão termina, deixe o cursor e a rolagem onde estão em vez de ir para a pasta do item excluído.",
         "set.ops.lastdest" => "Último destino de movimentação",
         "set.ops.notset" => "Ainda não definido",
         "set.startup.title" => "Inicialização",

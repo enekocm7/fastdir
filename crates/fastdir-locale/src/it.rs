@@ -359,6 +359,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Cestino",
         "set.ops.perm" => "Elimina definitivamente",
         "set.ops.deletekey_cap" => "Shift+Delete fa sempre l'altro.",
+        "set.ops.keep_view" => "Resta sull'elemento corrente dopo un'eliminazione",
+        "set.ops.keep_view_cap" => "Al termine di un'eliminazione, lascia cursore e scorrimento dove sono invece di passare alla cartella dell'elemento eliminato.",
         "set.ops.lastdest" => "Ultima destinazione di spostamento",
         "set.ops.notset" => "Non ancora impostata",
         "set.startup.title" => "Avvio",

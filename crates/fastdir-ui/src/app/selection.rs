@@ -242,6 +242,56 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Like [`Self::tree_changed`], but leaves the cursor and the scroll
+    /// position where the user left them, as long as `previous_fs` (captured
+    /// before the tree changed) is still in the scan. Used by the "stay on the
+    /// current item after a delete" setting, so a delete finishing in the
+    /// background does not pull the view to the deleted item's folder. Falls
+    /// back to `tree_changed(select)` when the cursor itself was deleted or is
+    /// hidden by the active filter.
+    pub(super) fn tree_changed_keeping_selection(
+        &mut self,
+        previous_fs: &std::path::Path,
+        select: Option<NodePath>,
+        cx: &mut Context<Self>,
+    ) {
+        // Look the node up by file-system path: sibling rows shift when
+        // something above them is removed, so the old `NodePath` is stale.
+        let previous = self
+            .tree
+            .as_ref()
+            .and_then(|tree| tree.read().find(previous_fs));
+        let Some(previous) = previous else {
+            self.tree_changed(select, cx);
+            return;
+        };
+        // Node paths shifted, so a multi-selection no longer points anywhere.
+        self.marked.clear();
+        self.selected = None;
+        self.rebuild_rows();
+        self.selected = self.rows.iter().position(|r| r.path == previous);
+        let Some(ix) = self.selected else {
+            // The row is hidden by the active filter: use the normal path so
+            // the cursor stays valid.
+            self.tree_changed(select, cx);
+            return;
+        };
+        // Deliberately no `scroll_to_item`: the viewport stays put.
+        debug_assert_eq!(self.rows[ix].path, previous);
+        self.anchor = self.rows.get(ix).map(|r| r.path.clone());
+        // The largest files may have changed, or a path may have moved.
+        self.top_stale = true;
+        if self.tab == ListTab::TopFiles {
+            self.refresh_top_files();
+        }
+        let sel = self.selection();
+        self.treemap.update(cx, |t, cx| {
+            t.invalidate(cx);
+            t.set_selection(sel, cx);
+        });
+        cx.notify();
+    }
+
     /// Move the cursor in whichever list is showing.
     fn step(&mut self, ix: usize, cx: &mut Context<Self>) {
         if self.tab == ListTab::TopFiles {

@@ -367,6 +367,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Przenieś do Kosza",
         "set.ops.perm" => "Usuń trwale",
         "set.ops.deletekey_cap" => "Shift+Delete zawsze robi to drugie.",
+        "set.ops.keep_view" => "Pozostań na bieżącym elemencie po usunięciu",
+        "set.ops.keep_view_cap" => "Po zakończeniu usuwania zostaw kursor i przewinięcie tam, gdzie są, zamiast przechodzić do folderu usuniętego elementu.",
         "set.ops.lastdest" => "Ostatni cel przenoszenia",
         "set.ops.notset" => "Jeszcze nie ustawiono",
         "set.startup.title" => "Uruchamianie",

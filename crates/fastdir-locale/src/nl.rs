@@ -359,6 +359,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Prullenbak",
         "set.ops.perm" => "Definitief verwijderen",
         "set.ops.deletekey_cap" => "Shift+Delete doet altijd het andere.",
+        "set.ops.keep_view" => "Bij het huidige item blijven na verwijderen",
+        "set.ops.keep_view_cap" => "Laat na een verwijdering de cursor en schuifpositie staan in plaats van naar de map van het verwijderde item te gaan.",
         "set.ops.lastdest" => "Laatste verplaatsbestemming",
         "set.ops.notset" => "Nog niet ingesteld",
         "set.startup.title" => "Opstarten",
