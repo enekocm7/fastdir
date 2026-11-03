@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "embed-resource",
  "fastdir-ui",
@@ -1534,7 +1534,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "fastdir-locale",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir-locale"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "windows-sys 0.61.2",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fastdir-locale",
  "serde",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir-treemap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fastdir-core",
  "rayon",
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fastdir-core",
  "fastdir-locale",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "fastdir-updater"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "semver",
  "serde",
