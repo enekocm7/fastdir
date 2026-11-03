@@ -1,0 +1,12 @@
+# Opt-in nightly-only speedups for local development (CI builds on stable).
+# Use via the aliases in .cargo/config.toml, e.g. `cargo bn` / `cargo rn`.
+#   -Zthreads        parallel rustc frontend
+#   -Zshare-generics reuse generic instantiations from dependencies instead of
+#                    re-monomorphising them in every crate
+# Switching between these flags and plain `cargo build` invalidates the build
+# cache (different rustflags), so stick to one.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-Zthreads=8", "-Zshare-generics=y"]
+
+[target.'cfg(not(windows))']
+rustflags = ["-Zthreads=8", "-Zshare-generics=y"]
