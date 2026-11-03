@@ -157,7 +157,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: FastDir ${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          # Release notes are generated once, by the Windows job.
           files: dist/*
 
   macos:
@@ -217,5 +217,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: FastDir ${{ steps.version.outputs.version }}
-          generate_release_notes: true
+          # Release notes are generated once, by the Windows job.
           files: dist/*
