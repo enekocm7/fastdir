@@ -50,6 +50,7 @@ impl FastDir {
         self.anchor = None;
         self.selected_ext = None;
         self.selected_category = None;
+        self.selected_owner = None;
         self.tab = ListTab::Tree;
         self.filter = Filter::default();
         self.filter_form = FilterForm::default();
@@ -192,6 +193,7 @@ impl FastDir {
         self.marked.clear();
         self.selected_ext = None;
         self.selected_category = None;
+        self.selected_owner = None;
         self.tab = ListTab::Tree;
         self.rebuild_rows();
         self.restore_selected_fs(selected_fs);

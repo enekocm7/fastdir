@@ -226,6 +226,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Mappen",
         "list.col_date" => "Laatste wijziging",
         "list.tree_tab" => "Mappenboom",
+        "list.col_owner" => "Eigenaar",
+        "list.owner_col" => "Eigenaar",
+        "list.by_owner" => "Op eigenaar",
+        "list.unknown_owner" => "(onbekend)",
         "list.top_tab" => "Topbestanden ({n})",
         "list.no_match" => "Geen items komen overeen met het filter",
         "list.empty" => "Deze map is leeg",
@@ -317,6 +321,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Scanthreads",
         "set.scan.threads_cap" => "Wordt gebruikt door de volgende scan (1-64).",
         "set.scan.partial" => "Gedeeltelijke resultaten tonen tijdens scannen",
+        "set.scan.owners" => "Bestandseigenaren verzamelen",
+        "set.scan.owners_cap" => "Legt de eigenaar van elk bestand vast voor de kolom Eigenaar en totalen per gebruiker. Langzamere scans.",
         "set.scan.partial_cap" => {
             "Voltooide mappen en een treemapvoorbeeld verschijnen vóór het einde."
         }
@@ -365,6 +371,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Kolom mappen",
         "set.list.modified_col" => "Kolom laatste wijziging",
         "set.list.disk_col" => "Kolom grootte op schijf",
+        "set.list.owner_col" => "Kolom Eigenaar",
         "tb.menu_hide_empty" => "Lege mappen verbergen",
         "tb.tip_hide_empty" => "Lege mappen verbergen (mappen zonder bestanden)",
         "set.list.hide_empty" => "Lege mappen verbergen",

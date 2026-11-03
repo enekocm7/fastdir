@@ -8,11 +8,9 @@ use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
 use fastdir_core::filter::Filter;
 use fastdir_core::format;
-use std::collections::VecDeque;
-use gpui_kit::component::popover::Popover;
 use fastdir_core::fsops;
 use fastdir_core::integration;
-use fastdir_core::model::{FileEntry, NO_EXT, Node, NodePath, Subtree, Tree};
+use fastdir_core::model::{FileEntry, NO_EXT, NO_OWNER, Node, NodePath, OwnerTotal, Subtree, Tree};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
 use fastdir_settings::{
     DateFormat, DeleteAction, ExtGrouping, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
@@ -28,6 +26,7 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu};
 use gpui_kit::component::notification::{Notification, NotificationType};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::scroll::Scrollbar;
@@ -42,6 +41,7 @@ use gpui_kit::*;
 use parking_lot::RwLock;
 use std::cell::Cell;
 use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::net::TcpListener;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -226,6 +226,7 @@ const COL_ITEMS: f32 = 82.;
 const COL_FILES: f32 = 82.;
 const COL_DIRS: f32 = 74.;
 const COL_DATE: f32 = 128.;
+const COL_OWNER: f32 = 128.;
 const COL_DELTA: f32 = 100.;
 const COL_DELTA_PCT: f32 = 70.;
 const COL_STATUS: f32 = 84.;
@@ -258,6 +259,8 @@ fn treemap_render_options(settings: &Settings) -> RenderOptions {
     RenderOptions {
         highlight: None,
         highlight_category: None,
+        highlight_owner: None,
+        root_owner: NO_OWNER,
         show_free: t.show_free_space,
         show_unknown: t.show_unknown,
         use_disk: t.disk_size,
@@ -293,7 +296,13 @@ enum ListTab {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ExtRow {
     Category(FileCategory),
-    Extension { ext: u16 },
+    Extension {
+        ext: u16,
+    },
+    /// One row of the per-user totals view.
+    Owner {
+        owner: u16,
+    },
 }
 /// What a click does to the selection.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -432,6 +441,13 @@ pub struct FastDir {
     anchor: Option<NodePath>,
     /// Extension rank highlighted in the treemap, picked from the ext list.
     selected_ext: Option<u16>,
+    /// Owner highlighted in the treemap, picked from the per-user totals view.
+    /// Also filters the directory list while it is set.
+    selected_owner: Option<u16>,
+    /// Per-user totals rows, refreshed with the panel.
+    owner_rows: Vec<OwnerTotal>,
+    /// Sort column and direction of the per-user totals view.
+    owner_sort: (SortKey, bool),
     /// Category highlighted in the treemap, picked from the category list.
     selected_category: Option<FileCategory>,
     sort: (SortKey, bool),
@@ -557,7 +573,9 @@ impl FastDir {
         // `fastdir <folder>` scans right away, `fastdir <scan>.json` opens a
         // saved scan; otherwise the startup mode decides: re-scan the last
         // path, or open the drive overview.
-        let initial = initial_path.as_deref().and_then(open_scan::classify_open_path);
+        let initial = initial_path
+            .as_deref()
+            .and_then(open_scan::classify_open_path);
         let startup_path = match &initial {
             Some(open_scan::OpenTarget::Folder(path)) => Some(path.clone()),
             Some(open_scan::OpenTarget::SavedScan(_)) => None,
@@ -568,8 +586,9 @@ impl FastDir {
                 .filter(|p| p.is_dir()),
         };
         // "Open nothing" shows a blank home until the user scans or goes home.
-        let home_drives =
-            initial.is_some() || startup_path.is_some() || settings.startup.mode != StartupMode::Empty;
+        let home_drives = initial.is_some()
+            || startup_path.is_some()
+            || settings.startup.mode != StartupMode::Empty;
         if let Some(path) = startup_path {
             cx.defer_in(window, move |this: &mut Self, window, cx| {
                 this.start_scan(path, window, cx)
@@ -623,6 +642,9 @@ impl FastDir {
             marked: BTreeSet::new(),
             anchor: None,
             selected_ext: None,
+            selected_owner: None,
+            owner_rows: Vec::new(),
+            owner_sort: (SortKey::Size, true),
             selected_category: None,
             sort,
             list_scroll: UniformListScrollHandle::new(),
@@ -665,10 +687,8 @@ impl FastDir {
                     let Some(path) = request.flatten() else {
                         continue;
                     };
-                    this.update_in(cx, |this, window, cx| {
-                        this.open_path_arg(path, window, cx)
-                    })
-                    .ok();
+                    this.update_in(cx, |this, window, cx| this.open_path_arg(path, window, cx))
+                        .ok();
                 }
             }));
         }
@@ -756,13 +776,12 @@ impl FastDir {
 
     /// Toggle between extension/category colours and the age scale.
     pub(super) fn toggle_treemap_age_colors(&mut self, cx: &mut Context<Self>) {
-        self.settings.treemap.color_mode = if self.settings.treemap.color_mode
-            == TreemapColorMode::Age
-        {
-            TreemapColorMode::Extension
-        } else {
-            TreemapColorMode::Age
-        };
+        self.settings.treemap.color_mode =
+            if self.settings.treemap.color_mode == TreemapColorMode::Age {
+                TreemapColorMode::Extension
+            } else {
+                TreemapColorMode::Age
+            };
         self.settings.save();
         self.refresh_treemap_options(cx);
         cx.notify();
@@ -778,6 +797,7 @@ impl FastDir {
             follow_junctions: s.follow_junctions,
             cross_volumes: s.cross_volumes,
             threads: s.thread_count.map(|n| (n as usize).clamp(1, 64)),
+            collect_owners: s.collect_owners,
         }
     }
 
@@ -840,12 +860,7 @@ impl FastDir {
 
     /// Switch the interface language, persist it and repaint everything
     /// (including the treemap hover labels, which cache their text).
-    pub(super) fn set_language(
-        &mut self,
-        code: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn set_language(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.settings.locale.language = code.to_string();
         self.settings.save();
         let placeholder = self.mod_tip("search.placeholder");
@@ -1025,9 +1040,7 @@ impl FastDir {
                         .text_ellipsis()
                         .text_xs()
                         .text_color(theme.warning)
-                        .child(
-                            self.tr_fmt("banner.limited", &[("errors", &self.count(errors))]),
-                        ),
+                        .child(self.tr_fmt("banner.limited", &[("errors", &self.count(errors))])),
                 )
                 .when(!elevated, |d| {
                     d.child(

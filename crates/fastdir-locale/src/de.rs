@@ -226,6 +226,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Ordner",
         "list.col_date" => "Letzte Änderung",
         "list.tree_tab" => "Verzeichnisbaum",
+        "list.col_owner" => "Besitzer",
+        "list.owner_col" => "Besitzer",
+        "list.by_owner" => "Nach Besitzer",
+        "list.unknown_owner" => "(unbekannt)",
         "list.top_tab" => "Größte Dateien ({n})",
         "list.no_match" => "Keine Elemente entsprechen dem Filter",
         "list.empty" => "Dieser Ordner ist leer",
@@ -317,6 +321,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Scan-Threads",
         "set.scan.threads_cap" => "Wird vom nächsten Scan verwendet (1-64).",
         "set.scan.partial" => "Teilergebnisse während des Scans anzeigen",
+        "set.scan.owners" => "Dateibesitzer erfassen",
+        "set.scan.owners_cap" => "Speichert den Besitzer jeder Datei für die Besitzer-Spalte und Summen pro Benutzer. Langsamere Scans.",
         "set.scan.partial_cap" => {
             "Fertige Ordner und eine Treemap-Vorschau erscheinen vor Scanende."
         }
@@ -365,6 +371,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Ordnerspalte",
         "set.list.modified_col" => "Spalte „Letzte Änderung“",
         "set.list.disk_col" => "Spalte „Größe auf Datenträger“",
+        "set.list.owner_col" => "Besitzer-Spalte",
         "tb.menu_hide_empty" => "Leere Ordner ausblenden",
         "tb.tip_hide_empty" => "Leere Ordner ausblenden (Ordner ohne Dateien)",
         "set.list.hide_empty" => "Leere Ordner ausblenden",

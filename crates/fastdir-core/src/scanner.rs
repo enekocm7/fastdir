@@ -12,7 +12,7 @@
 //! Anything that is constant for a volume (cluster size, whether the file-ID
 //! class works) is looked up once per scan and passed down, never per folder.
 
-use crate::model::{Arena, DirBuilder, Node, Subtree, Tree};
+use crate::model::{Arena, DirBuilder, NO_OWNER, Node, OwnerTable, Subtree, Tree};
 use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 #[cfg(windows)]
@@ -84,6 +84,213 @@ impl LinkTracker {
     }
 }
 
+/// Resolves and interns the owning account of scanned entries.
+///
+/// Every arena of one scan gets a snapshot of the same table, so the `u16`
+/// owner indices stored with each block line up across top-level subtrees.
+/// Lookups are cached: a whole scan almost always sees a handful of accounts.
+struct OwnerCollector {
+    /// uid -> user name (Unix), or raw SID -> display name (Windows).
+    #[cfg(unix)]
+    names: Mutex<HashMap<u32, Box<str>>>,
+    #[cfg(windows)]
+    names: Mutex<HashMap<Box<str>, Box<str>>>,
+    #[cfg(not(any(unix, windows)))]
+    names: Mutex<HashMap<u32, Box<str>>>,
+    table: Mutex<OwnerTable>,
+}
+
+impl OwnerCollector {
+    fn new() -> Self {
+        Self {
+            names: Mutex::new(HashMap::new()),
+            table: Mutex::new(OwnerTable::default()),
+        }
+    }
+
+    /// The table as it stands now, for one finished arena.
+    fn snapshot(&self) -> OwnerTable {
+        self.table.lock().clone()
+    }
+
+    /// The owner of the entry at `path` (whose listing reported `uid`).
+    #[cfg(unix)]
+    fn owner(&self, _path: &Path, uid: u32) -> u16 {
+        if uid == u32::MAX {
+            return NO_OWNER;
+        }
+        let mut names = self.names.lock();
+        let name = names.entry(uid).or_insert_with(|| user_name(uid));
+        self.table.lock().intern(name)
+    }
+
+    /// The owner of the entry at `path`.
+    #[cfg(windows)]
+    fn owner(&self, path: &Path, _uid: u32) -> u16 {
+        let Some((sid, display)) = owner_of_path(path) else {
+            return NO_OWNER;
+        };
+        let mut names = self.names.lock();
+        if !names.contains_key(&sid) {
+            names.insert(sid.clone(), display);
+        }
+        self.table.lock().intern(&names[&sid])
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn owner(&self, _path: &Path, _uid: u32) -> u16 {
+        NO_OWNER
+    }
+
+    /// The owner of the scanned root folder itself.
+    #[cfg(unix)]
+    fn owner_of_root(&self, path: &Path) -> u16 {
+        use std::os::unix::fs::MetadataExt;
+        let uid = std::fs::metadata(path).map(|m| m.uid()).unwrap_or(u32::MAX);
+        self.owner(path, uid)
+    }
+
+    /// The owner of the scanned root folder itself.
+    #[cfg(not(unix))]
+    fn owner_of_root(&self, path: &Path) -> u16 {
+        self.owner(path, 0)
+    }
+}
+
+/// The user name for a Unix uid, or the raw uid when it cannot be resolved.
+#[cfg(unix)]
+fn user_name(uid: u32) -> Box<str> {
+    use std::ffi::CStr;
+    let mut buf = vec![0u8; 1024];
+    loop {
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+        let rc = unsafe {
+            libc::getpwuid_r(
+                uid,
+                &mut pwd,
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &mut result,
+            )
+        };
+        if rc == libc::ERANGE && buf.len() < (1 << 20) {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        if rc != 0 || result.is_null() || pwd.pw_name.is_null() {
+            return uid.to_string().into();
+        }
+        return unsafe { CStr::from_ptr(pwd.pw_name) }
+            .to_string_lossy()
+            .into_owned()
+            .into();
+    }
+}
+
+/// The raw SID (used as the cache key) and display name of a file's owner.
+/// The name is `DOMAIN\user`, or the raw SID when the account cannot be
+/// resolved (deleted accounts, unreachable domain controllers).
+#[cfg(windows)]
+fn owner_of_path(path: &Path) -> Option<(Box<str>, Box<str>)> {
+    use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{LookupAccountSidW, OWNER_SECURITY_INFORMATION, PSID};
+
+    let wide = wide_z(path);
+    let mut sid: PSID = std::ptr::null_mut();
+    let mut descriptor = std::ptr::null_mut();
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut sid,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != 0 || sid.is_null() {
+        if !descriptor.is_null() {
+            unsafe { LocalFree(descriptor) };
+        }
+        return None;
+    }
+
+    let mut raw: *mut u16 = std::ptr::null_mut();
+    let sid_string: Option<Box<str>> = if unsafe { ConvertSidToStringSidW(sid, &mut raw) } != 0 {
+        let text = wide_to_string(raw);
+        unsafe { LocalFree(raw.cast()) };
+        Some(text.into())
+    } else {
+        None
+    };
+
+    // Resolve the SID to `DOMAIN\user`; buffer sizes are in UTF-16 units.
+    let mut name = vec![0u16; 256];
+    let mut domain = vec![0u16; 256];
+    let mut name_len = name.len() as u32;
+    let mut domain_len = domain.len() as u32;
+    let mut kind = 0;
+    let mut ok = unsafe {
+        LookupAccountSidW(
+            std::ptr::null(),
+            sid,
+            name.as_mut_ptr(),
+            &mut name_len,
+            domain.as_mut_ptr(),
+            &mut domain_len,
+            &mut kind,
+        )
+    };
+    if ok == 0
+        && std::io::Error::last_os_error().raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32)
+    {
+        name.resize(name_len as usize, 0);
+        domain.resize(domain_len as usize, 0);
+        name_len = name.len() as u32;
+        domain_len = domain.len() as u32;
+        ok = unsafe {
+            LookupAccountSidW(
+                std::ptr::null(),
+                sid,
+                name.as_mut_ptr(),
+                &mut name_len,
+                domain.as_mut_ptr(),
+                &mut domain_len,
+                &mut kind,
+            )
+        };
+    }
+    let resolved: Option<Box<str>> = (ok != 0).then(|| {
+        let user = String::from_utf16_lossy(&name[..name_len as usize]);
+        let domain = String::from_utf16_lossy(&domain[..domain_len as usize]);
+        if domain.is_empty() {
+            user.into()
+        } else {
+            format!("{domain}\\{user}").into()
+        }
+    });
+
+    unsafe { LocalFree(descriptor) };
+    let sid = sid_string?;
+    Some((sid.clone(), resolved.unwrap_or(sid)))
+}
+
+/// Decode a NUL-terminated UTF-16 buffer into a string.
+#[cfg(windows)]
+fn wide_to_string(wide: *const u16) -> String {
+    let mut len = 0usize;
+    while unsafe { *wide.add(len) } != 0 {
+        len += 1;
+    }
+    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(wide, len) })
+}
+
 /// What to scan and with how many threads. Built by the UI from the
 /// persisted settings; the scanner itself never reads global state.
 ///
@@ -109,6 +316,11 @@ pub struct ScanOptions {
     /// Scan threads, or `None` for automatic (`cores * 2`, clamped 4..=64).
     /// A fixed number keeps a slow HDD or network share responsive.
     pub threads: Option<usize>,
+    /// Record the owning account of every entry (the Owner column and the
+    /// per-user totals). Off by default: on Windows this needs one extra
+    /// security query per file, which is expensive, while Unix gets the uid
+    /// from the listing it already does.
+    pub collect_owners: bool,
 }
 
 impl ScanOptions {
@@ -214,6 +426,8 @@ struct ScanContext<'a> {
     /// Cached facts about other volumes reached through followed junctions,
     /// keyed by [`volume_key`].
     volumes: Mutex<HashMap<String, Arc<Volume>>>,
+    /// Owner resolution, present only when the scan collects owners.
+    owners: Option<OwnerCollector>,
 }
 
 impl<'a> ScanContext<'a> {
@@ -235,6 +449,7 @@ impl<'a> ScanContext<'a> {
             root_volume,
             root_info,
             volumes: Mutex::new(HashMap::new()),
+            owners: options.collect_owners.then(OwnerCollector::new),
         }
     }
 
@@ -367,7 +582,14 @@ pub fn scan_live(
         };
         let mut arena = Arena::default();
         let root_node = node.commit(&mut arena);
-        let mut sub = Subtree::new(arena, &name, root_node);
+        let mut sub = match &ctx.owners {
+            Some(owners) => {
+                let root_owner = owners.owner_of_root(&root);
+                arena.set_owners(owners.snapshot());
+                Subtree::new_owned(arena, &name, root_node, root_owner)
+            }
+            None => Subtree::new(arena, &name, root_node),
+        };
         sub.root_mut().set_expanded(true);
         // Keep the category table the caller set on the empty tree (the UI
         // applies `[categories]` overrides there before the scan starts).
@@ -389,7 +611,14 @@ pub fn scan_live(
                 &ctx,
                 volume,
             );
-            let sub = Subtree::new(arena.into_inner(), &sub.name, child);
+            let mut arena = arena.into_inner();
+            let sub = match &ctx.owners {
+                Some(owners) => {
+                    arena.set_owners(owners.snapshot());
+                    Subtree::new_owned(arena, &sub.name, child, sub.owner)
+                }
+                None => Subtree::new(arena, &sub.name, child),
+            };
             live.write().adopt(&[], sub);
         });
 
@@ -423,13 +652,25 @@ pub fn scan_subtree(path: &Path, options: &ScanOptions) -> Subtree {
 /// scan itself, so it is freed before the caller builds anything on top.
 fn scan_detached(path: &Path, name: &str, progress: &Progress, options: &ScanOptions) -> Subtree {
     let arena = Mutex::new(Arena::default());
+    let owners;
     let root = {
         let links = LinkTracker::default();
         let visited = Mutex::new(HashSet::new());
         let ctx = ScanContext::for_scan(path, options, &visited);
+        owners = ctx
+            .owners
+            .as_ref()
+            .map(|collector| (collector.owner_of_root(path), collector.snapshot()));
         scan_dir(path, 0, progress, &links, &arena, &ctx, &ctx.root_info)
     };
-    Subtree::new(arena.into_inner(), name, root)
+    let mut arena = arena.into_inner();
+    match owners {
+        Some((root_owner, table)) => {
+            arena.set_owners(table);
+            Subtree::new_owned(arena, name, root, root_owner)
+        }
+        None => Subtree::new(arena, name, root),
+    }
 }
 
 /// Allocated size of a single file (compressed/sparse aware where the OS
@@ -472,6 +713,8 @@ struct Subdir {
     /// The volume of a followed junction's target; `None` means the same
     /// volume as the parent.
     volume: Option<Arc<Volume>>,
+    /// Owner index in the scan's table ([`NO_OWNER`] unless collected).
+    owner: u16,
 }
 
 /// Entries listed for one directory, before its sub-directories are scanned.
@@ -502,6 +745,23 @@ fn list_one(
     let mut subdirs: Vec<Subdir> = Vec::new();
     let mut files: u64 = 0;
     let mut bytes: u64 = 0;
+    // One owner query per listed entry, and only when the scan asked for it.
+    let owner_of = |name: &str, uid: u32| match &ctx.owners {
+        Some(collector) if options.collect_owners => {
+            #[cfg(windows)]
+            {
+                collector.owner(&path.join(name), uid)
+            }
+            // Unix gets the uid from the listing, so no path is needed (and
+            // no allocation per entry).
+            #[cfg(not(windows))]
+            {
+                let _ = name;
+                collector.owner(Path::new(""), uid)
+            }
+        }
+        _ => NO_OWNER,
+    };
     let ok = list_dir(path, volume, |entry| match entry {
         Entry::File {
             name,
@@ -510,6 +770,7 @@ fn list_one(
             modified,
             file_id,
             hidden,
+            uid,
         } => {
             if hidden && options.skip_hidden_system {
                 return;
@@ -519,18 +780,20 @@ fn list_one(
             }
             files += 1;
             bytes += size;
+            let owner = owner_of(&name, uid);
             // A zero-length file shares no blocks, so its link count is
             // irrelevant; skip it to keep the tracker small.
             if size > 0 && links.is_duplicate(file_id) {
-                node.add_hard_link(&name, modified);
+                node.add_hard_link_owned(&name, modified, owner);
             } else {
-                node.add_file(&name, size, disk_size, modified);
+                node.add_file_owned(&name, size, disk_size, modified, owner);
             }
         }
         Entry::Dir {
             name,
             modified,
             hidden,
+            uid,
         } => {
             if hidden && options.skip_hidden_system {
                 return;
@@ -538,17 +801,19 @@ fn list_one(
             if options.is_excluded(&name) {
                 return;
             }
+            let owner = owner_of(&name, uid);
             // On Windows a mount point is a reparse point (`Entry::Link`), so a
             // plain directory is always on its parent's volume: skip the check.
             if cfg!(not(windows)) && !options.cross_volumes && !ctx.same_volume(&path.join(&*name))
             {
                 // A mount point on another volume: list it but do not enter.
-                node.add_empty_dir(&name, modified);
+                node.add_empty_dir_owned(&name, modified, owner);
             } else {
                 subdirs.push(Subdir {
                     name,
                     modified,
                     volume: None,
+                    owner,
                 });
             }
         }
@@ -556,6 +821,7 @@ fn list_one(
             name,
             modified,
             hidden,
+            uid,
         } => {
             if hidden && options.skip_hidden_system {
                 return;
@@ -563,6 +829,7 @@ fn list_one(
             if options.is_excluded(&name) {
                 return;
             }
+            let owner = owner_of(&name, uid);
             // Junctions / symlinked dirs: list them but never follow unless
             // the user opted in (with a warning about double counting). Even
             // then each target is entered at most once, so a loop (A -> B ->
@@ -577,8 +844,9 @@ fn list_one(
                     name,
                     modified,
                     volume: Some(target),
+                    owner,
                 }),
-                None => node.add_empty_dir(&name, modified),
+                None => node.add_empty_dir_owned(&name, modified, owner),
             }
         }
     });
@@ -612,7 +880,7 @@ fn scan_dir(
     let Listing { mut node, subdirs } = list_one(path, modified, progress, links, ctx, volume);
 
     if !subdirs.is_empty() {
-        let children: Vec<(Box<str>, Node)> = subdirs
+        let children: Vec<(Box<str>, Node, u16)> = subdirs
             .into_par_iter()
             .map(|sub| {
                 let child_path = path.join(&*sub.name);
@@ -626,11 +894,11 @@ fn scan_dir(
                     ctx,
                     child_volume,
                 );
-                (sub.name, child)
+                (sub.name, child, sub.owner)
             })
             .collect();
-        for (name, child) in children {
-            node.add_dir(&name, child);
+        for (name, child, owner) in children {
+            node.add_dir_owned(&name, child, owner);
         }
     }
     // Sort outside the lock; only the copy into the arena is serialised.
@@ -648,18 +916,23 @@ enum Entry {
         file_id: u128,
         /// Hidden or system (Windows attributes, dot-file on Unix).
         hidden: bool,
+        /// Owning uid on Unix (`u32::MAX` when unknown); unused on Windows,
+        /// where the owner is queried from the path.
+        uid: u32,
     },
     Dir {
         name: Box<str>,
         modified: i64,
         /// Hidden or system (Windows attributes, dot-file on Unix).
         hidden: bool,
+        uid: u32,
     },
     Link {
         name: Box<str>,
         modified: i64,
         /// Hidden or system (Windows attributes, dot-file on Unix).
         hidden: bool,
+        uid: u32,
     },
 }
 
@@ -929,12 +1202,14 @@ fn read_by_id(
                             name,
                             modified,
                             hidden,
+                            uid: 0,
                         });
                     } else {
                         f(Entry::Dir {
                             name,
                             modified,
                             hidden,
+                            uid: 0,
                         });
                     }
                 } else {
@@ -970,6 +1245,7 @@ fn read_by_id(
                         modified,
                         file_id,
                         hidden,
+                        uid: 0,
                     });
                 }
             }
@@ -1036,12 +1312,14 @@ fn list_dir_find(path: &Path, cluster: u64, mut f: impl FnMut(Entry)) -> bool {
                             name,
                             modified,
                             hidden,
+                            uid: 0,
                         });
                     } else {
                         f(Entry::Dir {
                             name,
                             modified,
                             hidden,
+                            uid: 0,
                         });
                     }
                 } else {
@@ -1060,6 +1338,7 @@ fn list_dir_find(path: &Path, cluster: u64, mut f: impl FnMut(Entry)) -> bool {
                         modified,
                         file_id: 0,
                         hidden,
+                        uid: 0,
                     });
                 }
             }
@@ -1103,18 +1382,28 @@ fn list_dir(path: &Path, _volume: &Volume, mut f: impl FnMut(Entry)) -> bool {
         };
         #[cfg(not(unix))]
         let (disk_size, file_id) = (size, 0);
+        // The owner uid comes for free from the metadata above.
+        #[cfg(unix)]
+        let uid = {
+            use std::os::unix::fs::MetadataExt;
+            meta.as_ref().map(|m| m.uid()).unwrap_or(u32::MAX)
+        };
+        #[cfg(not(unix))]
+        let uid = 0;
         let hidden = name.starts_with('.');
         if ft.is_symlink() {
             f(Entry::Link {
                 name,
                 modified,
                 hidden,
+                uid,
             });
         } else if ft.is_dir() {
             f(Entry::Dir {
                 name,
                 modified,
                 hidden,
+                uid,
             });
         } else {
             f(Entry::File {
@@ -1124,6 +1413,7 @@ fn list_dir(path: &Path, _volume: &Volume, mut f: impl FnMut(Entry)) -> bool {
                 modified,
                 file_id,
                 hidden,
+                uid,
             });
         }
     }
@@ -1237,6 +1527,73 @@ mod tests {
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].size, 0);
         assert_eq!(links[0].disk_size, 0);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn owners_are_collected_only_when_asked() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("a.txt"), b"hello").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
+
+        let plain = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
+        assert!(!plain.tree.has_owners());
+
+        let options = ScanOptions {
+            collect_owners: true,
+            ..ScanOptions::default()
+        };
+        let owned = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        let tree = &owned.tree;
+        assert!(tree.has_owners(), "owners were collected");
+        // Every file got an owner and the per-user totals add up.
+        let totals = tree.owner_totals();
+        assert_eq!(totals.iter().map(|t| t.size).sum::<u64>(), 15);
+        assert_eq!(totals.iter().map(|t| t.files).sum::<u64>(), 2);
+        let a = tree.find(&dir.join("a.txt")).unwrap();
+        assert_ne!(tree.owner_at(&a), crate::model::NO_OWNER);
+        assert!(tree.owner_name(tree.owner_at(&a)).is_some());
+        // The root folder's own owner is recorded too.
+        assert!(tree.owner_name(tree.root_owner()).is_some());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_live_keeps_owner_indices_aligned_across_folders() {
+        let dir = temp_dir();
+        std::fs::create_dir(dir.join("one")).unwrap();
+        std::fs::write(dir.join("one/a.bin"), vec![0u8; 7]).unwrap();
+        std::fs::create_dir(dir.join("two")).unwrap();
+        std::fs::write(dir.join("two/b.bin"), vec![0u8; 11]).unwrap();
+
+        let options = ScanOptions {
+            collect_owners: true,
+            ..ScanOptions::default()
+        };
+        let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
+        scan_live(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            live.clone(),
+            &options,
+        );
+        let tree = live.read();
+        assert!(tree.has_owners());
+        // Both files must resolve to the same account (the test user), so
+        // the indices from the separate top-level arenas line up.
+        let a = tree.find(&dir.join("one/a.bin")).unwrap();
+        let b = tree.find(&dir.join("two/b.bin")).unwrap();
+        assert_eq!(tree.owner_at(&a), tree.owner_at(&b));
+        let totals = tree.owner_totals();
+        assert_eq!(totals.iter().map(|t| t.size).sum::<u64>(), 18);
+        drop(tree);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

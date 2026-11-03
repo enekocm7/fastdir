@@ -12,6 +12,9 @@
 //!   its block by a `u32` id.
 //! - Every name lives in a shared, append-only list of 1 MiB string chunks; a
 //!   node stores only a `u32` offset and a 10-bit length into it.
+//! - Owners (an opt-in scan setting) live per block in a side array of `u16`
+//!   indices into a small owner table. A default scan allocates neither, so
+//!   `Node` stays 40 bytes.
 //!
 //! The scanner writes each directory's block straight into the arena when the
 //! directory is done, so there is no second copy of the tree at any point.
@@ -24,6 +27,60 @@ use std::path::{Path, PathBuf};
 
 /// No extension (directories, or files without a dot).
 pub const NO_EXT: u16 = u16::MAX;
+
+/// Sentinel owner index: no owner was collected, or it is unknown (for
+/// example because the account could not be resolved).
+pub const NO_OWNER: u16 = u16::MAX;
+
+/// The owning accounts seen by one scan, as display names: `DOMAIN\user` on
+/// Windows, the user name on Unix, or the raw SID / uid when the account
+/// could not be resolved.
+///
+/// Nodes do not carry owner names: each block of children has an optional
+/// parallel array of `u16` indices into this table (see [`Arena`]), and the
+/// table itself is empty unless the scan opted into owner collection. A
+/// default scan therefore pays nothing at all.
+#[derive(Clone, Debug, Default)]
+pub struct OwnerTable {
+    names: Vec<Box<str>>,
+    index: HashMap<Box<str>, u16>,
+}
+
+impl OwnerTable {
+    /// No owners collected yet.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    /// Number of distinct owners.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    /// One owner's display name, by index.
+    #[inline]
+    pub fn name(&self, index: u16) -> Option<&str> {
+        self.names.get(index as usize).map(|n| &**n)
+    }
+
+    /// The index of `name`, adding it when new. Returns [`NO_OWNER`] when the
+    /// table is full (more than 65534 distinct owners in one scan).
+    pub fn intern(&mut self, name: &str) -> u16 {
+        if let Some(&index) = self.index.get(name) {
+            return index;
+        }
+        if self.names.len() >= NO_OWNER as usize {
+            return NO_OWNER;
+        }
+        let index = self.names.len() as u16;
+        let stored: Box<str> = name.into();
+        self.names.push(stored.clone());
+        self.index.insert(stored, index);
+        index
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -256,9 +313,15 @@ fn sort_by_size<'a>(children: &mut [Node], name: impl Fn(&Node) -> &'a str) {
 #[derive(Debug, Default)]
 pub struct Arena {
     blocks: Vec<Box<[Node]>>,
+    /// Optional owner index for every node in `blocks`, parallel to it. The
+    /// outer vector (and each inner array) only exists once a scan collects
+    /// owners, so the default scan allocates nothing here.
+    block_owners: Option<Vec<Option<Box<[u16]>>>>,
     /// Ids of emptied blocks, reused before growing `blocks`.
     free_blocks: Vec<u32>,
     chunks: Vec<String>,
+    /// Distinct owners referenced by `block_owners`.
+    owners: OwnerTable,
 }
 
 #[inline]
@@ -303,34 +366,108 @@ impl Arena {
         &self.blocks[node.block as usize]
     }
 
+    /// The owners referenced by this tree (empty unless they were collected).
+    #[inline]
+    pub fn owners(&self) -> &OwnerTable {
+        &self.owners
+    }
+
+    /// Replace the owner table, e.g. with the scan's shared snapshot.
+    pub fn set_owners(&mut self, owners: OwnerTable) {
+        self.owners = owners;
+    }
+
+    /// The owner index of child `index` of the block `id`, if known.
+    #[inline]
+    fn owner_in(&self, id: u32, index: usize) -> u16 {
+        self.block_owners
+            .as_ref()
+            .and_then(|blocks| blocks.get(id as usize))
+            .and_then(|owners| owners.as_ref())
+            .and_then(|owners| owners.get(index).copied())
+            .unwrap_or(NO_OWNER)
+    }
+
+    /// The owner indices of a whole block, if they were collected.
+    #[inline]
+    fn owners_of(&self, id: u32) -> Option<&[u16]> {
+        self.block_owners
+            .as_ref()
+            .and_then(|blocks| blocks.get(id as usize))
+            .and_then(|owners| owners.as_ref())
+            .map(|owners| &**owners)
+    }
+
     /// Store a block of children and return its id ([`NO_BLOCK`] if empty).
-    fn push_block(&mut self, nodes: Box<[Node]>) -> u32 {
+    fn push_block(&mut self, nodes: Box<[Node]>, owners: Option<Box<[u16]>>) -> u32 {
         if nodes.is_empty() {
             return NO_BLOCK;
         }
-        if let Some(id) = self.free_blocks.pop() {
-            self.blocks[id as usize] = nodes;
-            return id;
-        }
-        let id = u32::try_from(self.blocks.len())
-            .ok()
-            .filter(|&id| id != NO_BLOCK)
-            .expect("too many directories");
-        self.blocks.push(nodes);
+        let id = match self.free_blocks.pop() {
+            Some(id) => id,
+            None => {
+                let id = u32::try_from(self.blocks.len())
+                    .ok()
+                    .filter(|&id| id != NO_BLOCK)
+                    .expect("too many directories");
+                self.blocks.push(Box::default());
+                id
+            }
+        };
+        self.set_block(id, nodes, owners);
         id
     }
 
+    /// Store one block's children and (optional) owner indices.
+    fn set_block(&mut self, id: u32, nodes: Box<[Node]>, owners: Option<Box<[u16]>>) {
+        let id = id as usize;
+        self.blocks[id] = nodes;
+        match owners {
+            Some(owners) => {
+                debug_assert_eq!(owners.len(), self.blocks[id].len());
+                let blocks = self
+                    .block_owners
+                    .get_or_insert_with(|| vec![None; self.blocks.len()]);
+                if blocks.len() <= id {
+                    blocks.resize_with(id + 1, || None);
+                }
+                blocks[id] = Some(owners);
+            }
+            None => {
+                if let Some(blocks) = &mut self.block_owners
+                    && let Some(slot) = blocks.get_mut(id)
+                {
+                    *slot = None;
+                }
+            }
+        }
+    }
+
     /// Replace the children of `dir` with `nodes`, reusing its block id.
-    fn set_children(&mut self, dir: &mut Node, nodes: Vec<Node>) {
+    fn set_children(&mut self, dir: &mut Node, nodes: Vec<Node>, owners: Option<Box<[u16]>>) {
         if dir.block == NO_BLOCK {
-            dir.block = self.push_block(nodes.into_boxed_slice());
+            dir.block = self.push_block(nodes.into_boxed_slice(), owners);
         } else if nodes.is_empty() {
-            self.blocks[dir.block as usize] = Box::default();
-            self.free_blocks.push(dir.block);
+            let id = dir.block;
+            self.blocks[id as usize] = Box::default();
+            if let Some(blocks) = &mut self.block_owners
+                && let Some(slot) = blocks.get_mut(id as usize)
+            {
+                *slot = None;
+            }
+            self.free_blocks.push(id);
             dir.block = NO_BLOCK;
         } else {
-            self.blocks[dir.block as usize] = nodes.into_boxed_slice();
+            self.set_block(dir.block, nodes.into_boxed_slice(), owners);
         }
+    }
+
+    /// Take a block's owner indices out for editing (re-inserted by
+    /// [`Self::set_children`]).
+    fn take_owners(&mut self, id: u32) -> Option<Vec<u16>> {
+        let blocks = self.block_owners.as_mut()?;
+        let slot = blocks.get_mut(id as usize)?;
+        slot.take().map(|owners| owners.into_vec())
     }
 
     /// Free every block below `node`, calling `f` for each node in its
@@ -343,6 +480,11 @@ impl Arena {
                 continue;
             }
             let block = std::mem::take(&mut self.blocks[id as usize]);
+            if let Some(blocks) = &mut self.block_owners
+                && let Some(slot) = blocks.get_mut(id as usize)
+            {
+                *slot = None;
+            }
             self.free_blocks.push(id);
             for c in block.iter() {
                 f(c);
@@ -351,24 +493,51 @@ impl Arena {
         }
     }
 
+    /// Map every owner index of `src` into this arena's table (an identity
+    /// map when both tables are the scan's shared snapshot).
+    fn owner_map(&mut self, src: &OwnerTable) -> Vec<u16> {
+        if self.owners.len() == src.len()
+            && (0..src.len()).all(|i| self.owners.name(i as u16) == src.name(i as u16))
+        {
+            return (0..src.len() as u16).collect();
+        }
+        src.names
+            .iter()
+            .map(|name| self.owners.intern(name))
+            .collect()
+    }
+
     /// Copy `node` and its subtree from `src` into this arena, re-storing its
     /// names here. Returns the node as it is stored in this arena.
-    fn import(&mut self, src: &mut Arena, node: &Node) -> Node {
+    fn import(&mut self, src: &mut Arena, node: &Node, map: &[u16]) -> Node {
         let mut n = *node;
         self.set_name(&mut n, src.name(node));
         if node.block != NO_BLOCK {
             let block = std::mem::take(&mut src.blocks[node.block as usize]);
-            let children: Vec<Node> = block.iter().map(|c| self.import(src, c)).collect();
-            n.block = self.push_block(children.into_boxed_slice());
+            let owners: Option<Vec<u16>> = src
+                .block_owners
+                .as_ref()
+                .and_then(|blocks| blocks[node.block as usize].as_ref())
+                .map(|owners| {
+                    owners
+                        .iter()
+                        .map(|&owner| map.get(owner as usize).copied().unwrap_or(NO_OWNER))
+                        .collect()
+                });
+            let children: Vec<Node> = block.iter().map(|c| self.import(src, c, map)).collect();
+            n.block = self.push_block(
+                children.into_boxed_slice(),
+                owners.map(Vec::into_boxed_slice),
+            );
         }
         n
     }
 
     /// Move `src` into this arena, renumbering its block and name references
-    /// in place. Returns `root` as it is stored here. Unlike [`Self::import`]
-    /// this never copies a node or a name, which is what live scanning uses to
+    /// in place. `root_owner` is remapped too. Unlike [`Self::import`] this
+    /// never copies a node or a name, which is what live scanning uses to
     /// adopt a finished top-level subtree without a second copy of it.
-    fn adopt_from(&mut self, src: &mut Arena, mut root: Node) -> Node {
+    fn adopt_from(&mut self, src: &mut Arena, mut root: Node, root_owner: u16) -> (Node, u16) {
         let chunk_base = u32::try_from(self.chunks.len()).expect("too many name chunks");
         let block_base = u32::try_from(self.blocks.len()).expect("too many directories");
         assert!(
@@ -379,6 +548,15 @@ impl Arena {
             block_base as usize + src.blocks.len() < NO_BLOCK as usize,
             "too many directories"
         );
+        let map = self.owner_map(&src.owners);
+        let remap_owner = |owner: u16| map.get(owner as usize).copied().unwrap_or(NO_OWNER);
+        if let Some(blocks) = &mut src.block_owners {
+            for owners in blocks.iter_mut().flatten() {
+                for owner in owners.iter_mut() {
+                    *owner = remap_owner(*owner);
+                }
+            }
+        }
         let name_add = chunk_base << CHUNK_BITS;
         fn remap(n: &mut Node, name_add: u32, block_base: u32) {
             n.name_off += name_add;
@@ -393,8 +571,15 @@ impl Arena {
             }
         }
         self.blocks.append(&mut src.blocks);
+        if let Some(mut owners) = src.block_owners.take() {
+            let blocks = self
+                .block_owners
+                .get_or_insert_with(|| vec![None; block_base as usize]);
+            blocks.resize_with(block_base as usize, || None);
+            blocks.append(&mut owners);
+        }
         self.chunks.append(&mut src.chunks);
-        root
+        (root, remap_owner(root_owner))
     }
 }
 
@@ -405,14 +590,26 @@ impl Arena {
 pub struct Subtree {
     root: Node,
     arena: Arena,
+    /// The owner of the root itself, which lives in `arena`'s table (the
+    /// parent's block stores its children's owners, not its own).
+    root_owner: u16,
 }
 
 impl Subtree {
     /// A tree whose root is `root` (usually from [`DirBuilder::commit`] into
     /// `arena`), named `name`.
-    pub fn new(mut arena: Arena, name: &str, mut root: Node) -> Self {
+    pub fn new(arena: Arena, name: &str, root: Node) -> Self {
+        Self::new_owned(arena, name, root, NO_OWNER)
+    }
+
+    /// Like [`Self::new`], with the root's owner index in `arena`'s table.
+    pub fn new_owned(mut arena: Arena, name: &str, mut root: Node, root_owner: u16) -> Self {
         arena.set_name(&mut root, name);
-        Self { root, arena }
+        Self {
+            root,
+            arena,
+            root_owner,
+        }
     }
 
     /// A file whose on-disk size is unknown; assume it matches the logical size.
@@ -433,12 +630,28 @@ impl Subtree {
         let name = clip_name(name);
         arena.chunks[0].push_str(name);
         root.set_name(0, name.len());
-        Self { root, arena }
+        Self {
+            root,
+            arena,
+            root_owner: NO_OWNER,
+        }
     }
 
     #[inline]
     pub fn root(&self) -> &Node {
         &self.root
+    }
+
+    /// The root's own owner (see [`Tree::root_owner`]).
+    #[inline]
+    pub fn root_owner(&self) -> u16 {
+        self.root_owner
+    }
+
+    /// The owners referenced by this subtree.
+    #[inline]
+    pub fn owners(&self) -> &OwnerTable {
+        self.arena.owners()
     }
 
     #[inline]
@@ -473,6 +686,9 @@ pub struct DirBuilder {
     /// they are committed.
     names: String,
     children: Vec<Node>,
+    /// Owner index per child, parallel to `children`. Only allocated once a
+    /// child actually carries an owner, so a default scan pays nothing.
+    owners: Option<Vec<u16>>,
     finished: bool,
 }
 
@@ -482,35 +698,68 @@ impl DirBuilder {
             node: Node::new(NodeKind::Dir, 0, 0, modified),
             names: String::new(),
             children: Vec::new(),
+            owners: None,
             finished: false,
         }
     }
 
-    fn push(&mut self, name: &str, mut node: Node) {
+    fn push(&mut self, name: &str, mut node: Node, owner: u16) {
         let name = clip_name(name);
         node.set_name(self.names.len() as u32, name.len());
         self.names.push_str(name);
+        if owner != NO_OWNER && self.owners.is_none() {
+            self.owners = Some(vec![NO_OWNER; self.children.len()]);
+        }
+        if let Some(owners) = &mut self.owners {
+            owners.push(owner);
+        }
         self.children.push(node);
         self.finished = false;
     }
 
     /// A file with a known logical and allocated (on-disk) size.
     pub fn add_file(&mut self, name: &str, size: u64, disk_size: u64, modified: i64) {
-        self.push(name, Node::new(NodeKind::File, size, disk_size, modified));
+        self.add_file_owned(name, size, disk_size, modified, NO_OWNER);
+    }
+
+    /// A file with a known size whose owner was collected.
+    pub fn add_file_owned(
+        &mut self,
+        name: &str,
+        size: u64,
+        disk_size: u64,
+        modified: i64,
+        owner: u16,
+    ) {
+        self.push(
+            name,
+            Node::new(NodeKind::File, size, disk_size, modified),
+            owner,
+        );
     }
 
     /// A later hard link to a file that was already counted. It still counts
     /// as a file, but adds no bytes to any total.
     pub fn add_hard_link(&mut self, name: &str, modified: i64) {
+        self.add_hard_link_owned(name, modified, NO_OWNER);
+    }
+
+    /// A hard-link duplicate whose owner was collected.
+    pub fn add_hard_link_owned(&mut self, name: &str, modified: i64, owner: u16) {
         let mut node = Node::new(NodeKind::File, 0, 0, modified);
         node.set_flag(HARD_LINK, true);
-        self.push(name, node);
+        self.push(name, node, owner);
     }
 
     /// A directory that is listed but not descended into (junctions,
     /// symlinked directories).
     pub fn add_empty_dir(&mut self, name: &str, modified: i64) {
-        self.push(name, Node::new(NodeKind::Dir, 0, 0, modified));
+        self.add_empty_dir_owned(name, modified, NO_OWNER);
+    }
+
+    /// A listed-but-not-entered directory whose owner was collected.
+    pub fn add_empty_dir_owned(&mut self, name: &str, modified: i64, owner: u16) {
+        self.push(name, Node::new(NodeKind::Dir, 0, 0, modified), owner);
     }
 
     /// A drive pseudo-item (`<Free space>` or `<Unknown>`) read back from an
@@ -524,12 +773,17 @@ impl DirBuilder {
         modified: i64,
     ) {
         debug_assert!(matches!(kind, NodeKind::FreeSpace | NodeKind::Unknown));
-        self.push(name, Node::new(kind, size, disk_size, modified));
+        self.push(name, Node::new(kind, size, disk_size, modified), NO_OWNER);
     }
 
     /// A sub-directory already committed to the same arena.
     pub fn add_dir(&mut self, name: &str, dir: Node) {
-        self.push(name, dir);
+        self.add_dir_owned(name, dir, NO_OWNER);
+    }
+
+    /// A sub-directory whose own owner was collected.
+    pub fn add_dir_owned(&mut self, name: &str, dir: Node, owner: u16) {
+        self.push(name, dir, owner);
     }
 
     /// The directory could not be read.
@@ -545,9 +799,26 @@ impl DirBuilder {
             return;
         }
         let names = &self.names;
-        sort_by_size(&mut self.children, |n| {
-            &names[n.name_off as usize..n.name_off as usize + n.name_len()]
-        });
+        let name_of = |n: &Node| &names[n.name_off as usize..n.name_off as usize + n.name_len()];
+        match &mut self.owners {
+            None => sort_by_size(&mut self.children, name_of),
+            Some(owners) => {
+                // Keep the parallel owner array in step with the sort.
+                let mut pairs: Vec<(Node, u16)> = self
+                    .children
+                    .iter()
+                    .copied()
+                    .zip(owners.iter().copied())
+                    .collect();
+                pairs.sort_unstable_by(|(a, _), (b, _)| {
+                    b.size.cmp(&a.size).then_with(|| name_of(a).cmp(name_of(b)))
+                });
+                for (i, (node, owner)) in pairs.into_iter().enumerate() {
+                    self.children[i] = node;
+                    owners[i] = owner;
+                }
+            }
+        }
         aggregate(&mut self.node, &self.children);
         self.finished = true;
     }
@@ -562,7 +833,13 @@ impl DirBuilder {
             let name = &names[start..start + c.name_len()];
             arena.set_name(c, name);
         }
-        self.node.block = arena.push_block(self.children.into_boxed_slice());
+        let owners = self.owners.map(Vec::into_boxed_slice);
+        debug_assert!(
+            owners
+                .as_ref()
+                .is_none_or(|owners| owners.len() == self.children.len())
+        );
+        self.node.block = arena.push_block(self.children.into_boxed_slice(), owners);
         self.node
     }
 }
@@ -597,6 +874,19 @@ pub struct FileEntry {
     pub modified: i64,
     /// Rank in [`Tree::exts`], or [`NO_EXT`].
     pub ext: u16,
+    /// Owner index in [`Tree::owners`], or [`NO_OWNER`].
+    pub owner: u16,
+}
+
+/// Bytes and file count in one owning account.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OwnerTotal {
+    /// Index in [`Tree::owners`], or [`NO_OWNER`] for files whose owner is
+    /// unknown (unreadable, or not collected for that entry).
+    pub owner: u16,
+    pub size: u64,
+    pub disk_size: u64,
+    pub files: u64,
 }
 
 /// Where a node is stored.
@@ -724,6 +1014,89 @@ impl Tree {
         self.build_extensions();
     }
 
+    /// The owning accounts, or an empty table when owners were not collected.
+    #[inline]
+    pub fn owners(&self) -> &OwnerTable {
+        self.sub.arena.owners()
+    }
+
+    /// Whether this scan collected file owners.
+    #[inline]
+    pub fn has_owners(&self) -> bool {
+        !self.owners().is_empty()
+    }
+
+    /// The display name of an owner index (`DOMAIN\user`, a user name, or a
+    /// raw SID / uid).
+    #[inline]
+    pub fn owner_name(&self, owner: u16) -> Option<&str> {
+        self.owners().name(owner)
+    }
+
+    /// The owner of the node at `path`, or [`NO_OWNER`] when it is unknown or
+    /// owners were not collected.
+    pub fn owner_at(&self, path: &[u32]) -> u16 {
+        match self.slot(path) {
+            Some(Slot::Root) => self.sub.root_owner,
+            Some(Slot::In(block, index)) => self.sub.arena.owner_in(block, index),
+            None => NO_OWNER,
+        }
+    }
+
+    /// The owner of the scanned root folder itself.
+    #[inline]
+    pub fn root_owner(&self) -> u16 {
+        self.sub.root_owner
+    }
+
+    /// The owner of child `index` of `parent` (both in this tree). Used by
+    /// the treemap, which walks nodes without their index paths.
+    #[inline]
+    pub fn child_owner(&self, parent: &Node, index: usize) -> u16 {
+        if parent.block == NO_BLOCK {
+            return NO_OWNER;
+        }
+        self.sub.arena.owner_in(parent.block, index)
+    }
+
+    /// Bytes, disk bytes and file count per owner, largest first.
+    ///
+    /// Only real files carry bytes, so the sizes add up to the scanned total.
+    /// Files whose owner is unknown are grouped under [`NO_OWNER`] (so totals
+    /// still add up); the result is empty when owners were not collected.
+    pub fn owner_totals(&self) -> Vec<OwnerTotal> {
+        if self.sub.arena.block_owners.is_none() {
+            return Vec::new();
+        }
+        let mut totals: HashMap<u16, OwnerTotal> = HashMap::new();
+        for (id, block) in self.sub.arena.blocks.iter().enumerate() {
+            let owners = self.sub.arena.owners_of(id as u32);
+            for (i, node) in block.iter().enumerate() {
+                if node.kind() != NodeKind::File {
+                    continue;
+                }
+                let owner = owners
+                    .and_then(|owners| owners.get(i).copied())
+                    .unwrap_or(NO_OWNER);
+                let total = totals.entry(owner).or_insert(OwnerTotal {
+                    owner,
+                    ..OwnerTotal::default()
+                });
+                total.size += node.size;
+                total.disk_size += node.disk_size;
+                total.files += 1;
+            }
+        }
+        let mut out: Vec<OwnerTotal> = totals.into_values().collect();
+        out.sort_unstable_by(|a, b| {
+            b.size
+                .cmp(&a.size)
+                .then_with(|| b.files.cmp(&a.files))
+                .then_with(|| a.owner.cmp(&b.owner))
+        });
+        out
+    }
+
     #[inline]
     pub fn root(&self) -> &Node {
         &self.sub.root
@@ -846,12 +1219,13 @@ impl Tree {
                     .get(&path)
                     .expect("top-file path still points into the tree");
                 FileEntry {
-                    path,
+                    path: path.clone(),
                     name,
                     size: node.size,
                     disk_size: node.disk_size,
                     modified: node.modified(),
                     ext: node.ext,
+                    owner: self.owner_at(&path),
                 }
             })
             .collect();
@@ -982,6 +1356,10 @@ impl Tree {
         let mut d = *self.at(dir);
         let mut children = self.children(&d).to_vec();
         let node = children.remove(k);
+        let owners = self.sub.arena.take_owners(d.block).map(|mut owners| {
+            owners.remove(k);
+            owners.into_boxed_slice()
+        });
         let exts = &mut self.exts;
         let mut dead = 0usize;
         self.sub.arena.free_subtree(&node, |n| {
@@ -989,19 +1367,32 @@ impl Tree {
             dead += n.name_len();
         });
         self.dead_name_bytes += dead;
-        self.sub.arena.set_children(&mut d, children);
+        self.sub.arena.set_children(&mut d, children, owners);
         *self.at_mut(dir) = d;
         node
     }
 
     /// Append `node` (already stored in this arena) as the last child of the
-    /// directory in `dir`. Returns its position among its siblings.
-    fn append(&mut self, dir: Slot, node: Node) -> u32 {
+    /// directory in `dir`, with `owner` as its owner index. Returns its
+    /// position among its siblings.
+    fn append(&mut self, dir: Slot, node: Node, owner: u16) -> u32 {
         let mut d = *self.at(dir);
         let mut children = self.children(&d).to_vec();
         children.push(node);
         let k = children.len() as u32 - 1;
-        self.sub.arena.set_children(&mut d, children);
+        let owners = match self.sub.arena.take_owners(d.block) {
+            Some(mut owners) => {
+                owners.push(owner);
+                Some(owners.into_boxed_slice())
+            }
+            None if owner != NO_OWNER => {
+                let mut owners = vec![NO_OWNER; children.len() - 1];
+                owners.push(owner);
+                Some(owners.into_boxed_slice())
+            }
+            None => None,
+        };
+        self.sub.arena.set_children(&mut d, children, owners);
         *self.at_mut(dir) = d;
         k
     }
@@ -1015,10 +1406,39 @@ impl Tree {
         if dir.block == NO_BLOCK {
             aggregate(&mut dir, &[]);
         } else {
-            let Arena { blocks, chunks, .. } = &mut self.sub.arena;
+            let Arena {
+                blocks,
+                chunks,
+                block_owners,
+                ..
+            } = &mut self.sub.arena;
             let chunks: &[String] = chunks;
-            let children = &mut blocks[dir.block as usize];
-            sort_by_size(children, |n| name_in(chunks, n));
+            let id = dir.block as usize;
+            let children = &mut blocks[id];
+            match block_owners
+                .as_mut()
+                .and_then(|blocks| blocks.get_mut(id))
+                .and_then(|owners| owners.as_mut())
+            {
+                None => sort_by_size(children, |n| name_in(chunks, n)),
+                Some(owners) => {
+                    // Re-sort the parallel owner array along with the nodes.
+                    let mut pairs: Vec<(Node, u16)> = children
+                        .iter()
+                        .copied()
+                        .zip(owners.iter().copied())
+                        .collect();
+                    pairs.sort_unstable_by(|(a, _), (b, _)| {
+                        b.size
+                            .cmp(&a.size)
+                            .then_with(|| name_in(chunks, a).cmp(name_in(chunks, b)))
+                    });
+                    for (i, (node, owner)) in pairs.into_iter().enumerate() {
+                        children[i] = node;
+                        owners[i] = owner;
+                    }
+                }
+            }
             aggregate(&mut dir, children);
         }
         *self.at_mut(slot) = dir;
@@ -1117,6 +1537,7 @@ impl Tree {
         let Subtree {
             root,
             arena: mut src,
+            root_owner,
         } = sub;
         // An item with the same name is being replaced.
         let existing = {
@@ -1131,15 +1552,17 @@ impl Tree {
                 self.grow_free(old.size);
             }
         }
-        let node = if move_arena {
-            self.sub.arena.adopt_from(&mut src, root)
+        let (node, owner) = if move_arena {
+            self.sub.arena.adopt_from(&mut src, root, root_owner)
         } else {
-            self.sub.arena.import(&mut src, &root)
+            let map = self.sub.arena.owner_map(src.owners());
+            let owner = map.get(root_owner as usize).copied().unwrap_or(NO_OWNER);
+            (self.sub.arena.import(&mut src, &root, &map), owner)
         };
         drop(src);
         // Stamp extensions in this tree's ranking and count them.
         let node = self.stamp_new(node);
-        let k = self.append(dir, node);
+        let k = self.append(dir, node, owner);
         self.shrink_free(node.size);
         let mut p = dir_path.to_vec();
         p.push(k);
@@ -1225,7 +1648,7 @@ impl Tree {
             if size > 0 {
                 let mut node = Node::new(kind, size, size, 0);
                 self.sub.arena.set_name(&mut node, name);
-                self.append(Slot::Root, node);
+                self.append(Slot::Root, node, NO_OWNER);
                 changed = true;
             }
         }
@@ -1333,6 +1756,28 @@ mod tests {
         build(&mut root);
         let root = root.commit(&mut arena);
         Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
+    }
+
+    /// root (owner alice) / { sub (owner bob) / { a.txt 5 alice, b.bin 15 bob },
+    /// c.txt 30 alice }.
+    fn owned_tree() -> Tree {
+        let mut table = OwnerTable::default();
+        let alice = table.intern(r"DOMAIN\alice");
+        let bob = table.intern(r"DOMAIN\bob");
+        let mut arena = Arena::default();
+        let mut sub = DirBuilder::new(50);
+        sub.add_file_owned("a.txt", 5, 5, 5, alice);
+        sub.add_file_owned("b.bin", 15, 15, 6, bob);
+        let sub = sub.commit(&mut arena);
+        let mut root = DirBuilder::new(100);
+        root.add_dir_owned("sub", sub, bob);
+        root.add_file_owned("c.txt", 30, 30, 7, alice);
+        let root = root.commit(&mut arena);
+        arena.set_owners(table);
+        Tree::new(
+            Subtree::new_owned(arena, "root", root, alice),
+            PathBuf::from("/root"),
+        )
     }
 
     fn names(tree: &Tree, node: &Node) -> Vec<String> {
@@ -2132,5 +2577,83 @@ mod tests {
             (1377, 4, 1)
         );
         assert_eq!(ext_bytes(&tree, ".mp4"), (0, 0));
+    }
+
+    #[test]
+    fn owners_are_stored_per_node_and_totalled_per_account() {
+        let tree = owned_tree();
+        assert!(tree.has_owners());
+        assert_eq!(tree.owners().len(), 2);
+        assert_eq!(tree.owner_name(0), Some(r"DOMAIN\alice"));
+        assert_eq!(tree.root_owner(), 0);
+        assert_eq!(tree.owner_at(&[]), 0);
+
+        let sub = tree.find(Path::new("/root/sub")).unwrap();
+        assert_eq!(tree.owner_at(&sub), 1, "the folder's own owner");
+        let a = tree.find(Path::new("/root/sub/a.txt")).unwrap();
+        let b = tree.find(Path::new("/root/sub/b.bin")).unwrap();
+        let c = tree.find(Path::new("/root/c.txt")).unwrap();
+        assert_eq!(tree.owner_at(&a), 0);
+        assert_eq!(tree.owner_at(&b), 1);
+        assert_eq!(tree.owner_at(&c), 0);
+
+        // Per-user totals add up to the scan total.
+        let totals = tree.owner_totals();
+        assert_eq!(totals.iter().map(|t| t.size).sum::<u64>(), 50);
+        assert_eq!(totals.iter().map(|t| t.files).sum::<u64>(), 3);
+        let alice = totals.iter().find(|t| t.owner == 0).unwrap();
+        assert_eq!((alice.size, alice.files), (35, 2));
+        let bob = totals.iter().find(|t| t.owner == 1).unwrap();
+        assert_eq!((bob.size, bob.files), (15, 1));
+        // Largest first.
+        assert_eq!(totals[0].owner, 0);
+    }
+
+    #[test]
+    fn owner_arrays_follow_sorts_and_mutations() {
+        let mut tree = owned_tree();
+        // `c.txt` (30) sorts before `sub` (20): owners follow the sort.
+        let root_children = names(&tree, tree.root());
+        assert_eq!(root_children, ["c.txt", "sub"]);
+        assert_eq!(tree.owner_at(&[0]), 0);
+        assert_eq!(tree.owner_at(&[1]), 1);
+        assert_eq!(tree.child_owner(tree.root(), 0), 0);
+
+        // Removing a file removes its owner entry too.
+        let c = tree.find(Path::new("/root/c.txt")).unwrap();
+        tree.remove(&c).unwrap();
+        assert_eq!(names(&tree, tree.root()), ["sub"]);
+        assert_eq!(tree.owner_at(&[0]), 1);
+        let totals = tree.owner_totals();
+        assert_eq!(totals.iter().map(|t| t.size).sum::<u64>(), 20);
+
+        // Inserting a subtree from another scan remaps its owner indices.
+        let mut table = OwnerTable::default();
+        let carol = table.intern(r"DOMAIN\carol");
+        assert_eq!(carol, 0, "the other scan's table starts at zero");
+        let mut arena = Arena::default();
+        let mut dir = DirBuilder::new(1);
+        dir.add_file_owned("d.txt", 7, 7, 1, carol);
+        let node = dir.commit(&mut arena);
+        arena.set_owners(table);
+        let path = tree
+            .insert(&[], Subtree::new_owned(arena, "new", node, carol))
+            .unwrap();
+        assert_eq!(tree.owner_name(tree.owner_at(&path)), Some(r"DOMAIN\carol"));
+        let carol = tree.owner_at(&path);
+        let totals = tree.owner_totals();
+        assert!(totals.iter().any(|t| t.owner == carol && t.size == 7));
+        assert_eq!(totals.iter().map(|t| t.size).sum::<u64>(), 27);
+    }
+
+    #[test]
+    fn owner_totals_are_empty_without_collection() {
+        let tree = sample_tree();
+        assert!(!tree.has_owners());
+        assert!(tree.owner_totals().is_empty());
+        assert_eq!(tree.owner_at(&[]), NO_OWNER);
+        assert_eq!(tree.owner_name(NO_OWNER), None);
+        // A default tree keeps the per-block owner arrays unallocated.
+        assert!(tree.sub.arena.block_owners.is_none());
     }
 }
