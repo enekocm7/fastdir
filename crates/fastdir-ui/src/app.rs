@@ -3,6 +3,7 @@
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::categories::{CategoryMap, FileCategory};
+use fastdir_core::diff::{ChangeStatus, ScanDiff};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
 use fastdir_core::filter::Filter;
@@ -86,9 +87,20 @@ actions!(
         OpenFilters,
         OpenSettings,
         ExportResults,
+        RunAction1,
+        RunAction2,
+        RunAction3,
+        RunAction4,
+        RunAction5,
+        RunAction6,
+        RunAction7,
+        RunAction8,
+        RunAction9,
     ]
 );
 
+mod actions_ui;
+mod compare;
 mod context_menu;
 mod dialogs;
 mod export;
@@ -103,6 +115,7 @@ mod status;
 mod toolbar;
 mod update_ui;
 
+use self::compare::Comparison;
 use self::export::ExportForm;
 use self::filter::FilterForm;
 use self::open_scan::SavedScan;
@@ -145,6 +158,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-e", ExportResults, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("ctrl-1", RunAction1, Some(CONTEXT)),
+        KeyBinding::new("ctrl-2", RunAction2, Some(CONTEXT)),
+        KeyBinding::new("ctrl-3", RunAction3, Some(CONTEXT)),
+        KeyBinding::new("ctrl-4", RunAction4, Some(CONTEXT)),
+        KeyBinding::new("ctrl-5", RunAction5, Some(CONTEXT)),
+        KeyBinding::new("ctrl-6", RunAction6, Some(CONTEXT)),
+        KeyBinding::new("ctrl-7", RunAction7, Some(CONTEXT)),
+        KeyBinding::new("ctrl-8", RunAction8, Some(CONTEXT)),
+        KeyBinding::new("ctrl-9", RunAction9, Some(CONTEXT)),
     ]);
     // macOS users expect Cmd: bind it alongside Ctrl so both work. A full
     // shortcut overhaul (remappable keys) is out of scope.
@@ -162,6 +184,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-f", FocusSearch, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("cmd-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("cmd-1", RunAction1, Some(CONTEXT)),
+        KeyBinding::new("cmd-2", RunAction2, Some(CONTEXT)),
+        KeyBinding::new("cmd-3", RunAction3, Some(CONTEXT)),
+        KeyBinding::new("cmd-4", RunAction4, Some(CONTEXT)),
+        KeyBinding::new("cmd-5", RunAction5, Some(CONTEXT)),
+        KeyBinding::new("cmd-6", RunAction6, Some(CONTEXT)),
+        KeyBinding::new("cmd-7", RunAction7, Some(CONTEXT)),
+        KeyBinding::new("cmd-8", RunAction8, Some(CONTEXT)),
+        KeyBinding::new("cmd-9", RunAction9, Some(CONTEXT)),
     ]);
 }
 
@@ -196,6 +227,9 @@ const COL_FILES: f32 = 82.;
 const COL_DIRS: f32 = 74.;
 const COL_DATE: f32 = 128.;
 const COL_OWNER: f32 = 128.;
+const COL_DELTA: f32 = 100.;
+const COL_DELTA_PCT: f32 = 70.;
+const COL_STATUS: f32 = 84.;
 
 /// Colours for the "subtree percentage" bars, one per depth (WinDirStat style).
 const DEPTH_COLORS: [u32; 8] = [
@@ -216,6 +250,7 @@ fn color_mode_of(m: TreemapColorMode) -> ColorMode {
         TreemapColorMode::Extension => ColorMode::Extension,
         TreemapColorMode::Age => ColorMode::Age,
         TreemapColorMode::Category => ColorMode::Category,
+        TreemapColorMode::Change => ColorMode::Change,
     }
 }
 
@@ -252,6 +287,8 @@ fn update_channel_of(channel: UpdateChannel) -> fastdir_updater::Channel {
 enum ListTab {
     Tree,
     TopFiles,
+    /// Items that only existed in the baseline scan of a comparison.
+    Removed,
 }
 
 /// One row of the extension panel: a category header or an extension below
@@ -319,6 +356,7 @@ struct FileOp {
 enum PendingKind {
     Delete { permanent: bool },
     Move { dest: PathBuf },
+    Action { run: actions_ui::ActionRun },
 }
 
 /// A delete or move waiting for the running one to finish. The targets are
@@ -361,6 +399,12 @@ pub struct FastDir {
     tree: Option<Arc<RwLock<Tree>>>,
     /// Set while the visible tree came from a saved JSON document.
     saved: Option<SavedScan>,
+    /// Set while the visible tree is compared with a saved scan.
+    compare: Option<Comparison>,
+    /// Sort order and cursor of the "Removed" tab.
+    removed_sort: (SortKey, bool),
+    removed_scroll: UniformListScrollHandle,
+    removed_selected: Option<usize>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
     /// Folders that could not be read in the last finished scan (access denied).
@@ -443,9 +487,27 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // Change colours need a comparison; a config saved during one must
+        // not leave the next launch with a grey treemap.
+        let mut settings = settings;
+        if settings.treemap.color_mode == TreemapColorMode::Change {
+            settings.treemap.color_mode = TreemapColorMode::Extension;
+            settings.save();
+        }
         let sort = {
             let s = settings.effective_sort();
-            (s.column, s.descending)
+            // A comparison-only sort makes no sense for the next launch's
+            // fresh scan, so fall back to size and correct the saved value.
+            let column = match s.column {
+                SortKey::Delta | SortKey::Status => SortKey::Size,
+                other => other,
+            };
+            if column != s.column {
+                settings.list.sort.column = column;
+                settings.sort.column = column;
+                settings.save();
+            }
+            (column, s.descending)
         };
         apply_ui_scale(settings.appearance.ui_scale, cx);
         let decimal_sizes = settings.list.size_unit == SizeUnit::Decimal;
@@ -555,6 +617,10 @@ impl FastDir {
             home_drives,
             tree: None,
             saved: None,
+            compare: None,
+            removed_sort: (SortKey::Size, true),
+            removed_scroll: UniformListScrollHandle::new(),
+            removed_selected: None,
             scan_root: None,
             last_scan: None,
             last_errors: 0,
@@ -870,7 +936,8 @@ impl FastDir {
         let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
         let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
         let banner = self
-            .render_saved_banner(cx)
+            .render_compare_banner(cx)
+            .or_else(|| self.render_saved_banner(cx))
             .or_else(|| self.render_elevate_banner(cx));
         let lists = h_resizable("top-split")
             .with_state(&self.top_split)
@@ -921,8 +988,8 @@ impl FastDir {
                         .id("treemap-panel")
                         .size_full()
                         .child(self.treemap.clone())
-                        .context_menu(move |menu, _, cx| {
-                            entity.read(cx).build_context_menu(menu, cx)
+                        .context_menu(move |menu, window, cx| {
+                            actions_ui::build_context_menu(entity.clone(), menu, window, cx)
                         })
                 }))
                 .into_any_element()
@@ -1213,9 +1280,38 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::open_filters))
             .on_action(cx.listener(Self::open_export))
             .on_action(cx.listener(Self::open_settings))
-            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                this.open_dropped(paths, window, cx)
+            .on_action(cx.listener(|this, _: &RunAction1, window, cx| {
+                this.run_action_shortcut(1, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &RunAction2, window, cx| {
+                this.run_action_shortcut(2, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction3, window, cx| {
+                this.run_action_shortcut(3, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction4, window, cx| {
+                this.run_action_shortcut(4, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction5, window, cx| {
+                this.run_action_shortcut(5, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction6, window, cx| {
+                this.run_action_shortcut(6, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction7, window, cx| {
+                this.run_action_shortcut(7, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction8, window, cx| {
+                this.run_action_shortcut(8, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction9, window, cx| {
+                this.run_action_shortcut(9, window, cx)
+            }))
+            .on_drop::<ExternalPaths>(cx.listener(
+                |this, paths: &ExternalPaths, window, cx| {
+                    this.open_dropped(paths, window, cx)
+                },
+            ))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))

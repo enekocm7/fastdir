@@ -1,6 +1,7 @@
 //! The Settings dialog: appearance, scanning, treemap, file list, file
 //! operations, startup, updates and config-file tools.
 
+use super::actions_ui::ActionEditor;
 use super::*;
 use fastdir_core::integration;
 use fastdir_settings::{
@@ -13,13 +14,15 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 
 pub(super) struct SettingsView {
-    owner: Entity<FastDir>,
+    pub(super) owner: Entity<FastDir>,
     _owner_sub: Subscription,
     excluded_input: Entity<InputState>,
     thread_input: Entity<InputState>,
     cushion_input: Entity<InputState>,
     min_cell_input: Entity<InputState>,
     scale_input: Entity<InputState>,
+    /// Action being added or edited inline in the Actions card.
+    pub(super) action_editor: Option<ActionEditor>,
 }
 
 impl SettingsView {
@@ -41,6 +44,7 @@ impl SettingsView {
             cushion_input,
             min_cell_input,
             scale_input,
+            action_editor: None,
         }
     }
 }
@@ -77,6 +81,7 @@ impl Render for SettingsView {
             TreemapColorMode::Extension => 0,
             TreemapColorMode::Age => 1,
             TreemapColorMode::Category => 2,
+            TreemapColorMode::Change => 3,
         };
         let size_unit_ix = match list.size_unit {
             SizeUnit::Binary => 0,
@@ -224,6 +229,8 @@ impl Render for SettingsView {
                 .child(text)
         };
         let caption = |text: String| div().text_xs().text_color(muted).child(text);
+
+        let actions_section = self.render_actions_section(cx);
 
         v_flex()
             .id("settings-scroll")
@@ -813,14 +820,25 @@ impl Render for SettingsView {
                                                 Radio::new("colormode-category")
                                                     .label(tr("set.tree.colorby_category")),
                                             )
+                                            .child(
+                                                Radio::new("colormode-change")
+                                                    .label(tr("set.tree.colorby_change")),
+                                            )
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let mode = match ix {
                                                         1 => TreemapColorMode::Age,
                                                         2 => TreemapColorMode::Category,
+                                                        3 => TreemapColorMode::Change,
                                                         _ => TreemapColorMode::Extension,
                                                     };
                                                     color_mode_owner.update(cx, |this, cx| {
+                                                        // Change colours need a baseline.
+                                                        if mode == TreemapColorMode::Change
+                                                            && this.compare.is_none()
+                                                        {
+                                                            return;
+                                                        }
                                                         this.settings.treemap.color_mode = mode;
                                                         this.settings.save();
                                                         this.refresh_treemap_options(cx);
@@ -1449,6 +1467,7 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
+                    .child(actions_section)
                     .child(
                         section()
                             .gap_4()

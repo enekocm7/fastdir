@@ -262,11 +262,17 @@ impl FastDir {
                 let show_unknown = self.settings.treemap.show_unknown;
                 let treemap_disk = self.settings.treemap.disk_size;
                 let color_by_age = self.settings.treemap.color_mode == TreemapColorMode::Age;
+                let color_by_change = self.settings.treemap.color_mode == TreemapColorMode::Change;
+                let comparing = self.compare.is_some();
+                let can_compare = matches!(self.phase, Phase::Ready) && self.tree.is_some();
                 let show_partial = self.settings.scan.show_partial_results;
                 let show_treemap = self.settings.treemap.show;
                 let hide_empty = self.settings.list.hide_empty_folders;
                 let entity = update_entity.clone();
                 let menu_open_scan = self.tr("menu.open_scan");
+                let menu_compare = self.tr("menu.compare");
+                let menu_compare_clear = self.tr("menu.compare_clear");
+                let menu_change = self.tr("tb.menu_change");
                 let menu_settings = self.tr("tb.menu_settings");
                 let menu_check = self.tr("tb.menu_check");
                 let menu_auto = self.tr("tb.menu_auto");
@@ -281,6 +287,7 @@ impl FastDir {
                     .tr_fmt("tb.version", &[("version", updater::CURRENT_VERSION)])
                     .into();
                 move |menu, _, _| {
+                    let mut menu = menu;
                     let (e0, e1, e2) = (entity.clone(), entity.clone(), entity.clone());
                     let (e3, e4) = (entity.clone(), entity.clone());
                     let e5 = entity.clone();
@@ -288,19 +295,44 @@ impl FastDir {
                     let e7 = entity.clone();
                     let e8 = entity.clone();
                     let e9 = entity.clone();
+                    let e_change = entity.clone();
                     let e_open = entity.clone();
-                    menu.item(
-                        gpui_kit::component::menu::PopupMenuItem::new(menu_open_scan)
-                            .icon(IconName::FileText)
-                            .on_click(move |_, window, cx| {
-                                e_open
-                                    .update(cx, |this, cx| {
-                                        this.open_scan(&OpenScan, window, cx)
-                                    })
-                                    .ok();
-                            }),
-                    )
-                    .separator()
+                    let e_compare = entity.clone();
+                    let e_clear = entity.clone();
+                    menu = menu
+                        .item(
+                            gpui_kit::component::menu::PopupMenuItem::new(menu_open_scan)
+                                .icon(IconName::FileText)
+                                .on_click(move |_, window, cx| {
+                                    e_open
+                                        .update(cx, |this, cx| {
+                                            this.open_scan(&OpenScan, window, cx)
+                                        })
+                                        .ok();
+                                }),
+                        )
+                        .item(
+                            gpui_kit::component::menu::PopupMenuItem::new(menu_compare)
+                                .icon(IconName::ChartPie)
+                                .disabled(!can_compare)
+                                .on_click(move |_, window, cx| {
+                                    e_compare
+                                        .update(cx, |this, cx| this.compare_with(window, cx))
+                                        .ok();
+                                }),
+                        );
+                    if comparing {
+                        menu = menu.item(
+                            gpui_kit::component::menu::PopupMenuItem::new(menu_compare_clear)
+                                .icon(IconName::Close)
+                                .on_click(move |_, _, cx| {
+                                    e_clear
+                                        .update(cx, |this, cx| this.clear_comparison(cx))
+                                        .ok();
+                                }),
+                        );
+                    }
+                    menu.separator()
                     .item(
                         gpui_kit::component::menu::PopupMenuItem::new(menu_settings)
                             .icon(IconName::Settings)
@@ -362,6 +394,16 @@ impl FastDir {
                             .checked(color_by_age)
                             .on_click(move |_, _, cx| {
                                 e9.update(cx, |this, cx| this.toggle_treemap_age_colors(cx))
+                                    .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(menu_change)
+                            .checked(color_by_change)
+                            .disabled(!comparing)
+                            .on_click(move |_, _, cx| {
+                                e_change
+                                    .update(cx, |this, cx| this.toggle_treemap_change_colors(cx))
                                     .ok();
                             }),
                     )
@@ -482,23 +524,26 @@ impl FastDir {
             (items, op.total_items)
         };
         let pct = (total > 0).then(|| (done as f64 / total as f64 * 100.0).min(100.0) as f32);
-        let detail = if op.by_bytes {
-            self.tr_fmt(
-                "tb.op_bytes",
-                &[
-                    ("done", &self.bytes(bytes)),
-                    ("total", &self.bytes(op.total_bytes)),
-                ],
-            )
-        } else {
-            self.tr_fmt(
-                "tb.op_items",
-                &[
-                    ("done", &self.count(items)),
-                    ("total", &self.count(op.total_items)),
-                ],
-            )
-        };
+        // Actions have no item / byte totals: show an indeterminate bar.
+        let detail = (total > 0).then(|| {
+            if op.by_bytes {
+                self.tr_fmt(
+                    "tb.op_bytes",
+                    &[
+                        ("done", &self.bytes(bytes)),
+                        ("total", &self.bytes(op.total_bytes)),
+                    ],
+                )
+            } else {
+                self.tr_fmt(
+                    "tb.op_items",
+                    &[
+                        ("done", &self.count(items)),
+                        ("total", &self.count(op.total_items)),
+                    ],
+                )
+            }
+        });
         h_flex()
             .gap_2()
             .text_xs()
@@ -524,7 +569,7 @@ impl FastDir {
                         .when(pct.is_none(), |p| p.loading(true)),
                 ),
             )
-            .child(div().flex_shrink_0().whitespace_nowrap().child(detail))
+            .child(div().flex_shrink_0().whitespace_nowrap().children(detail))
             .child(
                 Button::new("op-cancel")
                     .ghost()

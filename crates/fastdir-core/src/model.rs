@@ -269,6 +269,18 @@ impl Node {
     fn name_key(&self) -> (u32, usize) {
         (self.name_off, self.name_len())
     }
+
+    /// Stable identity of this node inside its tree: the start of its own
+    /// name slot.
+    ///
+    /// Unlike an index path it does not change when siblings are re-sorted,
+    /// and no two nodes in one tree share it. It changes when the node is
+    /// renamed or moved, which is exactly when a diff built against the old
+    /// tree stops being valid.
+    #[inline]
+    pub fn id(&self) -> u32 {
+        self.name_off
+    }
 }
 
 /// Recompute a directory's aggregates from its (already final) children.
@@ -748,6 +760,20 @@ impl DirBuilder {
     /// A listed-but-not-entered directory whose owner was collected.
     pub fn add_empty_dir_owned(&mut self, name: &str, modified: i64, owner: u16) {
         self.push(name, Node::new(NodeKind::Dir, 0, 0, modified), owner);
+    }
+
+    /// A drive pseudo-item (`<Free space>` or `<Unknown>`) read back from an
+    /// export, so its bytes are not mistaken for a real file.
+    pub fn add_special(
+        &mut self,
+        kind: NodeKind,
+        name: &str,
+        size: u64,
+        disk_size: u64,
+        modified: i64,
+    ) {
+        debug_assert!(matches!(kind, NodeKind::FreeSpace | NodeKind::Unknown));
+        self.push(name, Node::new(kind, size, disk_size, modified), NO_OWNER);
     }
 
     /// A sub-directory already committed to the same arena.

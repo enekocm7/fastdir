@@ -2,6 +2,7 @@
 //! and turns clicks into selections. It can be zoomed into any folder; a
 //! breadcrumb above the image leads back up.
 
+use fastdir_core::diff::ScanDiff;
 use fastdir_core::format;
 use fastdir_core::model::{Node, NodePath, Tree};
 use fastdir_treemap::{self as treemap, AgeBucket, ColorMode, Palette, RenderOptions};
@@ -54,6 +55,8 @@ struct Key {
     highlight_owner: Option<u16>,
     /// Bumped whenever the zoom root changes.
     zoom: u64,
+    /// Bumped whenever the comparison overlay changes.
+    change: u64,
     show_free: bool,
     show_unknown: bool,
     use_disk_size: bool,
@@ -77,6 +80,7 @@ impl Key {
         highlight_category: Option<u8>,
         highlight_owner: Option<u16>,
         zoom: u64,
+        change: u64,
         opts: RenderOptions,
     ) -> Self {
         Self {
@@ -88,6 +92,7 @@ impl Key {
             highlight_category,
             highlight_owner,
             zoom,
+            change,
             show_free: opts.show_free,
             show_unknown: opts.show_unknown,
             use_disk_size: opts.use_disk,
@@ -129,6 +134,9 @@ pub struct TreemapView {
     pending: Option<Key>,
     /// Bytes per age bucket for the current render, used by the age legend.
     age_totals: Option<[(AgeBucket, u64); 7]>,
+    /// Comparison overlay used by [`ColorMode::Change`].
+    change: Option<Arc<ScanDiff>>,
+    change_gen: u64,
     stale: Rc<std::cell::RefCell<Vec<Arc<RenderImage>>>>,
     /// Every selected node; each one gets an outline.
     selection: Vec<NodePath>,
@@ -174,6 +182,8 @@ impl TreemapView {
             image_key: None,
             pending: None,
             age_totals: None,
+            change: None,
+            change_gen: 0,
             stale: Default::default(),
             selection: Vec::new(),
             highlight: None,
@@ -281,6 +291,10 @@ impl TreemapView {
         self.zoom.clear();
         self.zoom_fs = None;
         self.zoom_gen += 1;
+        // A comparison points into the old tree; the owner sets a new one if
+        // the replacement is part of starting a comparison.
+        self.change = None;
+        self.change_gen += 1;
         self.hover = None;
         if let Some(img) = self.image.take() {
             self.stale.borrow_mut().push(img);
@@ -289,6 +303,22 @@ impl TreemapView {
         self.pending = None;
         self.age_totals = None;
         cx.notify();
+    }
+
+    /// Set or clear the comparison used by [`ColorMode::Change`]. A different
+    /// diff (or clearing it) invalidates the rendered image.
+    pub fn set_change(&mut self, change: Option<Arc<ScanDiff>>, cx: &mut Context<Self>) {
+        let same = match (&self.change, &change) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.change = change;
+            self.change_gen += 1;
+            self.age_totals = None;
+            cx.notify();
+        }
     }
 
     pub fn set_selection(&mut self, selection: Vec<NodePath>, cx: &mut Context<Self>) {
@@ -449,6 +479,7 @@ impl TreemapView {
         };
         let first = self.image.is_none();
         let zoom = self.zoom.clone();
+        let change = self.change.clone();
         self._task = Some(cx.spawn(async move |this, cx| {
             // Coalesce bursts of resizes into one render.
             if !first {
@@ -463,7 +494,15 @@ impl TreemapView {
                     let t = tree.read();
                     let root = t.get(&zoom).unwrap_or(t.root());
                     opts.root_owner = t.owner_at(&zoom);
-                    let buf = treemap::render(&t, root, key.w, key.h, background, &opts);
+                    let buf = treemap::render_with_change(
+                        &t,
+                        root,
+                        key.w,
+                        key.h,
+                        background,
+                        &opts,
+                        change.as_deref(),
+                    );
                     let totals = (opts.color_mode == ColorMode::Age)
                         .then(|| treemap::age_bucket_totals(&t, root, opts.now, opts.use_disk));
                     (buf, totals)
@@ -622,6 +661,7 @@ impl Render for TreemapView {
         let highlight_category = self.highlight_category;
         let highlight_owner = self.highlight_owner;
         let zoom = self.zoom_gen;
+        let change_gen = self.change_gen;
         let zoom_path = self.zoom.clone();
         let has_tree = self.tree.is_some();
         let render_opts = self.render_opts();
@@ -645,6 +685,7 @@ impl Render for TreemapView {
                         highlight_category,
                         highlight_owner,
                         zoom,
+                        change_gen,
                         render_opts,
                     );
                     if image_key != Some(key) && pending != Some(key) {
@@ -723,7 +764,9 @@ impl Render for TreemapView {
         let popover = theme.popover;
         let fg = theme.popover_foreground;
         let breadcrumb = has_tree.then(|| self.render_breadcrumb(cx));
-        let legend = self.render_age_legend(cx);
+        let legend = self
+            .render_age_legend(cx)
+            .or_else(|| self.render_change_legend(cx));
 
         let body = div()
             .id("treemap")
@@ -838,6 +881,69 @@ impl TreemapView {
                                     format::bytes_with(bytes, self.decimal_sizes)
                                 )))
                         }),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Diverging legend shown while [`ColorMode::Change`] is active and a
+    /// comparison is loaded.
+    fn render_change_legend(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.color_mode != ColorMode::Change {
+            return None;
+        }
+        let change = self.change.as_ref()?;
+        let totals = change.totals();
+        let theme = cx.theme();
+        let swatch = |color: (u8, u8, u8), key: &'static str| {
+            let (r, g, b) = color;
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .size(px(9.))
+                        .rounded_sm()
+                        .bg(rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32)),
+                )
+                .child(div().child(fastdir_locale::t(&self.lang, key)))
+        };
+        let net = totals.net();
+        let sign = if net > 0 {
+            "+"
+        } else if net < 0 {
+            "-"
+        } else {
+            ""
+        };
+        let net_text = format!(
+            "{sign}{}",
+            format::bytes_with(net.unsigned_abs(), self.decimal_sizes)
+        );
+        Some(
+            h_flex()
+                .w_full()
+                .flex_shrink_0()
+                .flex_wrap()
+                .gap_3()
+                .px_2()
+                .py_1()
+                .border_t_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(swatch(treemap::CHANGE_SHRANK_COLOR, "change.legend_shrank"))
+                .child(swatch(treemap::CHANGE_NEUTRAL_COLOR, "change.legend_same"))
+                .child(swatch(treemap::CHANGE_GREW_COLOR, "change.legend_grew"))
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(fastdir_locale::fmt(
+                            &self.lang,
+                            "change.legend_net",
+                            &[("delta", &net_text)],
+                        )),
                 )
                 .into_any_element(),
         )

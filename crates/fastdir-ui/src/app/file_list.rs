@@ -2,6 +2,19 @@
 
 use super::*;
 
+fn change_rank(diff: Option<&ScanDiff>, node: &Node) -> i64 {
+    diff.and_then(|diff| diff.change(node))
+        .map(|change| change.delta)
+        .unwrap_or(0)
+}
+
+fn change_status_rank(diff: Option<&ScanDiff>, node: &Node) -> u8 {
+    match diff.and_then(|diff| diff.change(node)) {
+        Some(change) => change.status.rank(),
+        None => 3, // unchanged sorts after everything that moved
+    }
+}
+
 /// Sort the flat top-files list in place. Name comparisons stay
 /// case-insensitive, like the tree.
 fn sort_top_files(files: &mut [FileEntry], sort: (SortKey, bool)) {
@@ -21,7 +34,12 @@ fn sort_top_files(files: &mut [FileEntry], sort: (SortKey, bool)) {
 }
 
 impl FastDir {
-    pub(super) fn child_order(tree: &Tree, node: &Node, sort: (SortKey, bool)) -> Vec<u32> {
+    pub(super) fn child_order(
+        tree: &Tree,
+        diff: Option<&ScanDiff>,
+        node: &Node,
+        sort: (SortKey, bool),
+    ) -> Vec<u32> {
         let c = tree.children(node);
         let mut idx: Vec<u32> = (0..c.len() as u32).collect();
         let (key, desc) = sort;
@@ -52,6 +70,8 @@ impl FastDir {
                             .unwrap_or("")
                             .to_lowercase(),
                     ),
+                SortKey::Delta => change_rank(diff, a).cmp(&change_rank(diff, b)),
+                SortKey::Status => change_status_rank(diff, a).cmp(&change_status_rank(diff, b)),
             };
             if desc { ord.reverse() } else { ord }
         });
@@ -68,6 +88,8 @@ impl FastDir {
         let Some(tree) = self.tree.clone() else {
             return;
         };
+        let diff = self.compare.as_ref().map(|compare| compare.diff.clone());
+        let diff = diff.as_deref();
         let tree = tree.read();
         let hide_empty = self.settings.list.hide_empty_folders;
         /// A folder is "empty" when nothing below it is a file (so a folder
@@ -77,8 +99,10 @@ impl FastDir {
             hide_empty && depth > 0 && node.is_dir() && !node.error() && node.files == 0
         }
         /// Add a node and its expanded descendants.
+        #[allow(clippy::too_many_arguments)]
         fn walk(
             tree: &Tree,
+            diff: Option<&ScanDiff>,
             node: &Node,
             path: &mut NodePath,
             depth: u16,
@@ -96,10 +120,11 @@ impl FastDir {
             });
             if node.expanded() && node.is_dir() {
                 let children = tree.children(node);
-                for i in FastDir::child_order(tree, node, sort) {
+                for i in FastDir::child_order(tree, diff, node, sort) {
                     path.push(i);
                     walk(
                         tree,
+                        diff,
                         &children[i as usize],
                         path,
                         depth + 1,
@@ -116,6 +141,7 @@ impl FastDir {
         #[allow(clippy::too_many_arguments)]
         fn walk_filtered(
             tree: &Tree,
+            diff: Option<&ScanDiff>,
             node: &Node,
             path: &mut NodePath,
             depth: u16,
@@ -132,10 +158,11 @@ impl FastDir {
             let mut any = false;
             if node.is_dir() {
                 let children = tree.children(node);
-                for i in FastDir::child_order(tree, node, sort) {
+                for i in FastDir::child_order(tree, diff, node, sort) {
                     path.push(i);
                     any |= walk_filtered(
                         tree,
+                        diff,
                         &children[i as usize],
                         path,
                         depth + 1,
@@ -169,6 +196,7 @@ impl FastDir {
         if self.filter.is_active() || owner_filter.is_some() {
             walk_filtered(
                 &tree,
+                diff,
                 tree.root(),
                 &mut path,
                 0,
@@ -186,6 +214,7 @@ impl FastDir {
         } else {
             walk(
                 &tree,
+                diff,
                 tree.root(),
                 &mut path,
                 0,
@@ -345,7 +374,9 @@ impl FastDir {
         if self.sort.0 == key {
             self.sort.1 = !self.sort.1;
         } else {
-            self.sort = (key, key != SortKey::Name);
+            // Status reads best from "needs attention" downwards; everything
+            // else opens on its largest/newest value.
+            self.sort = (key, !matches!(key, SortKey::Name | SortKey::Status));
         }
         self.settings.list.sort.column = self.sort.0;
         self.settings.list.sort.descending = self.sort.1;
@@ -410,6 +441,40 @@ impl FastDir {
             let disk_s = self.bytes(node.disk_size);
             let pct_s = self.percent_of(&tree, &row.path, node);
             let date_s = self.date(node.modified());
+            let comparing = self.compare.is_some();
+            let change = self
+                .compare
+                .as_ref()
+                .and_then(|compare| compare.diff.change(node))
+                .copied();
+            let (delta_s, delta_pct_s, status_s, delta_color) = match change {
+                Some(change) => {
+                    let color = if change.delta > 0 {
+                        rgb(0xe74c3c)
+                    } else {
+                        rgb(0x2ecc71)
+                    };
+                    (
+                        self.signed_bytes(change.delta),
+                        match change.fraction() {
+                            Some(_) => self.signed_percent(change.delta, change.old_size),
+                            None => "—".to_string(),
+                        },
+                        self.change_status_label(change.status).to_string(),
+                        Some(color),
+                    )
+                }
+                None => (
+                    String::new(),
+                    String::new(),
+                    if comparing {
+                        self.tr("change.same").to_string()
+                    } else {
+                        String::new()
+                    },
+                    None,
+                ),
+            };
             // The subtree bar is always parent-relative (it shows the share
             // of the folder above, like WinDirStat).
             let parent_size = if row.path.is_empty() {
@@ -592,6 +657,19 @@ impl FastDir {
                 )
                 .child(num(COL_PCT, pct_s))
                 .child(num(COL_SIZE, size_s).font_weight(FontWeight::MEDIUM))
+                .when(comparing, |d| {
+                    d.child(
+                        num(COL_DELTA, delta_s)
+                            .font_weight(FontWeight::MEDIUM)
+                            .when_some(delta_color, |d, color| d.text_color(color)),
+                    )
+                    .child(
+                        num(COL_DELTA_PCT, delta_pct_s)
+                            .text_color(muted)
+                            .when_some(delta_color, |d, color| d.text_color(color)),
+                    )
+                    .child(num(COL_STATUS, status_s).text_color(muted))
+                })
                 .when(show_disk, |d| d.child(num(COL_DISK, disk_s)))
                 .when(show_items, |d| {
                     d.child(
@@ -654,6 +732,15 @@ impl FastDir {
             out.push(el.into_any_element());
         }
         out
+    }
+
+    /// Localized label for a comparison status.
+    pub(super) fn change_status_label(&self, status: ChangeStatus) -> &'static str {
+        match status {
+            ChangeStatus::Added => self.tr("change.new"),
+            ChangeStatus::Grown => self.tr("change.grew"),
+            ChangeStatus::Shrunk => self.tr("change.shrank"),
+        }
     }
 
     pub(super) fn click_row(&mut self, ix: usize, mode: ClickMode, cx: &mut Context<Self>) {
@@ -780,6 +867,7 @@ impl FastDir {
 
     pub(super) fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let comparing = self.compare.is_some();
         let (key, desc) = self.sort;
         let show = &self.settings.list;
         let (show_items, show_files, show_folders, show_modified, show_disk) = (
@@ -862,6 +950,32 @@ impl FastDir {
                 true,
                 cx,
             ))
+            .when(comparing, |d| {
+                d.child(head(
+                    "h-delta",
+                    self.tr("list.col_delta"),
+                    SortKey::Delta,
+                    Some(COL_DELTA),
+                    true,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .w(sp(COL_DELTA_PCT))
+                        .flex_shrink_0()
+                        .px_2()
+                        .text_right()
+                        .child(self.tr("list.col_delta_pct")),
+                )
+                .child(head(
+                    "h-status",
+                    self.tr("list.col_status"),
+                    SortKey::Status,
+                    Some(COL_STATUS),
+                    true,
+                    cx,
+                ))
+            })
             .when(show_disk, |d| {
                 d.child(head(
                     "h-disk",
@@ -931,6 +1045,7 @@ impl FastDir {
             .child(match self.tab {
                 ListTab::Tree => self.render_tree_table(cx).into_any_element(),
                 ListTab::TopFiles => self.render_top_table(cx).into_any_element(),
+                ListTab::Removed => self.render_removed_table(cx).into_any_element(),
             })
     }
 
@@ -943,6 +1058,12 @@ impl FastDir {
         let head = theme.list_head;
         let tree_tab = self.tab == ListTab::Tree;
         let top_tab = self.tab == ListTab::TopFiles;
+        let removed_tab = self.tab == ListTab::Removed;
+        let removed_count = self
+            .compare
+            .as_ref()
+            .map(|compare| compare.diff.removed().len())
+            .unwrap_or(0);
         let tab = |id: &'static str,
                    label: String,
                    active: bool,
@@ -995,6 +1116,18 @@ impl FastDir {
                 ListTab::TopFiles,
                 cx,
             ))
+            .when(removed_count > 0, |d| {
+                d.child(tab(
+                    "tab-removed",
+                    self.tr_fmt(
+                        "list.removed_tab",
+                        &[("n", &self.count(removed_count as u64))],
+                    ),
+                    removed_tab,
+                    ListTab::Removed,
+                    cx,
+                ))
+            })
     }
 
     fn render_tree_table(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1030,7 +1163,9 @@ impl FastDir {
                         .track_scroll(&self.list_scroll),
                 )
                 .child(Scrollbar::vertical(&self.list_scroll))
-                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                .context_menu(move |menu, window, cx| {
+                    actions_ui::build_context_menu(entity.clone(), menu, window, cx)
+                })
                 .into_any_element()
         };
         v_flex()
@@ -1046,13 +1181,26 @@ impl FastDir {
         }
         self.tab = tab;
         self.marked.clear();
-        if tab == ListTab::TopFiles {
-            if self.top_stale {
-                self.refresh_top_files();
+        match tab {
+            ListTab::TopFiles => {
+                if self.top_stale {
+                    self.refresh_top_files();
+                }
+                if self.top_selected.is_none() && !self.top_files.is_empty() {
+                    self.top_selected = Some(0);
+                }
             }
-            if self.top_selected.is_none() && !self.top_files.is_empty() {
-                self.top_selected = Some(0);
+            ListTab::Removed => {
+                let count = self
+                    .compare
+                    .as_ref()
+                    .map(|compare| compare.removed_order.len())
+                    .unwrap_or(0);
+                if self.removed_selected.is_none() && count > 0 {
+                    self.removed_selected = Some(0);
+                }
             }
+            ListTab::Tree => {}
         }
         self.sync_treemap_selection(cx);
         cx.notify();
@@ -1289,7 +1437,9 @@ impl FastDir {
                         .track_scroll(&self.top_scroll),
                 )
                 .child(Scrollbar::vertical(&self.top_scroll))
-                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                .context_menu(move |menu, window, cx| {
+                    actions_ui::build_context_menu(entity.clone(), menu, window, cx)
+                })
                 .into_any_element()
         };
         v_flex()
@@ -1422,6 +1572,231 @@ impl FastDir {
                                 )),
                         )
                     })
+                    .into_any_element(),
+            );
+        }
+        out
+    }
+
+    /// Header of the "Removed" list: still sortable, but every row is a loss.
+    fn render_removed_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let (key, desc) = self.removed_sort;
+        let head = |id: &'static str,
+                    label: &'static str,
+                    k: SortKey,
+                    w: Option<f32>,
+                    right: bool,
+                    cx: &mut Context<Self>| {
+            let active = key == k;
+            let arrow = if desc {
+                IconName::ArrowDown
+            } else {
+                IconName::ArrowUp
+            };
+            h_flex()
+                .id(id)
+                .h_full()
+                .px_2()
+                .gap_1()
+                .cursor_pointer()
+                .when_some(w, |d, w| d.w(px(w)).flex_shrink_0())
+                .when(w.is_none(), |d| d.flex_1().min_w(sp(220.)).pl(sp(8.)))
+                .when(right, |d| d.justify_end())
+                .hover(|s| s.bg(cx.theme().list_hover))
+                .when(active, |d| d.text_color(cx.theme().foreground))
+                .child(label)
+                .when(active, |d| d.child(Icon::new(arrow).xsmall()))
+                .on_click(cx.listener(move |this, _, _, cx| this.set_removed_sort(k, cx)))
+        };
+        h_flex()
+            .h(sp(28.))
+            .w_full()
+            .flex_shrink_0()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.list_head)
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme.muted_foreground)
+            .child(head(
+                "removed-name",
+                self.tr("list.col_name"),
+                SortKey::Name,
+                None,
+                false,
+                cx,
+            ))
+            .child(head(
+                "removed-size",
+                self.tr("list.col_size"),
+                SortKey::Size,
+                Some(COL_SIZE),
+                true,
+                cx,
+            ))
+            .child(head(
+                "removed-disk",
+                self.tr("list.col_disk"),
+                SortKey::Disk,
+                Some(COL_DISK),
+                true,
+                cx,
+            ))
+            .child(head(
+                "removed-date",
+                self.tr("list.col_date"),
+                SortKey::Modified,
+                Some(COL_DATE),
+                true,
+                cx,
+            ))
+            .child(
+                div()
+                    .w(sp(COL_STATUS))
+                    .flex_shrink_0()
+                    .px_2()
+                    .text_right()
+                    .child(self.tr("list.col_status")),
+            )
+    }
+
+    fn render_removed_table(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let count = self
+            .compare
+            .as_ref()
+            .map(|compare| compare.removed_order.len())
+            .unwrap_or(0);
+        let theme = cx.theme();
+        let body: AnyElement = if count == 0 {
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(self.tr("list.removed_empty"))
+                .into_any_element()
+        } else {
+            div()
+                .id("removed-body")
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(
+                    uniform_list(
+                        "removed-rows",
+                        count,
+                        cx.processor(Self::render_removed_rows),
+                    )
+                    .size_full()
+                    .track_scroll(&self.removed_scroll),
+                )
+                .child(Scrollbar::vertical(&self.removed_scroll))
+                .into_any_element()
+        };
+        v_flex()
+            .size_full()
+            .child(self.render_removed_header(cx))
+            .child(body)
+    }
+
+    fn render_removed_rows(
+        &mut self,
+        range: Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(compare) = self.compare.as_ref() else {
+            return Vec::new();
+        };
+        let removed = compare.diff.removed();
+        let order = &compare.removed_order;
+        let theme = cx.theme();
+        let fg = theme.foreground;
+        let muted = theme.muted_foreground;
+        let danger = theme.danger;
+        let active = theme.list_active;
+        let active_border = theme.list_active_border;
+        let hover = theme.list_hover;
+        let even = theme.list_even;
+        let selected = self.removed_selected;
+        let num = |w: f32, s: String| {
+            div()
+                .w(px(w))
+                .flex_shrink_0()
+                .px_2()
+                .text_right()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(s)
+        };
+        let mut out = Vec::with_capacity(range.len());
+        for ix in range {
+            let Some(&entry_ix) = order.get(ix) else {
+                continue;
+            };
+            let Some(entry) = removed.get(entry_ix) else {
+                continue;
+            };
+            let is_sel = selected == Some(ix);
+            let icon = if entry.is_dir {
+                Icon::new(IconName::Folder)
+                    .xsmall()
+                    .text_color(rgb(0xe0b04a))
+            } else {
+                Icon::new(IconName::File).xsmall().text_color(muted)
+            };
+            out.push(
+                h_flex()
+                    .id(("removed-row", ix))
+                    .h(sp(ROW_H))
+                    .w_full()
+                    .text_xs()
+                    .text_color(fg)
+                    .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
+                    .when(is_sel, |d| {
+                        d.bg(active).border_l_2().border_color(active_border)
+                    })
+                    .when(!is_sel, |d| {
+                        d.border_l_2()
+                            .border_color(transparent_black())
+                            .hover(|s| s.bg(hover))
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.focus.focus(window, cx);
+                            this.select_removed_row(ix, cx);
+                        }),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w(sp(220.))
+                            .overflow_hidden()
+                            .gap_2()
+                            .pl_2()
+                            .child(icon)
+                            .child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_color(muted)
+                                    .child(SharedString::from(entry.path.clone())),
+                            ),
+                    )
+                    .child(num(COL_SIZE, self.bytes(entry.size)))
+                    .child(num(COL_DISK, self.bytes(entry.disk_size)))
+                    .child(num(COL_DATE, self.date(entry.modified)).text_color(muted))
+                    .child(
+                        num(COL_STATUS, self.tr("change.removed").to_string()).text_color(danger),
+                    )
                     .into_any_element(),
             );
         }
