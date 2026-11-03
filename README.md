@@ -376,6 +376,16 @@ on macOS `sudo purge`), then run
 `cargo run --release -p fastdir-cli -- scan <path>` once and note the time.
 Subsequent runs are warm.
 
+### Faster local builds
+
+On Windows, `.cargo/config.toml` links with `rust-lld` (ships with rustup), and
+debug builds keep only line tables for workspace crates and no debug info for
+dependencies, which keeps incremental rebuilds to a few seconds. On a nightly
+toolchain, the `cargo bn` / `rn` / `cn` / `tn` aliases (build / run / check /
+test) also turn on the parallel frontend and shared generics
+(`.cargo/nightly.toml`). Pick one style and stick to it, because switching
+rustflags rebuilds everything.
+
 ### Building the installer locally
 
 Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then:

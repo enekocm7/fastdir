@@ -1,0 +1,11 @@
+# rust-lld ships with every rustup toolchain and links far faster than
+# MSVC link.exe (debug link of the GUI drops from ~10s to a few seconds).
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+
+# Nightly-only extras, see .cargo/nightly.toml. Run from the repo root.
+[alias]
+bn = "build --config .cargo/nightly.toml"
+rn = "run --config .cargo/nightly.toml"
+cn = "check --config .cargo/nightly.toml"
+tn = "test --config .cargo/nightly.toml"
