@@ -10,6 +10,7 @@ use fastdir_settings::{
 };
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 
 pub(super) struct SettingsView {
@@ -195,27 +196,43 @@ impl Render for SettingsView {
         let reset_owner = self.owner.clone();
         let lang_owner = self.owner.clone();
 
-        let divider = || div().h(px(1.)).w_full().bg(border);
+        let card_bg = cx.theme().group_box;
+        // Each group of settings sits in its own padded, bordered card so the
+        // groups read as distinct blocks while scrolling.
+        let section = || {
+            v_flex()
+                .px_5()
+                .py_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .bg(card_bg)
+        };
         let title = |text: &'static str| {
             div()
-                .text_sm()
+                .pb_1()
+                .text_base()
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(text)
         };
         let caption = |text: String| div().text_xs().text_color(muted).child(text);
 
-        div()
+        v_flex()
             .id("settings-scroll")
             .max_h(px(560.))
-            .overflow_y_scroll()
             .w_full()
+            .overflow_y_scrollbar()
             .child(
                 v_flex()
-                    .gap_5()
+                    .gap_4()
                     .w_full()
+                    // Room on the right so the scrollbar never covers the cards.
+                    .pl_1()
+                    .pr_4()
+                    .py_1()
                     .child(
-                        v_flex()
-                            .gap_2()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.language.title")))
                             .child(caption(tr("set.language.caption").to_string()))
@@ -240,10 +257,9 @@ impl Render for SettingsView {
                                     ))
                             }),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_2()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.appearance.title")))
                             .child(div().text_xs().text_color(muted).child(tr("set.theme.label")))
@@ -318,10 +334,9 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.scan.title")))
                             .child(
@@ -579,10 +594,9 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.tree.title")))
                             .child(
@@ -925,10 +939,9 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.list.title")))
                             .child(
@@ -1129,10 +1142,9 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.ops.title")))
                             .child(
@@ -1278,10 +1290,9 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_2()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.startup.title")))
                             .child(div().text_xs().text_color(muted).child(tr("set.startup.showonlaunch")))
@@ -1312,10 +1323,9 @@ impl Render for SettingsView {
                                 tr("set.startup.hint").to_string(),
                             )),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.integration.title")))
                             .when(cfg!(windows), |d| {
@@ -1416,10 +1426,9 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_3()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.updates.title")))
                             .child(
@@ -1563,10 +1572,9 @@ impl Render for SettingsView {
                                     }),
                             ),
                     )
-                    .child(divider())
                     .child(
-                        v_flex()
-                            .gap_2()
+                        section()
+                            .gap_4()
                             .w_full()
                             .child(title(tr("set.advanced.title")))
                             .when_some(config_path(), |this, path| {
@@ -1698,7 +1706,7 @@ impl FastDir {
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
                 .title(dlg_title)
-                .w(px(640.))
+                .w(px(680.))
                 .child(view.clone())
                 .footer(
                     h_flex().w_full().justify_end().child(
