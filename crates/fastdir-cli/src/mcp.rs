@@ -10,10 +10,12 @@
 //! `delete_path` exist only when the server is started with
 //! `--allow-destructive`.
 
+use crate::diff as diff_doc;
 use crate::schema::{self, ScanDoc, ScanMeta, TreeShape, entry_summary};
 use crate::{CliError, Scanned, resolve_root};
+use fastdir_core::diff as core_diff;
 use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
-use fastdir_core::export::{ExportOptions, export_csv};
+use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
 use fastdir_core::filter::{Filter, parse_size};
 use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
 use fastdir_core::scanner::{self, Progress, ScanOptions};
@@ -35,8 +37,9 @@ const MAX_LIMIT: usize = 1000;
 const INSTRUCTIONS: &str = "FastDir analyzes disk usage. Call scan_path on a folder or drive \
 first (it can take a while on a whole drive), then use get_children to drill down, \
 largest_files for cleanup candidates, search to find entries by name or glob, find_duplicates \
-for groups of identical files, and path_info for one entry. Results come from the in-memory \
-scan; call scan_path again to refresh. Sizes are bytes; `disk_size` is the allocated size on disk.";
+for groups of identical files, and path_info for one entry. compare_scans shows what changed \
+since a cached scan or a saved JSON scan. Results come from the in-memory scan; call scan_path \
+again to refresh. Sizes are bytes; `disk_size` is the allocated size on disk.";
 
 // JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -262,6 +265,22 @@ impl Server {
                 "annotations": read_only,
             }),
             json!({
+                "name": "compare_scans",
+                "description": "Show what changed between two scans of the same folder: added, removed, grown and shrunk paths with their old and new sizes, largest absolute change first. `old` is a cached scan root or a saved JSON scan file; `new` is a saved JSON scan file or a folder to scan now.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "old": { "type": "string", "description": "Root of a scan cached in this session, or a saved fastdir.scan JSON file" },
+                        "new": { "type": "string", "description": "Folder or drive to scan now, or a saved fastdir.scan JSON file" },
+                        "min_change": { "type": ["string", "integer"], "description": "Hide changes smaller than this: bytes, or a size such as 20GB (binary units)" },
+                        "max_depth": { "type": "integer", "minimum": 0, "description": "Only entries up to this many levels below the root (0 = the root row)" },
+                        "limit": limit(50),
+                    },
+                    "required": ["old", "new"],
+                },
+                "annotations": read_only,
+            }),
+            json!({
                 "name": "export_scan",
                 "description": "Write a scanned folder (or a subfolder) to a JSON (fastdir.scan schema) or CSV file.",
                 "inputSchema": {
@@ -309,6 +328,7 @@ impl Server {
             "search" => self.search(args),
             "path_info" => self.path_info(args),
             "find_duplicates" => self.find_duplicates(args),
+            "compare_scans" => self.compare_scans(args),
             "export_scan" => self.export_scan(args),
             "recycle_path" if self.allow_destructive => self.remove_path(args, false),
             "delete_path" if self.allow_destructive => {
@@ -325,19 +345,8 @@ impl Server {
     // --- scans and lookup ---------------------------------------------------
 
     fn scan(&mut self, path: &Path, options: &ScanOptions) -> Result<usize, ToolError> {
-        let root = resolve_root(path)?;
-        let progress = Arc::new(Progress::default());
-        let scanned_at = schema::now_iso();
-        let result = scanner::scan(root.clone(), progress.clone(), options);
-        let scanned = Scanned {
-            tree: result.tree,
-            meta: ScanMeta {
-                root: root.clone(),
-                scanned_at,
-                elapsed_ms: result.elapsed.as_millis() as u64,
-                errors: progress.errors.load(Ordering::Relaxed),
-            },
-        };
+        let scanned = scan_folder(path, options)?;
+        let root = scanned.meta.root.clone();
         self.scans.retain(|s| !same_path(&s.meta.root, &root));
         if self.scans.len() >= MAX_CACHED_SCANS {
             self.scans.remove(0);
@@ -513,6 +522,95 @@ impl Server {
         Ok(out)
     }
 
+    fn compare_scans(&mut self, args: &Value) -> ToolResult {
+        let old_arg = arg_named_path(args, "old")?;
+        let new_arg = arg_named_path(args, "new")?;
+        let min_change = arg_size(args, "min_change")?;
+        let max_depth = match args.get("max_depth") {
+            None | Some(Value::Null) => None,
+            Some(v) => Some(
+                v.as_u64()
+                    .ok_or_else(|| ToolError("max_depth must be a whole number".into()))?
+                    as usize,
+            ),
+        };
+        let limit = arg_limit(args, 50)?;
+        let old = self.load_old_side(&old_arg)?;
+        let new = self.load_new_side(&new_arg)?;
+        let old_tree = old.tree(&self.scans);
+        let new_tree = new.tree(&self.scans);
+        let diff = core_diff::build(old_tree, new_tree);
+        let doc = diff_doc::document(
+            &diff,
+            new_tree,
+            old.side(),
+            new.side(),
+            min_change,
+            max_depth,
+            Some(limit),
+        );
+        serde_json::to_value(&doc)
+            .map_err(|e| ToolError(format!("could not serialize the comparison: {e}")))
+    }
+
+    /// `old` is a saved scan file or a cached scan root; a folder that is not
+    /// cached yet is scanned once and kept, so later calls can reuse it.
+    fn load_old_side(&mut self, path: &Path) -> Result<Side, ToolError> {
+        let path = absolute(path)?;
+        let meta =
+            std::fs::metadata(&path).map_err(|e| ToolError(format!("{}: {e}", path.display())))?;
+        if meta.is_file() {
+            return load_saved_side(&path);
+        }
+        if !meta.is_dir() {
+            return tool_err(format!("{}: not a file or folder", path.display()));
+        }
+        let i = match self
+            .scans
+            .iter()
+            .rposition(|s| same_path(&s.meta.root, &path))
+        {
+            Some(i) => {
+                // Keep the baseline from being evicted while `new` is loaded.
+                let s = self.scans.remove(i);
+                self.scans.push(s);
+                self.scans.len() - 1
+            }
+            None => self.scan(&path, &ScanOptions::default())?,
+        };
+        let s = &self.scans[i];
+        Ok(Side::Cached {
+            root: s.meta.root.clone(),
+            side: diff_doc::DiffSide::new(
+                s.meta.root.to_string_lossy().into_owned(),
+                Some(s.meta.scanned_at.clone()),
+            ),
+        })
+    }
+
+    /// `new` is a saved scan file or a folder scanned now. A folder is not
+    /// cached, so the baseline cached under the same root stays intact.
+    fn load_new_side(&mut self, path: &Path) -> Result<Side, ToolError> {
+        let path = absolute(path)?;
+        let meta =
+            std::fs::metadata(&path).map_err(|e| ToolError(format!("{}: {e}", path.display())))?;
+        if meta.is_file() {
+            return load_saved_side(&path);
+        }
+        if !meta.is_dir() {
+            return tool_err(format!("{}: not a file or folder", path.display()));
+        }
+        let scanned = scan_folder(&path, &ScanOptions::default())?;
+        let side = diff_doc::DiffSide::new(
+            scanned.meta.root.to_string_lossy().into_owned(),
+            Some(scanned.meta.scanned_at.clone()),
+        );
+        Ok(Side::Local {
+            tree: Box::new(scanned.tree),
+            side,
+        })
+    }
+
     fn find_duplicates(&mut self, args: &Value) -> ToolResult {
         let path = arg_path(args)?;
         let min_size = match args.get("min_size") {
@@ -670,6 +768,72 @@ impl Server {
     }
 }
 
+/// One side of a `compare_scans` comparison: a tree held here, or a tree in
+/// the server's scan cache (found by root when the diff is built).
+enum Side {
+    Local {
+        tree: Box<Tree>,
+        side: diff_doc::DiffSide,
+    },
+    Cached {
+        root: PathBuf,
+        side: diff_doc::DiffSide,
+    },
+}
+
+impl Side {
+    fn side(&self) -> &diff_doc::DiffSide {
+        match self {
+            Self::Local { side, .. } | Self::Cached { side, .. } => side,
+        }
+    }
+
+    fn tree<'a>(&'a self, scans: &'a [Scanned]) -> &'a Tree {
+        match self {
+            Self::Local { tree, .. } => tree,
+            Self::Cached { root, .. } => {
+                let i = scans
+                    .iter()
+                    .rposition(|s| same_path(&s.meta.root, root))
+                    .expect("the cached baseline is still present");
+                &scans[i].tree
+            }
+        }
+    }
+}
+
+fn load_saved_side(path: &Path) -> Result<Side, ToolError> {
+    let shown = path.display();
+    let file = std::fs::File::open(path).map_err(|e| ToolError(format!("{shown}: {e}")))?;
+    let imported = import_json_with_meta(io::BufReader::new(file))
+        .map_err(|e| ToolError(format!("{shown}: {e}")))?;
+    let side = diff_doc::DiffSide::new(
+        imported.tree.root_path.to_string_lossy().into_owned(),
+        schema::iso_time(imported.scanned_at),
+    );
+    Ok(Side::Local {
+        tree: Box::new(imported.tree),
+        side,
+    })
+}
+
+/// Scan `path` without touching the cache.
+fn scan_folder(path: &Path, options: &ScanOptions) -> Result<Scanned, ToolError> {
+    let root = resolve_root(path)?;
+    let progress = Arc::new(Progress::default());
+    let scanned_at = schema::now_iso();
+    let result = scanner::scan(root.clone(), progress.clone(), options);
+    Ok(Scanned {
+        tree: result.tree,
+        meta: ScanMeta {
+            root,
+            scanned_at,
+            elapsed_ms: result.elapsed.as_millis() as u64,
+            errors: progress.errors.load(Ordering::Relaxed),
+        },
+    })
+}
+
 /// `{ entry, children, total_children, omitted }` for the folder at `node`.
 fn children_reply(tree: &Tree, node: &[u32], limit: usize, include_files: bool) -> Value {
     let dir = tree.get(node).expect("folder exists");
@@ -785,6 +949,30 @@ fn arg_path(args: &Value) -> Result<PathBuf, ToolError> {
     match arg_str(args, "path")? {
         Some(p) if !p.trim().is_empty() => Ok(crate::args::normalize_path(&p)),
         _ => tool_err("missing path"),
+    }
+}
+
+/// A required path argument named `name` (`old` / `new` for `compare_scans`).
+fn arg_named_path(args: &Value, name: &str) -> Result<PathBuf, ToolError> {
+    match arg_str(args, name)? {
+        Some(p) if !p.trim().is_empty() => Ok(crate::args::normalize_path(&p)),
+        _ => tool_err(format!("missing {name}")),
+    }
+}
+
+/// A byte size given as an integer or as a string such as `20GB`.
+fn arg_size(args: &Value, name: &str) -> Result<u64, ToolError> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(0),
+        Some(Value::Number(n)) => n
+            .as_u64()
+            .ok_or_else(|| ToolError(format!("{name} must be a whole number of bytes"))),
+        Some(Value::String(s)) => parse_size(s).ok_or_else(|| {
+            ToolError(format!(
+                "{name} must be a size such as 500MB or 1.5GB, got {s:?}"
+            ))
+        }),
+        Some(_) => tool_err(format!("{name} must be a number of bytes or a size string")),
     }
 }
 
@@ -905,6 +1093,7 @@ mod tests {
                 "search",
                 "path_info",
                 "find_duplicates",
+                "compare_scans",
                 "export_scan"
             ]
         );
@@ -996,6 +1185,85 @@ mod tests {
         assert_eq!(doc["schema"], "fastdir.scan");
         assert_eq!(doc["tree"]["name"], "docs");
         assert_eq!(doc["tree"]["size"], 150);
+    }
+
+    #[test]
+    fn compare_scans_against_a_cached_scan_and_a_saved_file() {
+        let dir = TempDir::new("cmp");
+        let root = dir.0.to_string_lossy().to_string();
+        let mut s = Server::new(false);
+        ok(&mut s, "scan_path", json!({ "path": root }));
+
+        // Grow a.txt from 100 to 600 bytes.
+        std::fs::write(dir.0.join("docs").join("a.txt"), vec![b'a'; 600]).unwrap();
+        let v = ok(&mut s, "compare_scans", json!({ "old": root, "new": root }));
+        assert_eq!(v["schema"], "fastdir.diff");
+        assert_eq!(v["version"], 1);
+        assert_eq!(v["old"]["root"].as_str(), Some(root.as_str()));
+        assert_eq!(v["total"]["delta"], 500);
+        let entries = v["entries"].as_array().unwrap();
+        let a = entries
+            .iter()
+            .find(|e| e["path"].as_str().unwrap().ends_with("a.txt"))
+            .expect("a.txt changed");
+        assert_eq!(a["status"], "changed");
+        assert_eq!(a["type"], "file");
+        assert_eq!(a["old_size"], 100);
+        assert_eq!(a["new_size"], 600);
+        assert_eq!(a["delta"], 500);
+        // The cached baseline survives the scan of the new side.
+        let after = ok(&mut s, "path_info", json!({ "path": root }));
+        assert_eq!(after["size"], 1150, "the baseline was not replaced");
+
+        // Save the scan, then compare that file with the folder now.
+        let saved =
+            std::env::temp_dir().join(format!("fastdir-mcp-compare-{}.json", std::process::id()));
+        ok(
+            &mut s,
+            "export_scan",
+            json!({ "path": root, "output": saved.to_string_lossy() }),
+        );
+        std::fs::write(dir.0.join("docs").join("b.md"), vec![b'b'; 250]).unwrap();
+        let v = ok(
+            &mut s,
+            "compare_scans",
+            json!({ "old": saved.to_string_lossy(), "new": root }),
+        );
+        assert_eq!(v["total"]["delta"], 700);
+        let b = v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["path"].as_str().unwrap().ends_with("b.md"))
+            .expect("b.md changed");
+        assert_eq!(
+            (b["old_size"].as_u64(), b["new_size"].as_u64()),
+            (Some(50), Some(250))
+        );
+
+        // min_change hides rows; total is unchanged.
+        let hidden = ok(
+            &mut s,
+            "compare_scans",
+            json!({ "old": saved.to_string_lossy(), "new": root, "min_change": "1KB" }),
+        );
+        assert_eq!(hidden["total"]["delta"], 700);
+        assert!(hidden["entries"].as_array().unwrap().is_empty());
+        let limited = ok(
+            &mut s,
+            "compare_scans",
+            json!({ "old": saved.to_string_lossy(), "new": root, "limit": 1 }),
+        );
+        assert_eq!(limited["entries"].as_array().unwrap().len(), 1);
+
+        let (err, msg) = call(
+            &mut s,
+            "compare_scans",
+            json!({ "old": "nope.json", "new": root }),
+        );
+        assert!(err);
+        assert!(msg.as_str().unwrap().contains("nope.json"));
+        let _ = std::fs::remove_file(&saved);
     }
 
     #[test]

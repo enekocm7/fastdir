@@ -4,6 +4,7 @@
 //! keeps the GUI binary (which forwards subcommands here) lean. Options accept
 //! both `--name value` and `--name=value`; `--` ends option parsing.
 
+use fastdir_core::filter::parse_size;
 use fastdir_core::scanner::ScanOptions;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -15,6 +16,7 @@ const CLI_WORDS: &[&str] = &[
     "scan",
     "top",
     "duplicates",
+    "diff",
     "mcp",
     "help",
     "version",
@@ -91,6 +93,23 @@ pub struct TopCommand {
     pub limit: usize,
 }
 
+/// `fastdir diff <old.json> <new.json|path>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffCommand {
+    /// Saved scan to compare against (the baseline).
+    pub old: PathBuf,
+    /// Saved scan or live folder to compare it with.
+    pub new: PathBuf,
+    /// Scan options for when `new` is a folder rather than a saved scan.
+    pub scan: ScanArgs,
+    pub out: OutputArgs,
+    /// Hide changes smaller than this many bytes.
+    pub min_change: u64,
+    pub max_depth: Option<usize>,
+    /// Cap on the number of entries (`None` = all).
+    pub limit: Option<usize>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DuplicatesCommand {
     pub scan: ScanArgs,
@@ -116,6 +135,7 @@ pub enum HelpTopic {
     Scan,
     Top,
     Duplicates,
+    Diff,
     Mcp,
 }
 
@@ -126,6 +146,7 @@ pub enum Command {
     Scan(ScanCommand),
     Top(TopCommand),
     Duplicates(DuplicatesCommand),
+    Diff(DiffCommand),
     Mcp(McpCommand),
 }
 
@@ -231,12 +252,14 @@ pub fn parse(args: &[OsString]) -> Result<Command, UsageError> {
             Some("scan") => Ok(Command::Help(HelpTopic::Scan)),
             Some("top") => Ok(Command::Help(HelpTopic::Top)),
             Some("duplicates") => Ok(Command::Help(HelpTopic::Duplicates)),
+            Some("diff") => Ok(Command::Help(HelpTopic::Diff)),
             Some("mcp") => Ok(Command::Help(HelpTopic::Mcp)),
             Some(other) => err(format!("unknown command \"{other}\"")),
         },
         "scan" => parse_scan_like(cur, HelpTopic::Scan),
         "top" => parse_scan_like(cur, HelpTopic::Top),
         "duplicates" => parse_duplicates(cur),
+        "diff" => parse_diff(cur),
         "mcp" => parse_mcp(cur),
         other if other.starts_with('-') => err(format!("unknown option \"{other}\"")),
         other => err(format!("unknown command \"{other}\"")),
@@ -453,6 +476,112 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
     }))
 }
 
+fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
+    let mut positional: Vec<String> = Vec::new();
+    let mut threads = None;
+    let mut exclude = Vec::new();
+    let mut follow_junctions = false;
+    let mut cross_volumes = false;
+    let mut skip_hidden_system = false;
+    let mut collect_owners = false;
+    let mut quiet = false;
+    let mut format = Format::Json;
+    let mut output = None;
+    let mut pretty = false;
+    let mut min_change = 0;
+    let mut max_depth = None;
+    let mut limit = None;
+    let mut positional_only = false;
+
+    while let Some(arg) = cur.args.next() {
+        if positional_only || !arg.starts_with('-') || arg == "-" {
+            positional.push(arg);
+            continue;
+        }
+        let (name, inline) = split_eq(&arg);
+        let takes_value = matches!(
+            name,
+            "--threads"
+                | "--exclude"
+                | "--format"
+                | "--output"
+                | "-o"
+                | "--min-change"
+                | "--max-depth"
+                | "--limit"
+                | "-n"
+        );
+        if inline.is_some() && !takes_value {
+            return err(format!("{name} does not take a value"));
+        }
+        match name {
+            "--" => positional_only = true,
+            "--help" | "-h" => return Ok(Command::Help(HelpTopic::Diff)),
+            "--threads" => {
+                let n = parse_number(name, &cur.value(name, inline)?, 1)?;
+                if n > 64 {
+                    return err("--threads expects a number between 1 and 64");
+                }
+                threads = Some(n);
+            }
+            "--exclude" => exclude.push(cur.value(name, inline)?),
+            "--follow-junctions" => follow_junctions = true,
+            "--cross-volumes" => cross_volumes = true,
+            "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--owners" => collect_owners = true,
+            "--quiet" | "-q" => quiet = true,
+            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--output" | "-o" => {
+                let v = cur.value(name, inline)?;
+                output = if v == "-" {
+                    None
+                } else {
+                    Some(PathBuf::from(v))
+                };
+            }
+            "--pretty" => pretty = true,
+            "--min-change" => {
+                let raw = cur.value(name, inline)?;
+                min_change = parse_size(&raw).ok_or_else(|| {
+                    UsageError(format!(
+                        "--min-change expects a size such as 500MB or 1.5GB, got \"{raw}\""
+                    ))
+                })?;
+            }
+            "--max-depth" => max_depth = Some(parse_number(name, &cur.value(name, inline)?, 0)?),
+            "--limit" | "-n" => limit = Some(parse_number(name, &cur.value(name, inline)?, 1)?),
+            _ => return err(format!("unknown option \"{name}\"")),
+        }
+    }
+    if positional.len() != 2 {
+        return err("diff needs <old.json> and <new.json|path>");
+    }
+    let new = normalize_path(&positional[1]);
+    let scan = ScanArgs {
+        path: new.clone(),
+        threads,
+        exclude,
+        follow_junctions,
+        cross_volumes,
+        skip_hidden_system,
+        collect_owners,
+        quiet,
+    };
+    Ok(Command::Diff(DiffCommand {
+        old: normalize_path(&positional[0]),
+        new,
+        scan,
+        out: OutputArgs {
+            format,
+            output,
+            pretty,
+        },
+        min_change,
+        max_depth,
+        limit,
+    }))
+}
+
 fn parse_mcp(cur: Cursor) -> Result<Command, UsageError> {
     let mut allow_destructive = false;
     for arg in cur.args {
@@ -475,6 +604,7 @@ Usage:
   fastdir top <path> [options]    print the largest files under <path>
   fastdir duplicates <path> [options]
                                   list groups of identical files and the space they waste
+  fastdir diff <old> <new>        show what changed between two scans
   fastdir mcp [options]           run an MCP server on stdin/stdout
   fastdir help [<command>]        show help for a command
   fastdir --version               print the version
@@ -555,6 +685,32 @@ Scanning:
   --skip-hidden, -q/--quiet   as for `fastdir scan`
 ";
 
+pub const DIFF_HELP: &str = "\
+Usage: fastdir diff <old.json> <new.json|path> [options]
+
+Compares a saved scan (the baseline) with another saved scan or with a fresh
+scan of a folder or drive, and lists what was added, removed, grew or shrank.
+Entries are matched by relative path, so the baseline may come from another
+machine.
+
+Output:
+  --format json|csv       output format (default: json)
+  -o, --output <file|->   write to a file instead of stdout
+  --pretty                indent the JSON
+  --min-change <size>     hide changes smaller than <size> (e.g. 20GB)
+  --max-depth <n>         only entries up to <n> levels below the root
+                          (0 = the root row only)
+  -n, --limit <n>         cap the number of entries (largest change first)
+
+Scanning (only when <new> is a folder):
+  --threads <n>           scan threads, 1-64 (default: automatic)
+  --exclude <glob>        skip entries whose name matches (repeatable)
+  --follow-junctions      descend into junctions and symlinked folders
+  --cross-volumes         with --follow-junctions, also enter other volumes
+  --skip-hidden           skip hidden and system entries (alias: --skip-system)
+  -q, --quiet             no progress or summary on stderr
+";
+
 pub const MCP_HELP: &str = "\
 Usage: fastdir mcp [--allow-destructive]
 
@@ -563,8 +719,8 @@ Scans are kept in memory, so follow-up questions about the same folder do
 not rescan it.
 
 Tools: scan_path, get_children, largest_files, search, path_info,
-find_duplicates, export_scan. With --allow-destructive, recycle_path and
-delete_path are also offered; they are off by default.
+find_duplicates, compare_scans, export_scan. With --allow-destructive,
+recycle_path and delete_path are also offered; they are off by default.
 ";
 
 #[cfg(test)]
@@ -595,6 +751,7 @@ mod tests {
         assert!(is_cli_invocation(&args(&["scan", "C:\\"])));
         assert!(is_cli_invocation(&args(&["top"])));
         assert!(is_cli_invocation(&args(&["duplicates", "C:\\"])));
+        assert!(is_cli_invocation(&args(&["diff"])));
         assert!(is_cli_invocation(&args(&["mcp"])));
         assert!(is_cli_invocation(&args(&["--version"])));
         assert!(is_cli_invocation(&args(&["--help"])));
@@ -610,6 +767,7 @@ mod tests {
         assert_eq!(parse_ok(&["-h"]), Command::Help(HelpTopic::General));
         assert_eq!(parse_ok(&["help", "scan"]), Command::Help(HelpTopic::Scan));
         assert_eq!(parse_ok(&["help", "top"]), Command::Help(HelpTopic::Top));
+        assert_eq!(parse_ok(&["help", "diff"]), Command::Help(HelpTopic::Diff));
         assert_eq!(
             parse_ok(&["help", "duplicates"]),
             Command::Help(HelpTopic::Duplicates)
@@ -623,6 +781,10 @@ mod tests {
             Command::Help(HelpTopic::Scan)
         );
         assert_eq!(parse_ok(&["top", "x", "-h"]), Command::Help(HelpTopic::Top));
+        assert_eq!(
+            parse_ok(&["diff", "a", "b", "-h"]),
+            Command::Help(HelpTopic::Diff)
+        );
         assert_eq!(parse_ok(&["mcp", "--help"]), Command::Help(HelpTopic::Mcp));
         assert_eq!(parse_ok(&["--version"]), Command::Version);
         assert_eq!(parse_ok(&["-V"]), Command::Version);
@@ -779,6 +941,56 @@ mod tests {
     }
 
     #[test]
+    fn diff_options() {
+        let c = match parse_ok(&[
+            "diff",
+            "old.json",
+            "C:\\Users",
+            "--format",
+            "csv",
+            "-o",
+            "out.csv",
+            "--pretty",
+            "--min-change",
+            "1.5GB",
+            "--max-depth",
+            "2",
+            "--limit",
+            "10",
+            "--threads",
+            "4",
+            "--exclude",
+            "node_modules",
+            "--owners",
+            "-q",
+        ]) {
+            Command::Diff(c) => c,
+            other => panic!("expected diff, got {other:?}"),
+        };
+        assert_eq!(c.old, PathBuf::from("old.json"));
+        assert_eq!(c.new, PathBuf::from("C:\\Users"));
+        assert_eq!(c.scan.path, PathBuf::from("C:\\Users"));
+        assert_eq!(c.out.format, Format::Csv);
+        assert_eq!(c.out.output, Some(PathBuf::from("out.csv")));
+        assert!(c.out.pretty);
+        assert_eq!(c.min_change, 1024 * 1024 * 1024 * 3 / 2);
+        assert_eq!(c.max_depth, Some(2));
+        assert_eq!(c.limit, Some(10));
+        assert_eq!(c.scan.threads, Some(4));
+        assert_eq!(c.scan.exclude, vec!["node_modules"]);
+        assert!(c.scan.quiet && c.scan.collect_owners);
+
+        let defaults = match parse_ok(&["diff", "old.json", "new.json"]) {
+            Command::Diff(c) => c,
+            other => panic!("expected diff, got {other:?}"),
+        };
+        assert_eq!(defaults.min_change, 0);
+        assert_eq!(defaults.max_depth, None);
+        assert_eq!(defaults.limit, None);
+        assert_eq!(defaults.out.format, Format::Json);
+    }
+
+    #[test]
     fn mcp_options() {
         assert_eq!(
             parse_ok(&["mcp"]),
@@ -813,5 +1025,12 @@ mod tests {
         assert!(parse_err(&["frobnicate"]).contains("unknown command"));
         assert!(parse_err(&["--frobnicate"]).contains("unknown option"));
         assert!(parse_err(&["help", "nope"]).contains("unknown command"));
+        // diff has its own positional pair and options.
+        assert!(parse_err(&["diff", "old.json"]).contains("old.json"));
+        assert!(parse_err(&["diff", "a", "b", "c"]).contains("old.json"));
+        assert!(parse_err(&["diff", "a", "b", "--min-change", "lots"]).contains("size"));
+        assert!(parse_err(&["diff", "a", "b", "--limit", "0"]).contains("at least 1"));
+        assert!(parse_err(&["diff", "a", "b", "--max-depth", "x"]).contains("whole number"));
+        assert!(parse_err(&["diff", "a", "b", "--no-files"]).contains("--no-files"));
     }
 }
