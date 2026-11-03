@@ -3,14 +3,11 @@
 use super::*;
 
 impl FastDir {
-    pub(super) fn build_context_menu(&self, menu: PopupMenu, cx: &App) -> PopupMenu {
+    /// The top of the context menu: open, reveal and copy, ending right
+    /// before the dynamic *Run* submenu.
+    pub(super) fn context_menu_head(&self, menu: PopupMenu) -> PopupMenu {
         let multi = self.is_multi();
-        let is_root = self.only_root();
         let special = self.selected_is_special();
-        let is_dir = !multi && !special && self.selected_fs_path().is_some_and(|s| s.2);
-        let can_zoom_in = self.can_zoom_in(cx);
-        let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
-        let no_ops = is_root || special;
         // A saved scan may not touch items that are gone from this machine.
         let offline = !self.can_touch_selected();
         menu.action_context(self.focus.clone())
@@ -28,7 +25,19 @@ impl FastDir {
             )
             .menu_with_icon_and_disabled(self.tr("menu.copy_path"), IconName::Copy, Box::new(CopyPath), special)
             .menu_with_icon_and_disabled(self.tr("menu.copy_name"), IconName::Copy, Box::new(CopyName), special)
-            .separator()
+    }
+
+    /// The rest of the context menu, after the *Run* submenu.
+    pub(super) fn context_menu_tail(&self, menu: PopupMenu, cx: &App) -> PopupMenu {
+        let multi = self.is_multi();
+        let is_root = self.only_root();
+        let special = self.selected_is_special();
+        let is_dir = !multi && !special && self.selected_fs_path().is_some_and(|s| s.2);
+        let can_zoom_in = self.can_zoom_in(cx);
+        let can_zoom_out = !self.treemap.read(cx).zoom().is_empty();
+        let no_ops = is_root || special;
+        let offline = !self.can_touch_selected();
+        menu.separator()
             .menu_with_icon_and_disabled(
                 self.tr("menu.zoom_in"),
                 IconName::ZoomIn,

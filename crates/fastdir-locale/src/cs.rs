@@ -446,6 +446,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Sken se nepodařilo otevřít",
         "saved.err_body" => "Soubor {path} se nepodařilo otevřít: {error}",
         "saved.missing_item" => "Tato položka na tomto počítači není, takže ji nelze změnit.",
+        "menu.run" => "Spustit",
+        "set.actions.title" => "Akce",
+        "set.actions.caption" => {
+            "Příkazy v místní nabídce Spustit. Zástupné symboly: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Zatím žádné vlastní akce.",
+        "set.actions.add" => "Přidat akci",
+        "set.actions.add_preset" => "Přidat šablonu",
+        "set.actions.edit" => "Upravit",
+        "set.actions.delete" => "Odstranit",
+        "set.actions.name" => "Název",
+        "set.actions.command" => "Program",
+        "set.actions.args" => "Argumenty",
+        "set.actions.args_cap" => {
+            "Argumenty oddělujte mezerami; argumenty s mezerami dejte do uvozovek."
+        }
+        "set.actions.working_dir" => "Pracovní složka",
+        "set.actions.working_dir_cap" => {
+            "Prázdné použije složku položky. Fungují i {path} a {parent}."
+        }
+        "set.actions.applies" => "Platí pro",
+        "set.actions.dir" => "Složky",
+        "set.actions.file" => "Soubory",
+        "set.actions.both" => "Obojí",
+        "set.actions.match" => "Pouze když",
+        "set.actions.match_cap" => {
+            "Soubor, který složka musí obsahovat, nebo maska názvu jako *.zip. Prázdné zobrazí vždy."
+        }
+        "set.actions.shortcut" => "Zkratka",
+        "set.actions.none" => "Žádná",
+        "set.actions.confirm" => "Před spuštěním se zeptat",
+        "set.actions.refresh" => "Poté složku znovu prohledat",
+        "set.actions.show_output" => "Zobrazit výstup příkazu",
+        "set.actions.shell" => "Spustit přes shell",
+        "set.actions.enabled" => "Zapnuto",
+        "set.actions.save" => "Uložit",
+        "set.actions.need_name" => "Akce potřebuje název a program.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Spustit {name}?",
+        "set.actions.confirm_body" => "Spustí se:\n\n{commands}",
+        "set.actions.done" => "{name} dokončeno.",
+        "set.actions.failed_title" => "{name} selhalo",
+        "set.actions.failed_body" => "Návratový kód {code}.\n\n{output}",
+        "set.actions.output_title" => "Výstup {name}",
+        "set.actions.exit_code" => "Návratový kód: {code}",
+        "set.actions.no_output" => "Příkaz nevrátil žádný výstup.",
         _ => return None,
     })
 }

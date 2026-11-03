@@ -444,6 +444,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Scan konnte nicht geöffnet werden",
         "saved.err_body" => "Konnte {path} nicht öffnen: {error}",
         "saved.missing_item" => "Dieses Element ist auf diesem Rechner nicht vorhanden und kann nicht geändert werden.",
+        "menu.run" => "Ausführen",
+        "set.actions.title" => "Aktionen",
+        "set.actions.caption" => {
+            "Befehle im Rechtsklickmenü Ausführen. Platzhalter: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Noch keine eigenen Aktionen.",
+        "set.actions.add" => "Aktion hinzufügen",
+        "set.actions.add_preset" => "Vorlage hinzufügen",
+        "set.actions.edit" => "Bearbeiten",
+        "set.actions.delete" => "Löschen",
+        "set.actions.name" => "Name",
+        "set.actions.command" => "Programm",
+        "set.actions.args" => "Argumente",
+        "set.actions.args_cap" => {
+            "Argumente durch Leerzeichen trennen; Argumente mit Leerzeichen in Anführungszeichen setzen."
+        }
+        "set.actions.working_dir" => "Arbeitsordner",
+        "set.actions.working_dir_cap" => {
+            "Leer verwendet den Ordner des Elements. {path} und {parent} funktionieren ebenfalls."
+        }
+        "set.actions.applies" => "Gilt für",
+        "set.actions.dir" => "Ordner",
+        "set.actions.file" => "Dateien",
+        "set.actions.both" => "Beides",
+        "set.actions.match" => "Nur wenn",
+        "set.actions.match_cap" => {
+            "Eine Datei, die der Ordner enthalten muss, oder ein Namensmuster wie *.zip. Leer zeigt immer."
+        }
+        "set.actions.shortcut" => "Tastenkürzel",
+        "set.actions.none" => "Keins",
+        "set.actions.confirm" => "Vor dem Ausführen fragen",
+        "set.actions.refresh" => "Ordner danach neu einlesen",
+        "set.actions.show_output" => "Ausgabe des Befehls anzeigen",
+        "set.actions.shell" => "Über die Shell ausführen",
+        "set.actions.enabled" => "Aktiviert",
+        "set.actions.save" => "Speichern",
+        "set.actions.need_name" => "Eine Aktion braucht einen Namen und ein Programm.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "{name} ausführen?",
+        "set.actions.confirm_body" => "Ausgeführt wird:\n\n{commands}",
+        "set.actions.done" => "{name} beendet.",
+        "set.actions.failed_title" => "{name} fehlgeschlagen",
+        "set.actions.failed_body" => "Exit-Code {code}.\n\n{output}",
+        "set.actions.output_title" => "Ausgabe von {name}",
+        "set.actions.exit_code" => "Exit-Code: {code}",
+        "set.actions.no_output" => "Der Befehl hat keine Ausgabe erzeugt.",
         _ => return None,
     })
 }

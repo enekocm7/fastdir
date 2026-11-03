@@ -446,6 +446,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "스캔을 열 수 없습니다",
         "saved.err_body" => "{path}을(를) 열 수 없습니다: {error}",
         "saved.missing_item" => "이 항목이 이 컴퓨터에 없어 변경할 수 없습니다.",
+        "menu.run" => "실행",
+        "set.actions.title" => "작업",
+        "set.actions.caption" => {
+            "마우스 오른쪽 버튼의 실행 메뉴에 표시할 명령입니다. 자리 표시자: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "아직 사용자 지정 작업이 없습니다.",
+        "set.actions.add" => "작업 추가",
+        "set.actions.add_preset" => "프리셋 추가",
+        "set.actions.edit" => "편집",
+        "set.actions.delete" => "삭제",
+        "set.actions.name" => "이름",
+        "set.actions.command" => "프로그램",
+        "set.actions.args" => "인수",
+        "set.actions.args_cap" => {
+            "인수는 공백으로 구분하세요. 공백이 있는 인수는 따옴표로 묶으세요."
+        }
+        "set.actions.working_dir" => "작업 폴더",
+        "set.actions.working_dir_cap" => {
+            "비워 두면 항목의 폴더를 사용합니다. {path}와 {parent}도 사용할 수 있습니다."
+        }
+        "set.actions.applies" => "적용 대상",
+        "set.actions.dir" => "폴더",
+        "set.actions.file" => "파일",
+        "set.actions.both" => "둘 다",
+        "set.actions.match" => "조건",
+        "set.actions.match_cap" => {
+            "폴더에 있어야 하는 파일 또는 *.zip 같은 이름 패턴. 비워 두면 항상 표시합니다."
+        }
+        "set.actions.shortcut" => "바로 가기",
+        "set.actions.none" => "없음",
+        "set.actions.confirm" => "실행 전에 확인",
+        "set.actions.refresh" => "실행 후 폴더 다시 스캔",
+        "set.actions.show_output" => "명령 출력 표시",
+        "set.actions.shell" => "셸을 통해 실행",
+        "set.actions.enabled" => "사용",
+        "set.actions.save" => "저장",
+        "set.actions.need_name" => "작업에는 이름과 프로그램이 필요합니다.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "{name}을(를) 실행할까요?",
+        "set.actions.confirm_body" => "다음이 실행됩니다:\n\n{commands}",
+        "set.actions.done" => "{name} 완료.",
+        "set.actions.failed_title" => "{name} 실패",
+        "set.actions.failed_body" => "종료 코드 {code}.\n\n{output}",
+        "set.actions.output_title" => "{name}의 출력",
+        "set.actions.exit_code" => "종료 코드: {code}",
+        "set.actions.no_output" => "명령이 출력을 생성하지 않았습니다.",
         _ => return None,
     })
 }

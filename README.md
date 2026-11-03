@@ -66,6 +66,12 @@ culprit? Rename, move, recycle or delete it right there.
 - **File operations** that update the tree in place, with no rescan:
   rename, move (also across drives), move to Recycle Bin, delete permanently,
   refresh a single folder, show in Explorer, open, copy path.
+- **Custom actions** - wire cleanup commands into the right-click **Run**
+  menu (`cargo clean`, `git gc`, `docker system prune`, "open a terminal
+  here", "open in VS Code", ...) from `[[actions]]` in `config.toml` or
+  Settings → Actions. Placeholders (`{path}`, `{name}`, `{parent}`, `{ext}`),
+  folder/file filters, confirmations, optional output windows and an optional
+  folder refresh afterwards. See [Custom actions](#custom-actions).
 - **Multi-select**: Ctrl+click toggles, Shift+click selects a range (also in
   the treemap, where every selected cell is outlined). The status bar shows
   the count and total size; move / recycle / delete run on the whole
@@ -79,8 +85,9 @@ culprit? Rename, move, recycle or delete it right there.
   list-only mode, excluded
     paths, hidden/system skipping, junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
-  frequency, per-action delete confirmations, whether the list stays on the
-  current item after a delete (opt-in) and the default delete action.
+  frequency, per-action delete confirmations, custom cleanup actions, whether
+  the list stays on the current item after a delete (opt-in) and the default
+  delete action.
 - **Localized UI** (Settings → Language, applies immediately): English,
   Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian,
   Ukrainian, Turkish, Chinese, Japanese, Korean, Arabic and Czech. New
@@ -110,9 +117,9 @@ newer version exists, a notification and a toolbar button offer **Update now**
 this version**. Use the toolbar's `…` menu to check manually or to turn the
 automatic check off. All settings live in `%APPDATA%\FastDir\config.toml`,
 grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
-`[appearance]`, `[integration]`, `[locale]` and `[categories]` sections (older
-config files migrate automatically). Unknown extensions fall into *Other*;
-move or add extensions to a category in `[categories]`:
+`[appearance]`, `[integration]`, `[locale]`, `[categories]` and `[[actions]]`
+sections (older config files migrate automatically). Unknown extensions fall
+into *Other*; move or add extensions to a category in `[categories]`:
 
 ```toml
 [categories]
@@ -150,6 +157,51 @@ JSON is a browsing snapshot: hard-link markers and drive pseudo-items
 kept but the UI cannot tell them apart. Opening a truncated document
 (`--max-depth` or `--no-files`) also means totals only reflect the entries
 that were written.
+
+### Custom actions
+
+FastDir can run your own commands on the selected file or folder. They appear
+in the right-click **Run** submenu (and, optionally, on `Ctrl+1`…`Ctrl+9`).
+Define them under Settings → Actions or directly in `config.toml`:
+
+```toml
+[[actions]]
+name = "cargo clean"
+command = "cargo"
+args = ["clean"]
+working_dir = "{path}"        # placeholders: {path} {name} {parent} {ext}
+applies_to = "dir"            # dir | file | both
+match = "Cargo.toml"          # file the folder must contain, or a name glob
+confirm = true                # show the exact command line first
+refresh_after = true          # re-scan the folder in place afterwards
+show_output = false           # show stdout/stderr in a dialog
+enabled = true
+shortcut = 1                  # optional: Ctrl+1
+
+[[actions]]
+name = "Open in VS Code"
+command = "code"
+args = ["{path}"]
+applies_to = "both"
+confirm = false
+```
+
+- **Placeholders** are replaced per item. `{path}` is the full path, `{name}`
+  the file/folder name, `{parent}` the containing folder and `{ext}` the
+  extension (empty for folders).
+- **Direct execution**: commands are spawned directly, not through a shell,
+  so paths with spaces or non-ASCII characters work without quoting. Set
+  `shell = true` to run through `cmd /C` / `sh -c` instead; placeholder
+  values are then quoted for the platform shell.
+- **`match`** narrows where an action appears: a plain name must be a file the
+  folder contains (`Cargo.toml`, `.git`), and a glob (`*.zip`) is matched
+  against the item's name. For files, a plain name compares with the file name.
+- **`working_dir`** defaults to the item (a file's folder for files); `{path}`
+  and `{parent}` can be used explicitly.
+- **Safety**: actions with `confirm = true` show the full command line before
+  anything runs. FastDir ships four disabled examples (open terminal here,
+  open in VS Code, `cargo clean`, `git gc`) to copy from. Multi-select runs
+  the action once per item through the same queue as deletes and moves.
 
 ### Command line (for scripts and agents)
 
@@ -303,6 +355,7 @@ Or in any client's JSON configuration:
 | Ctrl+O | Scan a folder… |
 | Ctrl+F | Focus the search box |
 | Ctrl+Shift+F | Minimum size / extension / date filters |
+| Ctrl+1 … Ctrl+9 | Run the custom action bound to that number |
 | Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |
 | Ctrl+, | Open settings |

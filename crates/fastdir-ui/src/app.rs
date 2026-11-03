@@ -86,9 +86,19 @@ actions!(
         OpenFilters,
         OpenSettings,
         ExportResults,
+        RunAction1,
+        RunAction2,
+        RunAction3,
+        RunAction4,
+        RunAction5,
+        RunAction6,
+        RunAction7,
+        RunAction8,
+        RunAction9,
     ]
 );
 
+mod actions_ui;
 mod context_menu;
 mod dialogs;
 mod export;
@@ -145,6 +155,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-e", ExportResults, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("ctrl-1", RunAction1, Some(CONTEXT)),
+        KeyBinding::new("ctrl-2", RunAction2, Some(CONTEXT)),
+        KeyBinding::new("ctrl-3", RunAction3, Some(CONTEXT)),
+        KeyBinding::new("ctrl-4", RunAction4, Some(CONTEXT)),
+        KeyBinding::new("ctrl-5", RunAction5, Some(CONTEXT)),
+        KeyBinding::new("ctrl-6", RunAction6, Some(CONTEXT)),
+        KeyBinding::new("ctrl-7", RunAction7, Some(CONTEXT)),
+        KeyBinding::new("ctrl-8", RunAction8, Some(CONTEXT)),
+        KeyBinding::new("ctrl-9", RunAction9, Some(CONTEXT)),
     ]);
     // macOS users expect Cmd: bind it alongside Ctrl so both work. A full
     // shortcut overhaul (remappable keys) is out of scope.
@@ -162,6 +181,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-f", FocusSearch, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("cmd-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("cmd-1", RunAction1, Some(CONTEXT)),
+        KeyBinding::new("cmd-2", RunAction2, Some(CONTEXT)),
+        KeyBinding::new("cmd-3", RunAction3, Some(CONTEXT)),
+        KeyBinding::new("cmd-4", RunAction4, Some(CONTEXT)),
+        KeyBinding::new("cmd-5", RunAction5, Some(CONTEXT)),
+        KeyBinding::new("cmd-6", RunAction6, Some(CONTEXT)),
+        KeyBinding::new("cmd-7", RunAction7, Some(CONTEXT)),
+        KeyBinding::new("cmd-8", RunAction8, Some(CONTEXT)),
+        KeyBinding::new("cmd-9", RunAction9, Some(CONTEXT)),
     ]);
 }
 
@@ -310,6 +338,7 @@ struct FileOp {
 enum PendingKind {
     Delete { permanent: bool },
     Move { dest: PathBuf },
+    Action { run: actions_ui::ActionRun },
 }
 
 /// A delete or move waiting for the running one to finish. The targets are
@@ -906,8 +935,8 @@ impl FastDir {
                         .id("treemap-panel")
                         .size_full()
                         .child(self.treemap.clone())
-                        .context_menu(move |menu, _, cx| {
-                            entity.read(cx).build_context_menu(menu, cx)
+                        .context_menu(move |menu, window, cx| {
+                            actions_ui::build_context_menu(entity.clone(), menu, window, cx)
                         })
                 }))
                 .into_any_element()
@@ -1200,6 +1229,33 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::open_filters))
             .on_action(cx.listener(Self::open_export))
             .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(|this, _: &RunAction1, window, cx| {
+                this.run_action_shortcut(1, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction2, window, cx| {
+                this.run_action_shortcut(2, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction3, window, cx| {
+                this.run_action_shortcut(3, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction4, window, cx| {
+                this.run_action_shortcut(4, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction5, window, cx| {
+                this.run_action_shortcut(5, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction6, window, cx| {
+                this.run_action_shortcut(6, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction7, window, cx| {
+                this.run_action_shortcut(7, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction8, window, cx| {
+                this.run_action_shortcut(8, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RunAction9, window, cx| {
+                this.run_action_shortcut(9, window, cx)
+            }))
             .on_drop::<ExternalPaths>(cx.listener(
                 |this, paths: &ExternalPaths, window, cx| {
                     this.open_dropped(paths, window, cx)

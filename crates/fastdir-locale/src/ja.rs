@@ -446,6 +446,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "スキャンを開けませんでした",
         "saved.err_body" => "{path} を開けませんでした: {error}",
         "saved.missing_item" => "この項目はこのコンピューターにないため変更できません。",
+        "menu.run" => "実行",
+        "set.actions.title" => "アクション",
+        "set.actions.caption" => {
+            "右クリックの「実行」メニューに表示するコマンド。プレースホルダー: {path}、{name}、{parent}、{ext}。"
+        }
+        "set.actions.empty" => "カスタムアクションはまだありません。",
+        "set.actions.add" => "アクションを追加",
+        "set.actions.add_preset" => "プリセットを追加",
+        "set.actions.edit" => "編集",
+        "set.actions.delete" => "削除",
+        "set.actions.name" => "名前",
+        "set.actions.command" => "プログラム",
+        "set.actions.args" => "引数",
+        "set.actions.args_cap" => {
+            "引数はスペースで区切ります。スペースを含む引数は引用符で囲んでください。"
+        }
+        "set.actions.working_dir" => "作業フォルダー",
+        "set.actions.working_dir_cap" => {
+            "空の場合は項目のフォルダーを使用します。{path} と {parent} も使えます。"
+        }
+        "set.actions.applies" => "対象",
+        "set.actions.dir" => "フォルダー",
+        "set.actions.file" => "ファイル",
+        "set.actions.both" => "両方",
+        "set.actions.match" => "条件",
+        "set.actions.match_cap" => {
+            "フォルダーに必要なファイル、または *.zip のような名前パターン。空なら常に表示します。"
+        }
+        "set.actions.shortcut" => "ショートカット",
+        "set.actions.none" => "なし",
+        "set.actions.confirm" => "実行前に確認する",
+        "set.actions.refresh" => "実行後にフォルダーを再スキャン",
+        "set.actions.show_output" => "コマンドの出力を表示",
+        "set.actions.shell" => "シェル経由で実行",
+        "set.actions.enabled" => "有効",
+        "set.actions.save" => "保存",
+        "set.actions.need_name" => "アクションには名前とプログラムが必要です。",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "{name} を実行しますか?",
+        "set.actions.confirm_body" => "実行するコマンド:\n\n{commands}",
+        "set.actions.done" => "{name} が完了しました。",
+        "set.actions.failed_title" => "{name} に失敗しました",
+        "set.actions.failed_body" => "終了コード {code}。\n\n{output}",
+        "set.actions.output_title" => "{name} の出力",
+        "set.actions.exit_code" => "終了コード: {code}",
+        "set.actions.no_output" => "コマンドは出力を生成しませんでした。",
         _ => return None,
     })
 }

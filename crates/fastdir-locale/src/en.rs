@@ -416,6 +416,44 @@ pub const KEYS: &[&str] = &[
     "saved.err_title",
     "saved.err_body",
     "saved.missing_item",
+    "menu.run",
+    "set.actions.title",
+    "set.actions.caption",
+    "set.actions.empty",
+    "set.actions.add",
+    "set.actions.add_preset",
+    "set.actions.edit",
+    "set.actions.delete",
+    "set.actions.name",
+    "set.actions.command",
+    "set.actions.args",
+    "set.actions.args_cap",
+    "set.actions.working_dir",
+    "set.actions.working_dir_cap",
+    "set.actions.applies",
+    "set.actions.dir",
+    "set.actions.file",
+    "set.actions.both",
+    "set.actions.match",
+    "set.actions.match_cap",
+    "set.actions.shortcut",
+    "set.actions.none",
+    "set.actions.confirm",
+    "set.actions.refresh",
+    "set.actions.show_output",
+    "set.actions.shell",
+    "set.actions.enabled",
+    "set.actions.save",
+    "set.actions.need_name",
+    "set.actions.op_label",
+    "set.actions.confirm_title",
+    "set.actions.confirm_body",
+    "set.actions.done",
+    "set.actions.failed_title",
+    "set.actions.failed_body",
+    "set.actions.output_title",
+    "set.actions.exit_code",
+    "set.actions.no_output",
 ];
 
 /// English lookup. Returns `None` for unknown keys.
@@ -858,6 +896,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Could not open the scan",
         "saved.err_body" => "Could not open {path}: {error}",
         "saved.missing_item" => "This item is not on this machine, so it cannot be changed.",
+        "menu.run" => "Run",
+        "set.actions.title" => "Actions",
+        "set.actions.caption" => {
+            "Commands shown in the right-click Run menu. Placeholders: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "No custom actions yet.",
+        "set.actions.add" => "Add action",
+        "set.actions.add_preset" => "Add preset",
+        "set.actions.edit" => "Edit",
+        "set.actions.delete" => "Delete",
+        "set.actions.name" => "Name",
+        "set.actions.command" => "Program",
+        "set.actions.args" => "Arguments",
+        "set.actions.args_cap" => {
+            "Separate arguments with spaces; quote the ones that contain spaces."
+        }
+        "set.actions.working_dir" => "Working folder",
+        "set.actions.working_dir_cap" => {
+            "Empty runs in the item's folder. {path} and {parent} work too."
+        }
+        "set.actions.applies" => "Applies to",
+        "set.actions.dir" => "Folders",
+        "set.actions.file" => "Files",
+        "set.actions.both" => "Both",
+        "set.actions.match" => "Only when",
+        "set.actions.match_cap" => {
+            "A file the folder must contain, or a name glob such as *.zip. Empty always shows."
+        }
+        "set.actions.shortcut" => "Shortcut",
+        "set.actions.none" => "None",
+        "set.actions.confirm" => "Ask before running",
+        "set.actions.refresh" => "Rescan the folder afterwards",
+        "set.actions.show_output" => "Show the command output",
+        "set.actions.shell" => "Run through the shell",
+        "set.actions.enabled" => "Enabled",
+        "set.actions.save" => "Save",
+        "set.actions.need_name" => "An action needs a name and a program.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Run {name}?",
+        "set.actions.confirm_body" => "This runs:\n\n{commands}",
+        "set.actions.done" => "{name} finished.",
+        "set.actions.failed_title" => "{name} failed",
+        "set.actions.failed_body" => "Exit code {code}.\n\n{output}",
+        "set.actions.output_title" => "Output of {name}",
+        "set.actions.exit_code" => "Exit code: {code}",
+        "set.actions.no_output" => "The command produced no output.",
         _ => return None,
     })
 }

@@ -428,6 +428,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Не вдалося відкрити знімок",
         "saved.err_body" => "Не вдалося відкрити {path}: {error}",
         "saved.missing_item" => "Цього елемента немає на цьому комп'ютері, тому його не можна змінити.",
+        "menu.run" => "Виконати",
+        "set.actions.title" => "Дії",
+        "set.actions.caption" => {
+            "Команди в меню «Виконати» контекстного меню. Заповнювачі: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Власних дій ще немає.",
+        "set.actions.add" => "Додати дію",
+        "set.actions.add_preset" => "Додати шаблон",
+        "set.actions.edit" => "Змінити",
+        "set.actions.delete" => "Видалити",
+        "set.actions.name" => "Назва",
+        "set.actions.command" => "Програма",
+        "set.actions.args" => "Аргументи",
+        "set.actions.args_cap" => {
+            "Розділяйте аргументи пробілами; аргументи з пробілами беріть у лапки."
+        }
+        "set.actions.working_dir" => "Робоча папка",
+        "set.actions.working_dir_cap" => {
+            "Порожньо — папка елемента. Також працюють {path} і {parent}."
+        }
+        "set.actions.applies" => "Застосовується до",
+        "set.actions.dir" => "Папки",
+        "set.actions.file" => "Файли",
+        "set.actions.both" => "Обидва",
+        "set.actions.match" => "Лише якщо",
+        "set.actions.match_cap" => {
+            "Файл, який має містити папка, або шаблон назви, як-от *.zip. Порожньо — показувати завжди."
+        }
+        "set.actions.shortcut" => "Сполучення клавіш",
+        "set.actions.none" => "Немає",
+        "set.actions.confirm" => "Питати перед запуском",
+        "set.actions.refresh" => "Оновити папку після",
+        "set.actions.show_output" => "Показати вивід команди",
+        "set.actions.shell" => "Запускати через оболонку",
+        "set.actions.enabled" => "Увімкнено",
+        "set.actions.save" => "Зберегти",
+        "set.actions.need_name" => "Дії потрібні назва й програма.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Виконати {name}?",
+        "set.actions.confirm_body" => "Буде виконано:\n\n{commands}",
+        "set.actions.done" => "{name} завершено.",
+        "set.actions.failed_title" => "Помилка {name}",
+        "set.actions.failed_body" => "Код виходу {code}.\n\n{output}",
+        "set.actions.output_title" => "Вивід {name}",
+        "set.actions.exit_code" => "Код виходу: {code}",
+        "set.actions.no_output" => "Команда не вивела нічого.",
         _ => return None,
     })
 }
