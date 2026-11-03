@@ -16,7 +16,7 @@ env:
 jobs:
   windows:
     name: Windows x64
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
 
@@ -95,7 +95,7 @@ jobs:
 
   linux:
     name: Linux x64
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -159,7 +159,7 @@ jobs:
 
   macos:
     name: macOS arm64
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
