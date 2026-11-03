@@ -484,7 +484,7 @@ impl FastDir {
             let ok = submit.clone();
             dialog
                 .title(dlg_title)
-                .w(px(460.))
+                .w(sp(460.).to_pixels(window.rem_size()))
                 .child(
                     v_flex()
                         .gap_2()

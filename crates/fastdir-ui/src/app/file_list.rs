@@ -292,7 +292,7 @@ impl FastDir {
             };
             let chevron = div()
                 .id(("chev", ix))
-                .size(px(16.))
+                .size(sp(16.))
                 .flex_shrink_0()
                 .flex()
                 .items_center()
@@ -337,7 +337,7 @@ impl FastDir {
             };
             let el = h_flex()
                 .id(("row", ix))
-                .h(px(ROW_H))
+                .h(sp(ROW_H))
                 .w_full()
                 .text_xs()
                 .text_color(fg)
@@ -371,10 +371,10 @@ impl FastDir {
                 .child(
                     h_flex()
                         .flex_1()
-                        .min_w(px(220.))
+                        .min_w(sp(220.))
                         .overflow_hidden()
                         .gap_1()
-                        .pl(px(4. + depth * 16.))
+                        .pl(sp(4. + depth * 16.))
                         .child(chevron)
                         .child(icon)
                         .child(
@@ -394,9 +394,9 @@ impl FastDir {
                         }),
                 )
                 .child(
-                    div().w(px(COL_BAR)).flex_shrink_0().px_2().child(
+                    div().w(sp(COL_BAR)).flex_shrink_0().px_2().child(
                         div()
-                            .h(px(10.))
+                            .h(sp(10.))
                             .w_full()
                             .rounded_sm()
                             .bg(track)
@@ -526,7 +526,7 @@ impl FastDir {
                 .gap_1()
                 .cursor_pointer()
                 .when_some(w, |d, w| d.w(px(w)).flex_shrink_0())
-                .when(w.is_none(), |d| d.flex_1().min_w(px(220.)).pl(px(24.)))
+                .when(w.is_none(), |d| d.flex_1().min_w(sp(220.)).pl(sp(24.)))
                 .when(right, |d| d.justify_end())
                 .hover(|s| s.bg(cx.theme().list_hover))
                 .when(active, |d| d.text_color(cx.theme().foreground))
@@ -535,7 +535,7 @@ impl FastDir {
                 .on_click(cx.listener(move |this, _, _, cx| this.set_sort(k, cx)))
         };
         h_flex()
-            .h(px(28.))
+            .h(sp(28.))
             .w_full()
             .flex_shrink_0()
             .border_b_1()
@@ -547,7 +547,7 @@ impl FastDir {
             .child(head("h-name", self.tr("list.col_name"), SortKey::Name, None, false, cx))
             .child(
                 div()
-                    .w(px(COL_BAR))
+                    .w(sp(COL_BAR))
                     .flex_shrink_0()
                     .px_2()
                     .child(self.tr("list.col_subtree")),
@@ -659,7 +659,7 @@ impl FastDir {
                 .child(label)
         };
         h_flex()
-            .h(px(30.))
+            .h(sp(30.))
             .flex_shrink_0()
             .w_full()
             .gap_1()
@@ -843,7 +843,7 @@ impl FastDir {
                 .gap_1()
                 .cursor_pointer()
                 .when_some(w, |d, w| d.w(px(w)).flex_shrink_0())
-                .when(w.is_none(), |d| d.flex_1().min_w(px(220.)).pl(px(8.)))
+                .when(w.is_none(), |d| d.flex_1().min_w(sp(220.)).pl(sp(8.)))
                 .when(right, |d| d.justify_end())
                 .hover(|s| s.bg(cx.theme().list_hover))
                 .when(active, |d| d.text_color(cx.theme().foreground))
@@ -864,7 +864,7 @@ impl FastDir {
             .collect();
         let top_button = self.tr_fmt("list.top_n", &[("n", &self.count(limit as u64))]);
         h_flex()
-            .h(px(28.))
+            .h(sp(28.))
             .w_full()
             .flex_shrink_0()
             .border_b_1()
@@ -1009,7 +1009,7 @@ impl FastDir {
             out.push(
                 h_flex()
                     .id(("top-row", ix))
-                    .h(px(ROW_H))
+                    .h(sp(ROW_H))
                     .w_full()
                     .text_xs()
                     .text_color(fg)
@@ -1042,7 +1042,7 @@ impl FastDir {
                     .child(
                         h_flex()
                             .flex_1()
-                            .min_w(px(220.))
+                            .min_w(sp(220.))
                             .overflow_hidden()
                             .gap_2()
                             .pl_2()
@@ -1110,7 +1110,7 @@ impl FastDir {
             out.push(
                 h_flex()
                     .id(("ext", ix))
-                    .h(px(ROW_H))
+                    .h(sp(ROW_H))
                     .w_full()
                     .px_2()
                     .gap_2()
@@ -1132,25 +1132,25 @@ impl FastDir {
                             this.toggle_ext(ext, cx);
                         }),
                     )
-                    .child(div().size(px(10.)).rounded_sm().flex_shrink_0().bg(color))
+                    .child(div().size(sp(10.)).rounded_sm().flex_shrink_0().bg(color))
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(50.))
+                            .min_w(sp(50.))
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .child(SharedString::from(e.name.to_string())),
                     )
                     .child(
                         div()
-                            .w(px(70.))
+                            .w(sp(70.))
                             .text_right()
                             .font_weight(FontWeight::MEDIUM)
                             .child(bytes_s),
                     )
                     .child(
                         div()
-                            .w(px(48.))
+                            .w(sp(48.))
                             .text_right()
                             .text_color(muted)
                             .child(format::percent_in(
@@ -1161,7 +1161,7 @@ impl FastDir {
                     )
                     .child(
                         div()
-                            .w(px(64.))
+                            .w(sp(64.))
                             .text_right()
                             .text_color(muted)
                             .child(self.count(e.files)),
@@ -1181,7 +1181,7 @@ impl FastDir {
             .border_color(theme.border)
             .child(
                 h_flex()
-                    .h(px(28.))
+                    .h(sp(28.))
                     .flex_shrink_0()
                     .px_2()
                     .gap_2()
@@ -1191,11 +1191,11 @@ impl FastDir {
                     .text_xs()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.muted_foreground)
-                    .child(div().w(px(10.)))
-                    .child(div().flex_1().min_w(px(50.)).child(self.tr("list.ext_col")))
-                    .child(div().w(px(70.)).text_right().child(self.tr("list.bytes_col")))
-                    .child(div().w(px(48.)).text_right().child(self.tr("list.col_pct")))
-                    .child(div().w(px(64.)).text_right().child(self.tr("list.files_col"))),
+                    .child(div().w(sp(10.)))
+                    .child(div().flex_1().min_w(sp(50.)).child(self.tr("list.ext_col")))
+                    .child(div().w(sp(70.)).text_right().child(self.tr("list.bytes_col")))
+                    .child(div().w(sp(48.)).text_right().child(self.tr("list.col_pct")))
+                    .child(div().w(sp(64.)).text_right().child(self.tr("list.files_col"))),
             )
             .child(
                 div()

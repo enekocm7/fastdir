@@ -155,6 +155,27 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
+/// Base font size at 100% interface scale.
+const BASE_FONT_SIZE: f32 = 16.;
+/// Base monospace font size at 100% interface scale.
+const BASE_MONO_FONT_SIZE: f32 = 13.;
+
+/// Applies the interface scale. gpui-component's root resets the window's rem
+/// size from `Theme::font_size` on every frame, so the scale must live there;
+/// a direct `Window::set_rem_size` would be overwritten before the next paint.
+pub fn apply_ui_scale(scale: f32, cx: &mut App) {
+    let scale = scale.clamp(0.5, 2.0);
+    let theme = Theme::global_mut(cx);
+    theme.font_size = px(BASE_FONT_SIZE * scale);
+    theme.mono_font_size = px(BASE_MONO_FONT_SIZE * scale);
+    cx.refresh_windows();
+}
+
+/// A size given in pixels at 100% scale that follows the interface scale.
+fn sp(v: f32) -> Rems {
+    rems(v / BASE_FONT_SIZE)
+}
+
 const ROW_H: f32 = 22.;
 const COL_BAR: f32 = 110.;
 const COL_PCT: f32 = 62.;
@@ -365,7 +386,7 @@ impl FastDir {
             let s = settings.effective_sort();
             (s.column, s.descending)
         };
-        window.set_rem_size(px(16.0 * settings.appearance.ui_scale.clamp(0.5, 2.0)));
+        apply_ui_scale(settings.appearance.ui_scale, cx);
         let decimal_sizes = settings.list.size_unit == SizeUnit::Decimal;
         let render_opts = treemap_render_options(&settings);
         let treemap = cx.new(|_| TreemapView::new());
@@ -966,6 +987,7 @@ impl FastDir {
         };
         Theme::change(mode, Some(window), cx);
         apply_accent(cx);
+        apply_ui_scale(self.ui_scale(), cx);
         window.refresh();
     }
 
@@ -973,8 +995,8 @@ impl FastDir {
         self.settings.appearance.ui_scale.clamp(0.5, 2.0)
     }
 
-    pub(super) fn apply_ui_scale(&mut self, window: &mut Window) {
-        window.set_rem_size(px(16.0 * self.ui_scale()));
+    pub(super) fn apply_ui_scale(&mut self, window: &mut Window, cx: &mut App) {
+        apply_ui_scale(self.ui_scale(), cx);
         window.refresh();
     }
 }

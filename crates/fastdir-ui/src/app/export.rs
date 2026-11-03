@@ -79,7 +79,7 @@ impl FastDir {
         let cancel = self.tr("action.cancel");
         let ok = self.tr("exp.ok");
         let entity = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _window, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let theme = cx.theme();
             let form = entity
                 .upgrade()
@@ -116,7 +116,7 @@ impl FastDir {
             let entity_export = entity.clone();
             dialog
                 .title(title)
-                .w(px(520.))
+                .w(sp(520.).to_pixels(window.rem_size()))
                 .child(
                     v_flex()
                         .gap_3()

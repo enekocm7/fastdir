@@ -717,7 +717,7 @@ impl TreemapView {
         let zoomed = !self.zoom.is_empty();
 
         h_flex()
-            .h(px(26.))
+            .h(rems(26. / 16.))
             .flex_shrink_0()
             .w_full()
             .px_2()
