@@ -713,13 +713,23 @@ impl Tree {
     /// `limit` candidates in memory. Hard-link duplicates are left out: they
     /// add no bytes and would just repeat a file already in the list.
     pub fn top_files(&self, limit: usize) -> Vec<FileEntry> {
-        if limit == 0 {
+        self.top_files_in(&[], limit)
+    }
+
+    /// The `limit` largest files under the node at `root`, largest first
+    /// (empty when `root` does not exist or is a file). Paths in the result
+    /// are absolute index paths into the whole tree.
+    pub fn top_files_in(&self, root: &[u32], limit: usize) -> Vec<FileEntry> {
+        let Some(start) = self.get(root) else {
+            return Vec::new();
+        };
+        if limit == 0 || !start.is_dir() {
             return Vec::new();
         }
         // The smallest retained file is at the top of this min-heap.
         let mut heap: BinaryHeap<Reverse<(u64, Box<str>, NodePath)>> =
-            BinaryHeap::with_capacity(limit);
-        let mut stack: Vec<(NodePath, &Node)> = vec![(Vec::new(), self.root())];
+            BinaryHeap::with_capacity(limit.min(4096));
+        let mut stack: Vec<(NodePath, &Node)> = vec![(root.to_vec(), start)];
         while let Some((path, dir)) = stack.pop() {
             for (i, child) in self.children(dir).iter().enumerate() {
                 match child.kind() {
@@ -1603,6 +1613,22 @@ mod tests {
             ["c.txt", "b.bin", "a.txt"]
         );
         assert!(tree.top_files(0).is_empty());
+    }
+
+    #[test]
+    fn top_files_in_limits_to_a_subtree() {
+        let tree = sample_tree(); // c.txt 30, sub/b.bin 15, sub/a.txt 5
+        let sub = tree.find(Path::new("/root/sub")).unwrap();
+        let top = tree.top_files_in(&sub, 10);
+        assert_eq!(
+            top.iter().map(|f| &*f.name).collect::<Vec<_>>(),
+            ["b.bin", "a.txt"]
+        );
+        // Paths stay absolute index paths into the whole tree.
+        assert_eq!(top[0].path, vec![1, 0]);
+        let file = tree.find(Path::new("/root/c.txt")).unwrap();
+        assert!(tree.top_files_in(&file, 10).is_empty());
+        assert!(tree.top_files_in(&[9, 9], 10).is_empty());
     }
 
     #[test]

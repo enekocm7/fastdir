@@ -1,0 +1,22 @@
+[package]
+name = "fastdir-cli"
+version.workspace = true
+edition.workspace = true
+description = "Headless command line interface and MCP server for FastDir"
+repository.workspace = true
+
+[[bin]]
+name = "fastdir-cli"
+path = "src/main.rs"
+
+[dependencies]
+fastdir-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

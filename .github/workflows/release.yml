@@ -60,6 +60,7 @@ jobs:
           & $iscc /Qp `
             "/DAppVersion=${{ steps.version.outputs.version }}" `
             "/DSourceExe=$pwd\target\release\fastdir.exe" `
+            "/DSourceCliExe=$pwd\target\release\fastdir-cli.exe" `
             "/DIconFile=$($ico.FullName)" `
             "/DOutputDir=$pwd\dist" `
             installer\fastdir.iss
@@ -71,6 +72,7 @@ jobs:
           $v = "${{ steps.version.outputs.version }}"
           New-Item -ItemType Directory -Force staging | Out-Null
           Copy-Item target\release\fastdir.exe staging\FastDir.exe
+          Copy-Item target\release\fastdir-cli.exe staging\fastdir-cli.exe
           Copy-Item README.md staging\
           Compress-Archive -Path staging\* -DestinationPath "dist\FastDir-$v-portable-x64.zip" -Force
           Get-ChildItem dist | ForEach-Object {
@@ -138,6 +140,7 @@ jobs:
           v="${{ steps.version.outputs.version }}"
           mkdir -p staging dist
           cp target/release/fastdir staging/FastDir
+          cp target/release/fastdir-cli staging/fastdir-cli
           cp README.md staging/
           tar -czf "dist/FastDir-$v-linux-x64.tar.gz" -C staging .
           (cd dist && sha256sum ./* > SHA256SUMS.txt)
@@ -192,9 +195,11 @@ jobs:
           v="${{ steps.version.outputs.version }}"
           mkdir -p staging dist dmg-root
           cp target/release/fastdir staging/FastDir
+          cp target/release/fastdir-cli staging/fastdir-cli
           cp README.md staging/
           tar -czf "dist/FastDir-$v-macos-arm64.tar.gz" -C staging .
           cp staging/FastDir dmg-root/FastDir
+          cp staging/fastdir-cli dmg-root/fastdir-cli
           cp README.md dmg-root/
           hdiutil create -volname "FastDir $v" -srcfolder dmg-root \
             -ov -format UDZO "dist/FastDir-$v-macos-arm64.dmg"
