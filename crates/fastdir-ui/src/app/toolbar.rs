@@ -1,6 +1,7 @@
 //! The top toolbar and the window title bar.
 
 use super::*;
+use gpui_kit::component::Selectable as _;
 
 impl FastDir {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -165,6 +166,16 @@ impl FastDir {
             )
             .child(Separator::vertical().h(px(20.)).mx_1())
             .child(search)
+            .child(
+                tool(
+                    "hide-empty",
+                    IconName::Folder,
+                    self.tr("tb.tip_hide_empty"),
+                )
+                .selected(self.settings.list.hide_empty_folders)
+                .disabled(self.tree.is_none())
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_hide_empty(cx))),
+            )
             .child(div().flex_1())
             .children(op_view)
             .children(scan_view)
@@ -249,6 +260,7 @@ impl FastDir {
                 let treemap_disk = self.settings.treemap.disk_size;
                 let show_partial = self.settings.scan.show_partial_results;
                 let show_treemap = self.settings.treemap.show;
+                let hide_empty = self.settings.list.hide_empty_folders;
                 let entity = update_entity.clone();
                 let menu_settings = self.tr("tb.menu_settings");
                 let menu_check = self.tr("tb.menu_check");
@@ -258,6 +270,7 @@ impl FastDir {
                 let menu_disk = self.tr("tb.menu_disk");
                 let menu_partial = self.tr("tb.menu_partial");
                 let menu_treemap = self.tr("tb.menu_treemap");
+                let menu_hide_empty = self.tr("tb.menu_hide_empty");
                 let version_label: SharedString = self
                     .tr_fmt("tb.version", &[("version", updater::CURRENT_VERSION)])
                     .into();
@@ -267,6 +280,7 @@ impl FastDir {
                     let e5 = entity.clone();
                     let e6 = entity.clone();
                     let e7 = entity.clone();
+                    let e8 = entity.clone();
                     menu.item(
                         gpui_kit::component::menu::PopupMenuItem::new(menu_settings)
                             .icon(IconName::Settings)
@@ -337,6 +351,13 @@ impl FastDir {
                             .on_click(move |_, _, cx| {
                                 e7.update(cx, |this, cx| this.toggle_treemap_visible(cx))
                                     .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(menu_hide_empty)
+                            .checked(hide_empty)
+                            .on_click(move |_, _, cx| {
+                                e8.update(cx, |this, cx| this.toggle_hide_empty(cx)).ok();
                             }),
                     )
                     .separator()

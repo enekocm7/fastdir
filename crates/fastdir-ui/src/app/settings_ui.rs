@@ -184,6 +184,7 @@ impl Render for SettingsView {
         let confirm_permanent_owner = self.owner.clone();
         let confirm_move_owner = self.owner.clone();
         let keep_view_owner = self.owner.clone();
+        let hide_empty_owner = self.owner.clone();
         let default_delete_owner = self.owner.clone();
         let dest_owner = self.owner.clone();
         let startup_owner = self.owner.clone();
@@ -1141,6 +1142,28 @@ impl Render for SettingsView {
                                                     col_disk_owner.update(cx, |this, cx| {
                                                         this.settings.list.show_disk = *checked;
                                                         this.settings.save();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
+                                    .child(div().text_xs().child(tr("set.list.hide_empty")))
+                                    .child(
+                                        Switch::new("settings-hide-empty")
+                                            .checked(list.hide_empty_folders)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    hide_empty_owner.update(cx, |this, cx| {
+                                                        this.settings.list.hide_empty_folders = *checked;
+                                                        this.settings.save();
+                                                        this.rebuild_rows();
                                                         cx.notify();
                                                     });
                                                 },
