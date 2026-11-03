@@ -521,7 +521,7 @@ pub fn default_thread_count() -> usize {
 
 /// Runs `f` on the automatic pool, or on a throwaway pool with `threads`
 /// when the user picked a fixed count (e.g. to keep a slow HDD responsive).
-fn with_threads<R: Send>(threads: Option<usize>, f: impl FnOnce() -> R + Send) -> R {
+pub(crate) fn with_threads<R: Send>(threads: Option<usize>, f: impl FnOnce() -> R + Send) -> R {
     let mut f = Some(f);
     match threads.map(|n| n.clamp(1, 64)) {
         None => pool().install(f.take().expect("scan closure")),

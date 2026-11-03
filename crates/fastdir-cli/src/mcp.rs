@@ -14,6 +14,7 @@ use crate::diff as diff_doc;
 use crate::schema::{self, ScanDoc, ScanMeta, TreeShape, entry_summary};
 use crate::{CliError, Scanned, resolve_root};
 use fastdir_core::diff as core_diff;
+use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
 use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
 use fastdir_core::filter::{Filter, parse_size};
 use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
@@ -35,10 +36,10 @@ const MAX_LIMIT: usize = 1000;
 
 const INSTRUCTIONS: &str = "FastDir analyzes disk usage. Call scan_path on a folder or drive \
 first (it can take a while on a whole drive), then use get_children to drill down, \
-largest_files for cleanup candidates, search to find entries by name or glob, and path_info \
-for one entry. compare_scans shows what changed since a cached scan or a saved JSON scan. \
-Results come from the in-memory scan; call scan_path again to refresh. Sizes \
-are bytes; `disk_size` is the allocated size on disk.";
+largest_files for cleanup candidates, search to find entries by name or glob, find_duplicates \
+for groups of identical files, and path_info for one entry. compare_scans shows what changed \
+since a cached scan or a saved JSON scan. Results come from the in-memory scan; call scan_path \
+again to refresh. Sizes are bytes; `disk_size` is the allocated size on disk.";
 
 // JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -249,6 +250,21 @@ impl Server {
                 "annotations": read_only,
             }),
             json!({
+                "name": "find_duplicates",
+                "description": "Groups of byte-identical files under a folder, largest waste first. Reuses the cached scan for size grouping; only files that can still match are hashed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": path,
+                        "min_size": { "type": ["string", "integer"], "default": duplicates::DEFAULT_MIN_SIZE, "description": "Smallest file to hash in bytes, or a size such as 500MB or 1 GiB (default: 1 MB). Zero-byte files are skipped." },
+                        "extensions": { "type": "array", "items": { "type": "string" }, "description": "Only files with one of these extensions, e.g. [\".mp4\"]" },
+                        "limit": limit(100),
+                    },
+                    "required": ["path"],
+                },
+                "annotations": read_only,
+            }),
+            json!({
                 "name": "compare_scans",
                 "description": "Show what changed between two scans of the same folder: added, removed, grown and shrunk paths with their old and new sizes, largest absolute change first. `old` is a cached scan root or a saved JSON scan file; `new` is a saved JSON scan file or a folder to scan now.",
                 "inputSchema": {
@@ -311,6 +327,7 @@ impl Server {
             "largest_files" => self.largest_files(args),
             "search" => self.search(args),
             "path_info" => self.path_info(args),
+            "find_duplicates" => self.find_duplicates(args),
             "compare_scans" => self.compare_scans(args),
             "export_scan" => self.export_scan(args),
             "recycle_path" if self.allow_destructive => self.remove_path(args, false),
@@ -592,6 +609,73 @@ impl Server {
             tree: Box::new(scanned.tree),
             side,
         })
+    }
+
+    fn find_duplicates(&mut self, args: &Value) -> ToolResult {
+        let path = arg_path(args)?;
+        let min_size = match args.get("min_size") {
+            None | Some(Value::Null) => duplicates::DEFAULT_MIN_SIZE,
+            Some(Value::Number(n)) => n
+                .as_u64()
+                .ok_or_else(|| ToolError("min_size must be a whole number of bytes".into()))?,
+            Some(Value::String(s)) => parse_size(s).ok_or_else(|| {
+                ToolError(format!(
+                    "min_size expects a number of bytes or a size such as 500MB, got \"{s}\""
+                ))
+            })?,
+            Some(_) => {
+                return tool_err("min_size must be a number of bytes or a size string");
+            }
+        };
+        let extensions = match args.get("extensions") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::String(one)) => vec![one.clone()],
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|v| v.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| ToolError("extensions must be a list of strings".into()))?,
+            Some(_) => return tool_err("extensions must be a list of strings"),
+        };
+        let limit = arg_limit(args, 100)?;
+        let (i, node, scanned) = self.locate(&path)?;
+        let s = &self.scans[i];
+        if !s.tree.get(&node).is_some_and(|n| n.is_dir()) {
+            return tool_err(format!("{} is a file, not a folder", path.display()));
+        }
+        let options = DuplicateOptions {
+            min_size,
+            extensions,
+            limit: Some(limit),
+            threads: None,
+        };
+        let report = duplicates::find(
+            &s.tree,
+            &node,
+            &options,
+            Arc::new(DuplicateProgress::default()),
+        );
+        Ok(json!({
+            "path": s.tree.fs_path(&node).unwrap_or_default().to_string_lossy(),
+            "scanned_now": scanned,
+            "min_size": min_size,
+            "limit": limit,
+            "candidates": report.candidates,
+            "total_groups": report.total_groups,
+            "total_wasted": report.total_wasted,
+            "hashed_bytes": report.bytes_hashed,
+            "hash_errors": report.hash_errors,
+            "elapsed_ms": report.elapsed.as_millis() as u64,
+            "groups": report.groups.iter().map(|group| json!({
+                "size": group.size,
+                "hash": group.hash,
+                "wasted": group.wasted(),
+                "files": group.files.iter().map(|file| json!({
+                    "path": file.path.to_string_lossy(),
+                    "modified": schema::iso_time(file.modified),
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        }))
     }
 
     fn export_scan(&mut self, args: &Value) -> ToolResult {
@@ -1008,6 +1092,7 @@ mod tests {
                 "largest_files",
                 "search",
                 "path_info",
+                "find_duplicates",
                 "compare_scans",
                 "export_scan"
             ]
@@ -1199,6 +1284,62 @@ mod tests {
         );
         assert!(err);
         assert!(msg.as_str().unwrap().contains("not found"));
+    }
+
+    #[test]
+    fn find_duplicates_groups_identical_files() {
+        let dir = TempDir::new("dupes");
+        std::fs::write(dir.0.join("one.bin"), vec![7u8; 2000]).unwrap();
+        std::fs::write(dir.0.join("two.bin"), vec![7u8; 2000]).unwrap();
+        std::fs::write(dir.0.join("other.bin"), vec![8u8; 2000]).unwrap();
+        let root = dir.0.to_string_lossy().to_string();
+        let mut s = Server::new(false);
+
+        let found = ok(
+            &mut s,
+            "find_duplicates",
+            json!({ "path": root, "min_size": 1 }),
+        );
+        assert_eq!(found["scanned_now"], true);
+        assert_eq!(found["candidates"], 6);
+        assert_eq!(found["total_groups"], 1);
+        assert_eq!(found["total_wasted"], 2000);
+        let group = &found["groups"][0];
+        assert_eq!(group["size"], 2000);
+        assert_eq!(group["wasted"], 2000);
+        assert_eq!(group["files"].as_array().unwrap().len(), 2);
+        let names: Vec<&str> = group["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                f["path"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(names, ["one.bin", "two.bin"]);
+
+        // A cached scan is reused, and both filters are applied.
+        let filtered = ok(
+            &mut s,
+            "find_duplicates",
+            json!({ "path": root, "min_size": 1, "extensions": [".iso"] }),
+        );
+        assert_eq!(filtered["scanned_now"], false);
+        assert_eq!(filtered["candidates"], 1);
+        assert_eq!(filtered["total_groups"], 0);
+
+        let (err, msg) = call(
+            &mut s,
+            "find_duplicates",
+            json!({ "path": root, "extensions": 3 }),
+        );
+        assert!(err);
+        assert!(msg.as_str().unwrap().contains("extensions"));
     }
 
     #[test]

@@ -70,6 +70,11 @@ culprit? Rename, move, recycle or delete it right there.
   - **Top files** – a flat, sortable list of the N largest files in the whole
     scan (bounded heap, default 1,000), the quickest way to find cleanup
     targets.
+  - **Duplicate finder** – `fastdir-cli duplicates` (and the MCP
+    `find_duplicates` tool) groups byte-identical files by size, a 64 KB
+    prefix/suffix sample and then a full BLAKE3 hash, and reports how much
+    space each group wastes. Zero-byte files and extra hard links are not
+    duplicates.
   - **Extension list** with the colour each type has in the treemap. A
     *By category / By extension* switch groups extensions into file-type
     categories (video, images, audio, archives, documents, code, executables,
@@ -258,6 +263,8 @@ piped or redirected.
 ```text
 fastdir-cli scan <path> [options]   the tree under <path> (JSON by default)
 fastdir-cli top <path> [options]    the largest files under <path>
+fastdir-cli duplicates <path> [options]
+                                    groups of identical files and the space they waste
 fastdir-cli diff <old> <new>        what changed between two scans
 fastdir-cli mcp                     MCP server on stdin/stdout (see below)
 fastdir-cli help [<command>]        help for a command
@@ -272,6 +279,9 @@ fastdir-cli scan C:\Users --max-depth 1 --no-files |
 # Fifty largest files on D:, as CSV
 fastdir-cli top D:\ --limit 50 --format csv -o big-files.csv
 
+# Duplicate videos over 100 MB under D:, largest waste first
+fastdir-cli duplicates D:\ --min-size 100MB --ext .mp4 --pretty
+
 # What grew on D: since Monday's saved scan (saved.json)?
 fastdir-cli diff saved.json D:\ --min-change 1GB
 ```
@@ -284,22 +294,25 @@ row has its own sizes.
 
 | Option | Commands | |
 |---|---|---|
-| `--format json\|csv` | scan, top, diff | Output format (default `json`; CSV uses the export dialog's columns) |
-| `-o, --output <file\|->` | scan, top, diff | Write to a file instead of stdout |
-| `--pretty` | scan, top, diff | Indent the JSON |
+| `--format json\|csv` | scan, top, duplicates, diff | Output format (default `json`; CSV uses the export dialog's columns) |
+| `-o, --output <file\|->` | scan, top, duplicates, diff | Write to a file instead of stdout |
+| `--pretty` | scan, top, duplicates, diff | Indent the JSON |
 | `--max-depth <n>` | scan | List entries up to `<n>` levels below `<path>` (`0` = just the root). Sizes always count everything. |
 | `--max-depth <n>` | diff | Only list changed entries up to `<n>` levels below the root (`0` = the root row) |
 | `--no-files` | scan | List folders only |
 | `-n, --limit <n>` | top | How many files (default 20) |
 | `-n, --limit <n>` | diff | Cap the number of changed entries (largest \|change\| first) |
 | `--min-change <size>` | diff | Hide changes smaller than `<size>` (e.g. `20GB`, `500MB`) |
-| `--threads <n>` | scan, top, diff | Scan threads, 1–64 (default automatic) |
-| `--exclude <glob>` | scan, top, diff | Skip entries whose name matches; repeatable |
-| `--follow-junctions` | scan, top, diff | Descend into junctions / symlinked folders |
-| `--cross-volumes` | scan, top, diff | With `--follow-junctions`, also enter other volumes |
-| `--skip-hidden` (`--skip-system`) | scan, top, diff | Skip hidden and system entries |
+| `--min-size <size>` | duplicates | Smallest file to hash (default 1 MB); accepts `500MB` or `1.5 GiB` |
+| `--ext <ext>` | duplicates | Only files with this extension; repeatable |
+| `-n, --limit <groups>` | duplicates | How many groups to report (default all); totals still count every group |
+| `--threads <n>` | scan, top, duplicates, diff | Scan threads, 1–64 (default automatic) |
+| `--exclude <glob>` | scan, top, duplicates, diff | Skip entries whose name matches; repeatable |
+| `--follow-junctions` | scan, top, duplicates, diff | Descend into junctions / symlinked folders |
+| `--cross-volumes` | scan, top, duplicates, diff | With `--follow-junctions`, also enter other volumes |
+| `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff | Skip hidden and system entries |
 | `--owners` | scan, top, diff | Record the owning account of every entry (Owner field, per-user totals) |
-| `-q, --quiet` | scan, top, diff | Nothing on stderr except errors |
+| `-q, --quiet` | scan, top, duplicates, diff | Nothing on stderr except errors |
 
 Scan options apply to `diff` only when `<new>` is a folder; comparing two
 saved scans does not scan anything.
@@ -376,9 +389,9 @@ only present with `--owners`; CSV gains an `owner` column in the same case.
     "added": 50000000,               // bytes in top-level added entries
     "removed": 3000000,              // bytes in top-level removed entries
     "added_items": 120, "removed_items": 8,
-    "free_delta": -111111101          // free-space change, or null
+    "free_delta": -111111101         // free-space change, or null
   },
-  "min_change": 0,                    // options echo, for scripts
+  "min_change": 0,                   // options echo, for scripts
   "limit": null,
   "entries": [                       // largest |delta| first, then by path
     {
@@ -397,6 +410,53 @@ folder is one row with its subtree totals. Removed rows use the baseline's
 `root`. CSV uses the header
 `path,type,status,old_size,new_size,delta,old_disk_size,new_disk_size`.
 
+`fastdir duplicates` (`schema: "fastdir.duplicates"`) has the same scan
+metadata (`schema`, `version`, `fastdir_version`, `root`, `scanned_at`,
+`elapsed_ms`, `errors`) plus the filters that were applied and the groups:
+
+```jsonc
+{
+  "schema": "fastdir.duplicates", "version": 1, "fastdir_version": "0.2.0",
+  "root": "D:\\Media",
+  "scanned_at": "2026-11-03T12:00:00Z", "elapsed_ms": 840,
+  "errors": 0,
+  "min_size": 1048576,               // the --min-size that was used
+  "extensions": [".mp4"],            // empty when --ext was not given
+  "limit": null,                     // --limit, or null for every group
+  "candidates": 812,                 // files that passed the filters
+  "total_groups": 12,                // every group found, before --limit
+  "total_wasted": 3221225472,        // reclaimable bytes over every group
+  "hashed_bytes": 4831838208,        // read while hashing (samples included)
+  "hash_errors": 0,                  // files that could not be read
+  "groups": [                        // largest waste first
+    {
+      "size": 536870912,             // bytes of one copy
+      "hash": "5f2d…",               // BLAKE3 of the whole file (64 hex chars)
+      "wasted": 536870912,           // size × (files - 1)
+      "files": [
+        { "path": "D:\\Media\\a.mp4", "modified": "2026-10-01T09:30:00Z" },
+        { "path": "D:\\Backup\\a.mp4", "modified": "2026-09-02T18:12:00Z" }
+      ]
+    }
+  ]
+}
+```
+
+Files are grouped by size, then the first and last 64 KB are hashed, and only
+the files that still match get a full BLAKE3 hash. Zero-byte files are
+skipped, and extra hard links to an already-counted file are not duplicates.
+
+With `--format csv`, `duplicates` writes one row per file:
+
+```csv
+group,wasted,path,size,hash,modified_iso
+1,536870912,D:\Media\a.mp4,536870912,5f2d…,2026-10-01T09:30:00Z
+1,536870912,D:\Backup\a.mp4,536870912,5f2d…,2026-09-02T18:12:00Z
+```
+
+`group` is 1-based; rows of the same group share `wasted` (the group's
+reclaimable bytes) and `hash`.
+
 ### MCP server
 
 `fastdir-cli mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
@@ -411,6 +471,7 @@ rescan. A tool given a folder outside every cached scan scans it first.
 | `largest_files` | Largest files anywhere under a folder |
 | `search` | Find entries by name substring or glob, minimum size, extension or type |
 | `path_info` | One entry's sizes and counts, and its share of its parent and of the scan |
+| `find_duplicates` | Groups of identical files under a folder and the space they waste; reuses the cached scan |
 | `compare_scans` | What changed since a cached scan or a saved JSON scan (`fastdir.diff`) |
 | `export_scan` | Write a folder to a JSON (`fastdir.scan`) or CSV file |
 
