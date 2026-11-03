@@ -452,6 +452,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Nie można otworzyć skanu",
         "saved.err_body" => "Nie można otworzyć {path}: {error}",
         "saved.missing_item" => "Ten element nie znajduje się na tym komputerze, więc nie można go zmienić.",
+        "menu.run" => "Uruchom",
+        "set.actions.title" => "Akcje",
+        "set.actions.caption" => {
+            "Polecenia w menu Uruchom. Symbole: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Brak własnych akcji.",
+        "set.actions.add" => "Dodaj akcję",
+        "set.actions.add_preset" => "Dodaj szablon",
+        "set.actions.edit" => "Edytuj",
+        "set.actions.delete" => "Usuń",
+        "set.actions.name" => "Nazwa",
+        "set.actions.command" => "Program",
+        "set.actions.args" => "Argumenty",
+        "set.actions.args_cap" => {
+            "Rozdziel argumenty spacjami; argumenty ze spacjami ujmij w cudzysłowie."
+        }
+        "set.actions.working_dir" => "Folder roboczy",
+        "set.actions.working_dir_cap" => {
+            "Puste oznacza folder elementu. Działają też {path} i {parent}."
+        }
+        "set.actions.applies" => "Dotyczy",
+        "set.actions.dir" => "Foldery",
+        "set.actions.file" => "Pliki",
+        "set.actions.both" => "Oba",
+        "set.actions.match" => "Tylko gdy",
+        "set.actions.match_cap" => {
+            "Plik, który musi zawierać folder, albo wzorzec nazwy, np. *.zip. Puste pokazuje zawsze."
+        }
+        "set.actions.shortcut" => "Skrót",
+        "set.actions.none" => "Brak",
+        "set.actions.confirm" => "Pytaj przed uruchomieniem",
+        "set.actions.refresh" => "Odśwież folder po wykonaniu",
+        "set.actions.show_output" => "Pokaż wyjście polecenia",
+        "set.actions.shell" => "Uruchom przez powłokę",
+        "set.actions.enabled" => "Włączona",
+        "set.actions.save" => "Zapisz",
+        "set.actions.need_name" => "Akcja wymaga nazwy i programu.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Uruchomić {name}?",
+        "set.actions.confirm_body" => "Zostanie uruchomione:\n\n{commands}",
+        "set.actions.done" => "{name} zakończone.",
+        "set.actions.failed_title" => "{name} nie powiodło się",
+        "set.actions.failed_body" => "Kod wyjścia {code}.\n\n{output}",
+        "set.actions.output_title" => "Wyjście {name}",
+        "set.actions.exit_code" => "Kod wyjścia: {code}",
+        "set.actions.no_output" => "Polecenie nie zwróciło żadnego wyjścia.",
         _ => return None,
     })
 }

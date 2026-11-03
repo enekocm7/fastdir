@@ -4,6 +4,7 @@
 //! Nothing in this crate may depend on a GUI toolkit, so it can be tested and
 //! benchmarked on its own.
 
+pub mod actions;
 pub mod categories;
 pub mod drives;
 pub mod elevate;

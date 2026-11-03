@@ -428,6 +428,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Не удалось открыть снимок",
         "saved.err_body" => "Не удалось открыть {path}: {error}",
         "saved.missing_item" => "Этот элемент отсутствует на этом компьютере, поэтому его нельзя изменить.",
+        "menu.run" => "Выполнить",
+        "set.actions.title" => "Действия",
+        "set.actions.caption" => {
+            "Команды в меню «Выполнить» контекстного меню. Подстановки: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Своих действий пока нет.",
+        "set.actions.add" => "Добавить действие",
+        "set.actions.add_preset" => "Добавить шаблон",
+        "set.actions.edit" => "Изменить",
+        "set.actions.delete" => "Удалить",
+        "set.actions.name" => "Имя",
+        "set.actions.command" => "Программа",
+        "set.actions.args" => "Аргументы",
+        "set.actions.args_cap" => {
+            "Разделяйте аргументы пробелами; аргументы с пробелами заключайте в кавычки."
+        }
+        "set.actions.working_dir" => "Рабочая папка",
+        "set.actions.working_dir_cap" => {
+            "Пусто — папка элемента. Также работают {path} и {parent}."
+        }
+        "set.actions.applies" => "Применяется к",
+        "set.actions.dir" => "Папки",
+        "set.actions.file" => "Файлы",
+        "set.actions.both" => "Оба",
+        "set.actions.match" => "Только если",
+        "set.actions.match_cap" => {
+            "Файл, который должна содержать папка, или шаблон имени вроде *.zip. Пусто — показывать всегда."
+        }
+        "set.actions.shortcut" => "Сочетание клавиш",
+        "set.actions.none" => "Нет",
+        "set.actions.confirm" => "Спрашивать перед запуском",
+        "set.actions.refresh" => "Обновить папку после",
+        "set.actions.show_output" => "Показать вывод команды",
+        "set.actions.shell" => "Запускать через оболочку",
+        "set.actions.enabled" => "Включено",
+        "set.actions.save" => "Сохранить",
+        "set.actions.need_name" => "Действию нужны имя и программа.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Выполнить {name}?",
+        "set.actions.confirm_body" => "Будет выполнено:\n\n{commands}",
+        "set.actions.done" => "{name} завершено.",
+        "set.actions.failed_title" => "Ошибка {name}",
+        "set.actions.failed_body" => "Код выхода {code}.\n\n{output}",
+        "set.actions.output_title" => "Вывод {name}",
+        "set.actions.exit_code" => "Код выхода: {code}",
+        "set.actions.no_output" => "Команда не вывела ничего.",
         _ => return None,
     })
 }

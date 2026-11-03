@@ -464,6 +464,48 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "تعذّر فتح المسح",
         "saved.err_body" => "تعذّر فتح {path}: {error}",
         "saved.missing_item" => "هذا العنصر غير موجود على هذا الجهاز، لذا لا يمكن تغييره.",
+        "menu.run" => "تشغيل",
+        "set.actions.title" => "الإجراءات",
+        "set.actions.caption" => {
+            "الأوامر في قائمة التشغيل. العناصر النائبة: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "لا توجد إجراءات مخصصة بعد.",
+        "set.actions.add" => "إضافة إجراء",
+        "set.actions.add_preset" => "إضافة قالب",
+        "set.actions.edit" => "تعديل",
+        "set.actions.delete" => "حذف",
+        "set.actions.name" => "الاسم",
+        "set.actions.command" => "البرنامج",
+        "set.actions.args" => "الوسائط",
+        "set.actions.args_cap" => "افصل الوسائط بمسافات، وضع بين علامتي اقتباس ما يحتوي على مسافة.",
+        "set.actions.working_dir" => "مجلد العمل",
+        "set.actions.working_dir_cap" => "الفارغ يستخدم مجلد العنصر. يعمل أيضًا {path} و{parent}.",
+        "set.actions.applies" => "ينطبق على",
+        "set.actions.dir" => "المجلدات",
+        "set.actions.file" => "الملفات",
+        "set.actions.both" => "كلاهما",
+        "set.actions.match" => "فقط عندما",
+        "set.actions.match_cap" => {
+            "ملف يجب أن يحتويه المجلد، أو نمط اسم مثل *.zip. الفارغ يظهر دائمًا."
+        }
+        "set.actions.shortcut" => "الاختصار",
+        "set.actions.none" => "بدون",
+        "set.actions.confirm" => "السؤال قبل التشغيل",
+        "set.actions.refresh" => "إعادة فحص المجلد بعده",
+        "set.actions.show_output" => "إظهار مخرجات الأمر",
+        "set.actions.shell" => "التشغيل عبر الصدفة",
+        "set.actions.enabled" => "ممكّن",
+        "set.actions.save" => "حفظ",
+        "set.actions.need_name" => "يحتاج الإجراء إلى اسم وبرنامج.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "تشغيل {name}؟",
+        "set.actions.confirm_body" => "سيتم تشغيل:\n\n{commands}",
+        "set.actions.done" => "انتهى {name}.",
+        "set.actions.failed_title" => "فشل {name}",
+        "set.actions.failed_body" => "رمز الخروج {code}.\n\n{output}",
+        "set.actions.output_title" => "مخرجات {name}",
+        "set.actions.exit_code" => "رمز الخروج: {code}",
+        "set.actions.no_output" => "لم يُنتج الأمر أي مخرجات.",
         _ => return None,
     })
 }

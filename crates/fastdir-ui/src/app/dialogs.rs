@@ -270,7 +270,7 @@ impl FastDir {
         self.enqueue(srcs, kind, label, window, cx);
     }
 
-    fn enqueue(
+    pub(super) fn enqueue(
         &mut self,
         targets: Vec<Target>,
         kind: PendingKind,
@@ -293,7 +293,7 @@ impl FastDir {
     }
 
     /// Start the next queued operation, if any.
-    fn start_next_op(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn start_next_op(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.op_queue.pop_front() {
             Some(PendingOp {
                 targets,
@@ -305,6 +305,11 @@ impl FastDir {
                 kind: PendingKind::Move { dest },
                 ..
             }) => self.start_move(targets, dest, window, cx),
+            Some(PendingOp {
+                kind: PendingKind::Action { run },
+                label,
+                ..
+            }) => self.start_action_run(label, run, window, cx),
             None => cx.notify(),
         }
     }
@@ -467,7 +472,7 @@ impl FastDir {
     }
 
     /// Show the progress bar for a delete / move and keep it repainting.
-    fn begin_op(
+    pub(super) fn begin_op(
         &mut self,
         label: String,
         total_items: u64,

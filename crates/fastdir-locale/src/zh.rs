@@ -446,6 +446,50 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "无法打开扫描",
         "saved.err_body" => "无法打开 {path}：{error}",
         "saved.missing_item" => "此项目不在这台计算机上，无法修改。",
+        "menu.run" => "运行",
+        "set.actions.title" => "操作",
+        "set.actions.caption" => {
+            "右键“运行”菜单中的命令。占位符：{path}、{name}、{parent}、{ext}。"
+        }
+        "set.actions.empty" => "还没有自定义操作。",
+        "set.actions.add" => "添加操作",
+        "set.actions.add_preset" => "添加预设",
+        "set.actions.edit" => "编辑",
+        "set.actions.delete" => "删除",
+        "set.actions.name" => "名称",
+        "set.actions.command" => "程序",
+        "set.actions.args" => "参数",
+        "set.actions.args_cap" => "用空格分隔参数；包含空格的参数请加引号。",
+        "set.actions.working_dir" => "工作文件夹",
+        "set.actions.working_dir_cap" => {
+            "留空则使用该项所在的文件夹。也可使用 {path} 和 {parent}。"
+        }
+        "set.actions.applies" => "适用于",
+        "set.actions.dir" => "文件夹",
+        "set.actions.file" => "文件",
+        "set.actions.both" => "两者",
+        "set.actions.match" => "仅当",
+        "set.actions.match_cap" => {
+            "文件夹中必须存在的文件，或 *.zip 之类的名称通配符。留空则始终显示。"
+        }
+        "set.actions.shortcut" => "快捷键",
+        "set.actions.none" => "无",
+        "set.actions.confirm" => "运行前询问",
+        "set.actions.refresh" => "结束后重新扫描文件夹",
+        "set.actions.show_output" => "显示命令输出",
+        "set.actions.shell" => "通过 shell 运行",
+        "set.actions.enabled" => "启用",
+        "set.actions.save" => "保存",
+        "set.actions.need_name" => "操作需要名称和程序。",
+        "set.actions.op_label" => "{name}：{item}",
+        "set.actions.confirm_title" => "运行 {name}？",
+        "set.actions.confirm_body" => "将运行：\n\n{commands}",
+        "set.actions.done" => "{name} 已完成。",
+        "set.actions.failed_title" => "{name} 失败",
+        "set.actions.failed_body" => "退出代码 {code}。\n\n{output}",
+        "set.actions.output_title" => "{name} 的输出",
+        "set.actions.exit_code" => "退出代码：{code}",
+        "set.actions.no_output" => "命令没有产生任何输出。",
         _ => return None,
     })
 }

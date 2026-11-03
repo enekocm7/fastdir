@@ -416,6 +416,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Tarama açılamadı",
         "saved.err_body" => "{path} açılamadı: {error}",
         "saved.missing_item" => "Bu öğe bu makinede yok, bu yüzden değiştirilemez.",
+        "menu.run" => "Çalıştır",
+        "set.actions.title" => "Eylemler",
+        "set.actions.caption" => {
+            "Sağ tık Çalıştır menüsündeki komutlar. Yer tutucular: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Henüz özel eylem yok.",
+        "set.actions.add" => "Eylem ekle",
+        "set.actions.add_preset" => "Şablon ekle",
+        "set.actions.edit" => "Düzenle",
+        "set.actions.delete" => "Sil",
+        "set.actions.name" => "Ad",
+        "set.actions.command" => "Program",
+        "set.actions.args" => "Bağımsız değişkenler",
+        "set.actions.args_cap" => {
+            "Bağımsız değişkenleri boşlukla ayırın; boşluk içerenleri tırnak içine alın."
+        }
+        "set.actions.working_dir" => "Çalışma klasörü",
+        "set.actions.working_dir_cap" => {
+            "Boş, öğenin klasörünü kullanır. {path} ve {parent} de çalışır."
+        }
+        "set.actions.applies" => "Uygulandığı yer",
+        "set.actions.dir" => "Klasörler",
+        "set.actions.file" => "Dosyalar",
+        "set.actions.both" => "İkisi",
+        "set.actions.match" => "Yalnızca",
+        "set.actions.match_cap" => {
+            "Klasörün içermesi gereken bir dosya veya *.zip gibi bir ad kalıbı. Boş her zaman gösterir."
+        }
+        "set.actions.shortcut" => "Kısayol",
+        "set.actions.none" => "Yok",
+        "set.actions.confirm" => "Çalıştırmadan önce sor",
+        "set.actions.refresh" => "Sonra klasörü yeniden tara",
+        "set.actions.show_output" => "Komut çıktısını göster",
+        "set.actions.shell" => "Kabuk üzerinden çalıştır",
+        "set.actions.enabled" => "Etkin",
+        "set.actions.save" => "Kaydet",
+        "set.actions.need_name" => "Bir eylem ad ve program gerektirir.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "{name} çalıştırılsın mı?",
+        "set.actions.confirm_body" => "Şu komut çalışacak:\n\n{commands}",
+        "set.actions.done" => "{name} bitti.",
+        "set.actions.failed_title" => "{name} başarısız",
+        "set.actions.failed_body" => "Çıkış kodu {code}.\n\n{output}",
+        "set.actions.output_title" => "{name} çıktısı",
+        "set.actions.exit_code" => "Çıkış kodu: {code}",
+        "set.actions.no_output" => "Komut çıktı üretmedi.",
         _ => return None,
     })
 }

@@ -444,6 +444,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Impossibile aprire l'analisi",
         "saved.err_body" => "Impossibile aprire {path}: {error}",
         "saved.missing_item" => "Questo elemento non è presente su questo computer e non può essere modificato.",
+        "menu.run" => "Esegui",
+        "set.actions.title" => "Azioni",
+        "set.actions.caption" => {
+            "Comandi nel menu Esegui del menu contestuale. Segnaposto: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Nessuna azione personalizzata.",
+        "set.actions.add" => "Aggiungi azione",
+        "set.actions.add_preset" => "Aggiungi modello",
+        "set.actions.edit" => "Modifica",
+        "set.actions.delete" => "Elimina",
+        "set.actions.name" => "Nome",
+        "set.actions.command" => "Programma",
+        "set.actions.args" => "Argomenti",
+        "set.actions.args_cap" => {
+            "Separa gli argomenti con spazi; racchiudi tra virgolette quelli che contengono spazi."
+        }
+        "set.actions.working_dir" => "Cartella di lavoro",
+        "set.actions.working_dir_cap" => {
+            "Vuoto usa la cartella dell'elemento. Funzionano anche {path} e {parent}."
+        }
+        "set.actions.applies" => "Si applica a",
+        "set.actions.dir" => "Cartelle",
+        "set.actions.file" => "File",
+        "set.actions.both" => "Entrambi",
+        "set.actions.match" => "Solo se",
+        "set.actions.match_cap" => {
+            "Un file che la cartella deve contenere, o un modello come *.zip. Vuoto mostra sempre."
+        }
+        "set.actions.shortcut" => "Scorciatoia",
+        "set.actions.none" => "Nessuna",
+        "set.actions.confirm" => "Chiedi prima di eseguire",
+        "set.actions.refresh" => "Rianalizza la cartella dopo",
+        "set.actions.show_output" => "Mostra l'output del comando",
+        "set.actions.shell" => "Esegui tramite la shell",
+        "set.actions.enabled" => "Attiva",
+        "set.actions.save" => "Salva",
+        "set.actions.need_name" => "Un'azione richiede un nome e un programma.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Eseguire {name}?",
+        "set.actions.confirm_body" => "Verrà eseguito:\n\n{commands}",
+        "set.actions.done" => "{name} terminato.",
+        "set.actions.failed_title" => "{name} non riuscito",
+        "set.actions.failed_body" => "Codice di uscita {code}.\n\n{output}",
+        "set.actions.output_title" => "Output di {name}",
+        "set.actions.exit_code" => "Codice di uscita: {code}",
+        "set.actions.no_output" => "Il comando non ha prodotto output.",
         _ => return None,
     })
 }

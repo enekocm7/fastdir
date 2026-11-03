@@ -860,7 +860,9 @@ impl FastDir {
                         .track_scroll(&self.list_scroll),
                 )
                 .child(Scrollbar::vertical(&self.list_scroll))
-                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                .context_menu(move |menu, window, cx| {
+                    actions_ui::build_context_menu(entity.clone(), menu, window, cx)
+                })
                 .into_any_element()
         };
         v_flex()
@@ -1095,7 +1097,9 @@ impl FastDir {
                         .track_scroll(&self.top_scroll),
                 )
                 .child(Scrollbar::vertical(&self.top_scroll))
-                .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
+                .context_menu(move |menu, window, cx| {
+                    actions_ui::build_context_menu(entity.clone(), menu, window, cx)
+                })
                 .into_any_element()
         };
         v_flex()

@@ -444,6 +444,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Impossible d'ouvrir l'analyse",
         "saved.err_body" => "Impossible d'ouvrir {path} : {error}",
         "saved.missing_item" => "Cet élément n'existe pas sur cette machine et ne peut donc pas être modifié.",
+        "menu.run" => "Exécuter",
+        "set.actions.title" => "Actions",
+        "set.actions.caption" => {
+            "Commandes du menu contextuel Exécuter. Variables : {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Aucune action personnalisée.",
+        "set.actions.add" => "Ajouter une action",
+        "set.actions.add_preset" => "Ajouter un modèle",
+        "set.actions.edit" => "Modifier",
+        "set.actions.delete" => "Supprimer",
+        "set.actions.name" => "Nom",
+        "set.actions.command" => "Programme",
+        "set.actions.args" => "Arguments",
+        "set.actions.args_cap" => {
+            "Séparez les arguments par des espaces ; mettez entre guillemets ceux qui en contiennent."
+        }
+        "set.actions.working_dir" => "Dossier de travail",
+        "set.actions.working_dir_cap" => {
+            "Vide utilise le dossier de l'élément. {path} et {parent} fonctionnent aussi."
+        }
+        "set.actions.applies" => "S'applique à",
+        "set.actions.dir" => "Dossiers",
+        "set.actions.file" => "Fichiers",
+        "set.actions.both" => "Les deux",
+        "set.actions.match" => "Seulement si",
+        "set.actions.match_cap" => {
+            "Un fichier que le dossier doit contenir, ou un masque comme *.zip. Vide affiche toujours."
+        }
+        "set.actions.shortcut" => "Raccourci",
+        "set.actions.none" => "Aucun",
+        "set.actions.confirm" => "Demander avant d'exécuter",
+        "set.actions.refresh" => "Réanalyser le dossier ensuite",
+        "set.actions.show_output" => "Afficher la sortie de la commande",
+        "set.actions.shell" => "Exécuter via le shell",
+        "set.actions.enabled" => "Activée",
+        "set.actions.save" => "Enregistrer",
+        "set.actions.need_name" => "Une action a besoin d'un nom et d'un programme.",
+        "set.actions.op_label" => "{name} : {item}",
+        "set.actions.confirm_title" => "Exécuter {name} ?",
+        "set.actions.confirm_body" => "Commande :\n\n{commands}",
+        "set.actions.done" => "{name} est terminé.",
+        "set.actions.failed_title" => "Échec de {name}",
+        "set.actions.failed_body" => "Code de sortie {code}.\n\n{output}",
+        "set.actions.output_title" => "Sortie de {name}",
+        "set.actions.exit_code" => "Code de sortie : {code}",
+        "set.actions.no_output" => "La commande n'a produit aucune sortie.",
         _ => return None,
     })
 }

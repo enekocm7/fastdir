@@ -153,6 +153,147 @@ pub enum UpdateFrequency {
     Weekly,
 }
 
+/// What a context-menu action applies to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionAppliesTo {
+    /// Only folders.
+    Dir,
+    /// Only files.
+    File,
+    /// Both.
+    #[default]
+    Both,
+}
+
+/// One user-defined command in the context menu's *Run* submenu
+/// (`[[actions]]` in `config.toml`).
+///
+/// Placeholders in `command`, `args` and `working_dir`: `{path}`, `{name}`,
+/// `{parent}` and `{ext}`. `name` and `command` are required in practice; an
+/// action missing either is never shown.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ActionDef {
+    /// Label shown in the menu and in confirmations.
+    pub name: String,
+    /// Program to run. With `shell = false` (the default) it is spawned
+    /// directly; with `shell = true` the whole line goes through
+    /// `cmd /C` / `sh -c`.
+    pub command: String,
+    /// Arguments, one entry each.
+    pub args: Vec<String>,
+    /// Folder to run in; empty means the item (a file's folder for files).
+    pub working_dir: String,
+    /// Folders, files or both.
+    pub applies_to: ActionAppliesTo,
+    /// Optional extra condition: a name glob (`*.zip`) or, for folders, a
+    /// file the folder must contain (`Cargo.toml`, `.git`).
+    #[serde(rename = "match")]
+    pub match_pattern: Option<String>,
+    /// Ask before running, showing the exact command line.
+    pub confirm: bool,
+    /// Re-scan the target folder after the command finishes.
+    pub refresh_after: bool,
+    /// Show stdout / stderr in a dialog afterwards.
+    pub show_output: bool,
+    /// Run through the platform shell.
+    pub shell: bool,
+    /// Keyboard shortcut: `1`..`9` binds Ctrl+1..Ctrl+9.
+    pub shortcut: Option<u8>,
+    /// Disabled actions stay in the config but are not offered in the menu.
+    pub enabled: bool,
+}
+
+impl Default for ActionDef {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            command: String::new(),
+            args: Vec::new(),
+            working_dir: String::new(),
+            applies_to: ActionAppliesTo::Both,
+            match_pattern: None,
+            confirm: true,
+            refresh_after: false,
+            show_output: false,
+            shell: false,
+            shortcut: None,
+            enabled: true,
+        }
+    }
+}
+
+impl ActionDef {
+    /// Ready-made examples for the Settings *Add preset* menu and for fresh
+    /// configs. They start disabled so nothing runs by accident.
+    pub fn presets() -> Vec<Self> {
+        let terminal = if cfg!(windows) {
+            ActionDef {
+                name: "Open terminal here".into(),
+                command: "cmd".into(),
+                args: ["/C", "start", "", "cmd", "/K", "cd", "/D", "{path}"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                working_dir: "{path}".into(),
+                applies_to: ActionAppliesTo::Dir,
+                ..ActionDef::default()
+            }
+        } else {
+            ActionDef {
+                name: "Open terminal here".into(),
+                command: "x-terminal-emulator".into(),
+                args: Vec::new(),
+                working_dir: "{path}".into(),
+                applies_to: ActionAppliesTo::Dir,
+                ..ActionDef::default()
+            }
+        };
+        vec![
+            ActionDef {
+                enabled: false,
+                ..terminal
+            },
+            ActionDef {
+                name: "Open in VS Code".into(),
+                command: "code".into(),
+                args: vec!["{path}".into()],
+                confirm: false,
+                enabled: false,
+                ..ActionDef::default()
+            },
+            ActionDef {
+                name: "cargo clean".into(),
+                command: "cargo".into(),
+                args: vec!["clean".into()],
+                working_dir: "{path}".into(),
+                applies_to: ActionAppliesTo::Dir,
+                match_pattern: Some("Cargo.toml".into()),
+                refresh_after: true,
+                enabled: false,
+                ..ActionDef::default()
+            },
+            ActionDef {
+                name: "git gc".into(),
+                command: "git".into(),
+                args: vec!["gc".into()],
+                working_dir: "{path}".into(),
+                applies_to: ActionAppliesTo::Dir,
+                match_pattern: Some(".git".into()),
+                refresh_after: true,
+                enabled: false,
+                ..ActionDef::default()
+            },
+        ]
+    }
+
+    /// Whether the action is complete enough to offer.
+    pub fn is_usable(&self) -> bool {
+        self.enabled && !self.name.trim().is_empty() && !self.command.trim().is_empty()
+    }
+}
+
 /// Sort column and direction remembered across launches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -452,7 +593,8 @@ impl Default for LocaleSettings {
 /// Light, dark, or follow Windows; plus the interface scale.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct AppearanceSettings {    pub theme: ThemePreference,
+pub struct AppearanceSettings {
+    pub theme: ThemePreference,
     /// Interface scale factor (1.0 = 100%), separate from Windows DPI.
     /// Applied to the window's rem size, so text and rem-based layout grow.
     pub ui_scale: f32,
@@ -489,6 +631,11 @@ impl Default for IntegrationSettings {
     }
 }
 
+/// Disabled example actions for fresh configs.
+fn default_actions() -> Vec<ActionDef> {
+    ActionDef::presets()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -507,6 +654,9 @@ pub struct Settings {
     /// (`video`, `images`, ...) to extension names. Overrides both move
     /// built-in extensions and add new ones.
     pub categories: BTreeMap<String, Vec<String>>,
+    /// User-defined context-menu commands (`[[actions]]`).
+    #[serde(default = "default_actions")]
+    pub actions: Vec<ActionDef>,
     /// Last window geometry, restored on the next launch.
     pub window: Option<WindowState>,
     /// Last divider positions.
@@ -528,6 +678,7 @@ impl Default for Settings {
             integration: IntegrationSettings::default(),
             locale: LocaleSettings::default(),
             categories: BTreeMap::new(),
+            actions: default_actions(),
             window: None,
             panels: PanelSizes::default(),
             sort: SortSettings::default(),
@@ -645,6 +796,7 @@ impl From<LegacySettings> for Settings {
             integration: IntegrationSettings::default(),
             locale: LocaleSettings::default(),
             categories: BTreeMap::new(),
+            actions: default_actions(),
             window: old.window,
             panels: old.panels,
             // Written before the sort lived in `[list]`; keep both in step.
@@ -656,7 +808,7 @@ impl From<LegacySettings> for Settings {
 /// Top-level section names of the current format. A file containing any of
 /// them is parsed as [`Settings`]; anything else falls back to the legacy
 /// flat keys so old files keep loading.
-const SECTION_KEYS: [&str; 10] = [
+const SECTION_KEYS: [&str; 11] = [
     "scan",
     "treemap",
     "list",
@@ -667,6 +819,7 @@ const SECTION_KEYS: [&str; 10] = [
     "integration",
     "locale",
     "categories",
+    "actions",
 ];
 
 fn parse_current(text: &str) -> Option<Settings> {
@@ -869,6 +1022,20 @@ mod tests {
                 ),
                 ("other".to_string(), vec!["custom".to_string()]),
             ]),
+            actions: vec![ActionDef {
+                name: "cargo clean".into(),
+                command: "cargo".into(),
+                args: vec!["clean".into()],
+                working_dir: "{path}".into(),
+                applies_to: ActionAppliesTo::Dir,
+                match_pattern: Some("Cargo.toml".into()),
+                confirm: true,
+                refresh_after: true,
+                show_output: true,
+                shell: true,
+                shortcut: Some(1),
+                enabled: true,
+            }],
             window: Some(WindowState {
                 x: 10.5,
                 y: 20.5,
@@ -888,19 +1055,83 @@ mod tests {
         let text = toml::to_string_pretty(&s).unwrap();
         assert!(text.contains("[scan]"), "sections keep the file readable");
         assert!(text.contains("[treemap]"));
-        assert!(text.contains("[locale]"), "the language section is written out");
-        assert!(text.contains("[categories]"), "category overrides are written out");
+        assert!(
+            text.contains("[locale]"),
+            "the language section is written out"
+        );
+        assert!(
+            text.contains("[categories]"),
+            "category overrides are written out"
+        );
         assert!(text.contains("mp4"), "category extensions are written out");
+        assert!(text.contains("[[actions]]"), "actions are written out");
+        assert!(text.contains("match = \"Cargo.toml\""));
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(back, s);
     }
 
     #[test]
-    fn category_overrides_parse_on_their_own() {
+    fn actions_parse_and_default_safely() {
         let s: Settings = toml::from_str(
-            "[categories]\nvideo = [\"mp4\", \"custom\"]\narchives = [\"zip\"]\n",
+            r#"
+            [[actions]]
+            name = "cargo clean"
+            command = "cargo"
+            args = ["clean"]
+            working_dir = "{path}"
+            applies_to = "dir"
+            match = "Cargo.toml"
+            confirm = false
+            refresh_after = true
+            shortcut = 2
+
+            [[actions]]
+            name = "open"
+            command = "code"
+            applies_to = "both"
+            "#,
         )
         .unwrap();
+        assert_eq!(s.actions.len(), 2);
+        let first = &s.actions[0];
+        assert_eq!(first.applies_to, ActionAppliesTo::Dir);
+        assert_eq!(first.match_pattern.as_deref(), Some("Cargo.toml"));
+        assert!(!first.confirm);
+        assert!(first.refresh_after);
+        assert_eq!(first.shortcut, Some(2));
+        assert!(!first.show_output, "missing flags keep safe defaults");
+        assert!(!first.shell);
+        // The second action keeps `confirm = true`: actions ask by default.
+        assert!(s.actions[1].confirm);
+        assert!(s.actions[1].enabled);
+    }
+
+    #[test]
+    fn fresh_configs_offer_disabled_presets() {
+        let s: Settings = toml::from_str("").unwrap();
+        assert!(!s.actions.is_empty(), "presets are available to copy from");
+        assert!(
+            s.actions.iter().all(|a| !a.enabled),
+            "presets are off by default"
+        );
+        assert!(
+            s.actions.iter().all(|a| !a.is_usable()),
+            "a disabled preset is never offered in the menu"
+        );
+        // A config that predates actions gets the same presets.
+        let old: Settings = toml::from_str("[scan]\ncross_volumes = false\n").unwrap();
+        assert_eq!(old.actions, s.actions);
+        // An actions-only file is still the current format, not legacy.
+        let only: Settings =
+            toml::from_str("[[actions]]\nname = \"x\"\ncommand = \"y\"\n").unwrap();
+        assert_eq!(only.actions[0].name, "x");
+    }
+
+    #[test]
+    fn category_overrides_parse_on_their_own() {
+        let s: Settings =
+            toml::from_str("[categories]\nvideo = [\"mp4\", \"custom\"]\narchives = [\"zip\"]\n")
+                .unwrap();
         assert_eq!(
             s.categories.get("video").map(Vec::as_slice),
             Some(["mp4".to_string(), "custom".to_string()].as_slice())

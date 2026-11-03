@@ -444,6 +444,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Não foi possível abrir a análise",
         "saved.err_body" => "Não foi possível abrir {path}: {error}",
         "saved.missing_item" => "Este item não existe nesta máquina, por isso não pode ser alterado.",
+        "menu.run" => "Executar",
+        "set.actions.title" => "Ações",
+        "set.actions.caption" => {
+            "Comandos no menu Executar do menu de contexto. Marcadores: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Ainda não há ações personalizadas.",
+        "set.actions.add" => "Adicionar ação",
+        "set.actions.add_preset" => "Adicionar modelo",
+        "set.actions.edit" => "Editar",
+        "set.actions.delete" => "Excluir",
+        "set.actions.name" => "Nome",
+        "set.actions.command" => "Programa",
+        "set.actions.args" => "Argumentos",
+        "set.actions.args_cap" => {
+            "Separe os argumentos com espaços; use aspas nos que contêm espaços."
+        }
+        "set.actions.working_dir" => "Pasta de trabalho",
+        "set.actions.working_dir_cap" => {
+            "Vazio usa a pasta do item. {path} e {parent} também funcionam."
+        }
+        "set.actions.applies" => "Aplica-se a",
+        "set.actions.dir" => "Pastas",
+        "set.actions.file" => "Arquivos",
+        "set.actions.both" => "Ambos",
+        "set.actions.match" => "Somente se",
+        "set.actions.match_cap" => {
+            "Um arquivo que a pasta deve conter, ou um padrão como *.zip. Vazio sempre aparece."
+        }
+        "set.actions.shortcut" => "Atalho",
+        "set.actions.none" => "Nenhum",
+        "set.actions.confirm" => "Perguntar antes de executar",
+        "set.actions.refresh" => "Reexaminar a pasta depois",
+        "set.actions.show_output" => "Mostrar a saída do comando",
+        "set.actions.shell" => "Executar pelo shell",
+        "set.actions.enabled" => "Ativada",
+        "set.actions.save" => "Salvar",
+        "set.actions.need_name" => "Uma ação precisa de um nome e de um programa.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "Executar {name}?",
+        "set.actions.confirm_body" => "Será executado:\n\n{commands}",
+        "set.actions.done" => "{name} concluído.",
+        "set.actions.failed_title" => "{name} falhou",
+        "set.actions.failed_body" => "Código de saída {code}.\n\n{output}",
+        "set.actions.output_title" => "Saída de {name}",
+        "set.actions.exit_code" => "Código de saída: {code}",
+        "set.actions.no_output" => "O comando não produziu saída.",
         _ => return None,
     })
 }

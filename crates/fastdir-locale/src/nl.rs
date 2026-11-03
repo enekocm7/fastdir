@@ -444,6 +444,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "Kan de scan niet openen",
         "saved.err_body" => "Kan {path} niet openen: {error}",
         "saved.missing_item" => "Dit item staat niet op deze computer en kan daarom niet worden gewijzigd.",
+        "menu.run" => "Uitvoeren",
+        "set.actions.title" => "Acties",
+        "set.actions.caption" => {
+            "Opdrachten in het rechtsklikmenu Uitvoeren. Plaatshouders: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Nog geen eigen acties.",
+        "set.actions.add" => "Actie toevoegen",
+        "set.actions.add_preset" => "Sjabloon toevoegen",
+        "set.actions.edit" => "Bewerken",
+        "set.actions.delete" => "Verwijderen",
+        "set.actions.name" => "Naam",
+        "set.actions.command" => "Programma",
+        "set.actions.args" => "Argumenten",
+        "set.actions.args_cap" => {
+            "Scheid argumenten met spaties; zet argumenten met spaties tussen aanhalingstekens."
+        }
+        "set.actions.working_dir" => "Werkmap",
+        "set.actions.working_dir_cap" => {
+            "Leeg gebruikt de map van het item. {path} en {parent} werken ook."
+        }
+        "set.actions.applies" => "Geldt voor",
+        "set.actions.dir" => "Mappen",
+        "set.actions.file" => "Bestanden",
+        "set.actions.both" => "Beide",
+        "set.actions.match" => "Alleen als",
+        "set.actions.match_cap" => {
+            "Een bestand dat de map moet bevatten, of een naamfilter zoals *.zip. Leeg toont altijd."
+        }
+        "set.actions.shortcut" => "Sneltoets",
+        "set.actions.none" => "Geen",
+        "set.actions.confirm" => "Vragen voor het uitvoeren",
+        "set.actions.refresh" => "De map daarna opnieuw scannen",
+        "set.actions.show_output" => "De uitvoer van de opdracht tonen",
+        "set.actions.shell" => "Via de shell uitvoeren",
+        "set.actions.enabled" => "Ingeschakeld",
+        "set.actions.save" => "Opslaan",
+        "set.actions.need_name" => "Een actie heeft een naam en een programma nodig.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "{name} uitvoeren?",
+        "set.actions.confirm_body" => "Dit voert uit:\n\n{commands}",
+        "set.actions.done" => "{name} is klaar.",
+        "set.actions.failed_title" => "{name} is mislukt",
+        "set.actions.failed_body" => "Afsluitcode {code}.\n\n{output}",
+        "set.actions.output_title" => "Uitvoer van {name}",
+        "set.actions.exit_code" => "Afsluitcode: {code}",
+        "set.actions.no_output" => "De opdracht gaf geen uitvoer.",
         _ => return None,
     })
 }

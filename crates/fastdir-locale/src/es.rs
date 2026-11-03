@@ -446,6 +446,52 @@ pub fn get(key: &str) -> Option<&'static str> {
         "saved.err_title" => "No se pudo abrir el análisis",
         "saved.err_body" => "No se pudo abrir {path}: {error}",
         "saved.missing_item" => "Este elemento no está en este equipo, así que no se puede modificar.",
+        "menu.run" => "Ejecutar",
+        "set.actions.title" => "Acciones",
+        "set.actions.caption" => {
+            "Comandos que aparecen en el menú Ejecutar del botón derecho. Marcadores: {path}, {name}, {parent}, {ext}."
+        }
+        "set.actions.empty" => "Aún no hay acciones personalizadas.",
+        "set.actions.add" => "Añadir acción",
+        "set.actions.add_preset" => "Añadir plantilla",
+        "set.actions.edit" => "Editar",
+        "set.actions.delete" => "Eliminar",
+        "set.actions.name" => "Nombre",
+        "set.actions.command" => "Programa",
+        "set.actions.args" => "Argumentos",
+        "set.actions.args_cap" => {
+            "Separa los argumentos con espacios; entrecomilla los que contengan espacios."
+        }
+        "set.actions.working_dir" => "Carpeta de trabajo",
+        "set.actions.working_dir_cap" => {
+            "Vacío usa la carpeta del elemento. {path} y {parent} también funcionan."
+        }
+        "set.actions.applies" => "Se aplica a",
+        "set.actions.dir" => "Carpetas",
+        "set.actions.file" => "Archivos",
+        "set.actions.both" => "Ambos",
+        "set.actions.match" => "Solo si",
+        "set.actions.match_cap" => {
+            "Un archivo que debe contener la carpeta, o un patrón como *.zip. Vacío siempre se muestra."
+        }
+        "set.actions.shortcut" => "Atajo",
+        "set.actions.none" => "Ninguno",
+        "set.actions.confirm" => "Preguntar antes de ejecutar",
+        "set.actions.refresh" => "Volver a analizar la carpeta después",
+        "set.actions.show_output" => "Mostrar la salida del comando",
+        "set.actions.shell" => "Ejecutar mediante el shell",
+        "set.actions.enabled" => "Activada",
+        "set.actions.save" => "Guardar",
+        "set.actions.need_name" => "Una acción necesita un nombre y un programa.",
+        "set.actions.op_label" => "{name}: {item}",
+        "set.actions.confirm_title" => "¿Ejecutar {name}?",
+        "set.actions.confirm_body" => "Se ejecutará:\n\n{commands}",
+        "set.actions.done" => "{name} terminó.",
+        "set.actions.failed_title" => "{name} falló",
+        "set.actions.failed_body" => "Código de salida {code}.\n\n{output}",
+        "set.actions.output_title" => "Salida de {name}",
+        "set.actions.exit_code" => "Código de salida: {code}",
+        "set.actions.no_output" => "El comando no produjo salida.",
         _ => return None,
     })
 }

@@ -1,6 +1,7 @@
 //! The Settings dialog: appearance, scanning, treemap, file list, file
 //! operations, startup, updates and config-file tools.
 
+use super::actions_ui::ActionEditor;
 use super::*;
 use fastdir_core::integration;
 use fastdir_settings::{
@@ -13,13 +14,15 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 
 pub(super) struct SettingsView {
-    owner: Entity<FastDir>,
+    pub(super) owner: Entity<FastDir>,
     _owner_sub: Subscription,
     excluded_input: Entity<InputState>,
     thread_input: Entity<InputState>,
     cushion_input: Entity<InputState>,
     min_cell_input: Entity<InputState>,
     scale_input: Entity<InputState>,
+    /// Action being added or edited inline in the Actions card.
+    pub(super) action_editor: Option<ActionEditor>,
 }
 
 impl SettingsView {
@@ -41,6 +44,7 @@ impl SettingsView {
             cushion_input,
             min_cell_input,
             scale_input,
+            action_editor: None,
         }
     }
 }
@@ -219,6 +223,8 @@ impl Render for SettingsView {
                 .child(text)
         };
         let caption = |text: String| div().text_xs().text_color(muted).child(text);
+
+        let actions_section = self.render_actions_section(cx);
 
         v_flex()
             .id("settings-scroll")
@@ -1392,6 +1398,7 @@ impl Render for SettingsView {
                                     ),
                             ),
                     )
+                    .child(actions_section)
                     .child(
                         section()
                             .gap_4()

@@ -482,23 +482,26 @@ impl FastDir {
             (items, op.total_items)
         };
         let pct = (total > 0).then(|| (done as f64 / total as f64 * 100.0).min(100.0) as f32);
-        let detail = if op.by_bytes {
-            self.tr_fmt(
-                "tb.op_bytes",
-                &[
-                    ("done", &self.bytes(bytes)),
-                    ("total", &self.bytes(op.total_bytes)),
-                ],
-            )
-        } else {
-            self.tr_fmt(
-                "tb.op_items",
-                &[
-                    ("done", &self.count(items)),
-                    ("total", &self.count(op.total_items)),
-                ],
-            )
-        };
+        // Actions have no item / byte totals: show an indeterminate bar.
+        let detail = (total > 0).then(|| {
+            if op.by_bytes {
+                self.tr_fmt(
+                    "tb.op_bytes",
+                    &[
+                        ("done", &self.bytes(bytes)),
+                        ("total", &self.bytes(op.total_bytes)),
+                    ],
+                )
+            } else {
+                self.tr_fmt(
+                    "tb.op_items",
+                    &[
+                        ("done", &self.count(items)),
+                        ("total", &self.count(op.total_items)),
+                    ],
+                )
+            }
+        });
         h_flex()
             .gap_2()
             .text_xs()
@@ -524,7 +527,7 @@ impl FastDir {
                         .when(pct.is_none(), |p| p.loading(true)),
                 ),
             )
-            .child(div().flex_shrink_0().whitespace_nowrap().child(detail))
+            .child(div().flex_shrink_0().whitespace_nowrap().children(detail))
             .child(
                 Button::new("op-cancel")
                     .ghost()
