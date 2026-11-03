@@ -46,7 +46,7 @@ impl SettingsView {
 }
 
 impl Render for SettingsView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (theme, scan, treemap, list, ops, startup_mode, integration, updates, busy) = {
             let app = self.owner.read(cx);
             (
@@ -218,7 +218,9 @@ impl Render for SettingsView {
 
         v_flex()
             .id("settings-scroll")
-            .max_h(px(560.))
+            // Track the main window: most of its height, leaving room for the
+            // dialog's title bar and footer.
+            .max_h((window.viewport_size().height * 0.72).max(px(360.)))
             .w_full()
             .overflow_y_scrollbar()
             .child(
@@ -239,9 +241,13 @@ impl Render for SettingsView {
                                 let radios: Vec<Radio> = lang_codes
                                     .iter()
                                     .zip(lang_names.iter())
-                                    .map(|(code, name)| Radio::new(*code).label(*name))
+                                    .map(|(code, name)| {
+                                        // Just under half the row, so the
+                                        // wrapping group lays out two columns.
+                                        Radio::new(*code).label(*name).w(relative(0.47))
+                                    })
                                     .collect();
-                                RadioGroup::vertical("settings-language")
+                                RadioGroup::horizontal("settings-language")
                                     .selected_index(Some(lang_selected))
                                     .children(radios)
                                     .on_change(cx.listener(
@@ -1706,10 +1712,12 @@ impl FastDir {
                 cx,
             )
         });
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
+            // Scale with the main window, within readable bounds.
+            let width = (window.viewport_size().width * 0.7).clamp(px(680.), px(1000.));
             dialog
                 .title(dlg_title)
-                .w(px(680.))
+                .w(width)
                 .child(view.clone())
                 .footer(
                     h_flex().w_full().justify_end().child(
