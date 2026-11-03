@@ -347,6 +347,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "В корзину",
         "set.ops.perm" => "Удалить навсегда",
         "set.ops.deletekey_cap" => "Shift+Delete всегда делает другое.",
+        "set.ops.keep_view" => "Оставаться на текущем элементе после удаления",
+        "set.ops.keep_view_cap" => "После завершения удаления оставлять курсор и прокрутку на месте, а не переходить в папку удалённого элемента.",
         "set.ops.lastdest" => "Последнее назначение перемещения",
         "set.ops.notset" => "Ещё не задано",
         "set.startup.title" => "Запуск",

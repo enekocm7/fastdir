@@ -68,8 +68,8 @@ culprit? Rename, move, recycle or delete it right there.
   colour-blind-safe one), flat shading, cell borders, list-only mode, excluded
     paths, hidden/system skipping, junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
-  frequency, per-action delete confirmations
-  and the default delete action.
+  frequency, per-action delete confirmations, whether the list stays on the
+  current item after a delete (opt-in) and the default delete action.
 - **Localized UI** (Settings → Language, applies immediately): English,
   Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian,
   Ukrainian, Turkish, Chinese, Japanese, Korean, Arabic and Czech. New

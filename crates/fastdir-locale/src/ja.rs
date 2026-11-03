@@ -361,6 +361,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "ごみ箱に移動",
         "set.ops.perm" => "完全に削除",
         "set.ops.deletekey_cap" => "Shift+Delete は常に逆の動作をします。",
+        "set.ops.keep_view" => "削除後も現在の項目に留まる",
+        "set.ops.keep_view_cap" => "削除が完了しても、削除した項目のフォルダーへ移動せず、カーソルとスクロール位置をそのままにします。",
         "set.ops.lastdest" => "前回の移動先",
         "set.ops.notset" => "未設定",
         "set.startup.title" => "起動",

@@ -361,6 +361,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "휴지통으로 이동",
         "set.ops.perm" => "완전히 삭제",
         "set.ops.deletekey_cap" => "Shift+Delete는 항상 반대 동작을 합니다.",
+        "set.ops.keep_view" => "삭제 후 현재 항목에 머물기",
+        "set.ops.keep_view_cap" => "삭제가 끝나면 삭제된 항목의 폴더로 이동하지 않고 커서와 스크롤 위치를 그대로 둡니다.",
         "set.ops.lastdest" => "마지막 이동 대상",
         "set.ops.notset" => "아직 설정되지 않음",
         "set.startup.title" => "시작",

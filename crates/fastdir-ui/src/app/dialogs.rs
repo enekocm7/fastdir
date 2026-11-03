@@ -260,6 +260,13 @@ impl FastDir {
             let results = job.await;
             this.update_in(cx, |this, window, cx| {
                 let cancelled = this.end_op();
+                // Remember where the user is before rows shift, so the delete
+                // can finish without moving their view (opt-in setting).
+                let keep_fs = if this.settings.ops.keep_selection_after_delete {
+                    this.selected_fs_path().map(|(_, fs, _)| fs)
+                } else {
+                    None
+                };
                 let mut select = None;
                 let mut done = Vec::new();
                 let mut failed: Vec<(PathBuf, String)> = Vec::new();
@@ -281,7 +288,11 @@ impl FastDir {
                     failed.extend(r.report.failed);
                 }
                 if changed {
-                    this.tree_changed(select, cx);
+                    if let Some(fs) = keep_fs {
+                        this.tree_changed_keeping_selection(&fs, select, cx);
+                    } else {
+                        this.tree_changed(select, cx);
+                    }
                 } else {
                     cx.notify();
                 }

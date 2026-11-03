@@ -325,6 +325,10 @@ pub struct OpSettings {
     pub confirm_move: bool,
     /// What the Delete key does (Shift+Delete does the other).
     pub default_delete: DeleteAction,
+    /// Keep the current cursor and scroll position when a delete finishes
+    /// instead of moving to the deleted item's folder. Off by default, which
+    /// keeps the previous "show me what was deleted" behavior.
+    pub keep_selection_after_delete: bool,
     /// Where the last move went, remembered for convenience.
     pub last_move_dest: Option<String>,
 }
@@ -336,6 +340,7 @@ impl Default for OpSettings {
             confirm_permanent: true,
             confirm_move: true,
             default_delete: DeleteAction::Recycle,
+            keep_selection_after_delete: false,
             last_move_dest: None,
         }
     }
@@ -716,6 +721,10 @@ mod tests {
         assert_eq!(s.list.date_format, DateFormat::Absolute);
         assert!(s.ops.confirm_recycle);
         assert_eq!(s.ops.default_delete, DeleteAction::Recycle);
+        assert!(
+            !s.ops.keep_selection_after_delete,
+            "keeping the view after a delete is opt-in"
+        );
         assert_eq!(s.updates.channel, UpdateChannel::Stable);
         assert!(
             fastdir_locale::is_supported(&s.locale.language) || s.locale.language == "system",
@@ -786,6 +795,7 @@ mod tests {
                 confirm_permanent: true,
                 confirm_move: false,
                 default_delete: DeleteAction::Permanent,
+                keep_selection_after_delete: true,
                 last_move_dest: Some(r"C:\backup".into()),
             },
             startup: StartupSettings {

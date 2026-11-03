@@ -335,6 +335,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Geri dönüştür",
         "set.ops.perm" => "Kalıcı olarak sil",
         "set.ops.deletekey_cap" => "Shift+Delete her zaman diğerini yapar.",
+        "set.ops.keep_view" => "Silme sonrası geçerli öğede kal",
+        "set.ops.keep_view_cap" => "Silme bittiğinde silinen öğenin klasörüne gitmek yerine imleci ve kaydırma konumunu olduğu yerde bırak.",
         "set.ops.lastdest" => "Son taşıma hedefi",
         "set.ops.notset" => "Henüz ayarlanmadı",
         "set.startup.title" => "Başlangıç",

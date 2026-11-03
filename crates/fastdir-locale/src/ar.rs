@@ -379,6 +379,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "إعادة تدوير",
         "set.ops.perm" => "حذف نهائيًا",
         "set.ops.deletekey_cap" => "Shift+Delete يفعل العكس دائمًا.",
+        "set.ops.keep_view" => "البقاء على العنصر الحالي بعد الحذف",
+        "set.ops.keep_view_cap" => "عند انتهاء الحذف، أبقِ المؤشر وموضع التمرير كما هما بدلًا من الانتقال إلى مجلد العنصر المحذوف.",
         "set.ops.lastdest" => "آخر وجهة نقل",
         "set.ops.notset" => "لم يُعيَّن بعد",
         "set.startup.title" => "بدء التشغيل",

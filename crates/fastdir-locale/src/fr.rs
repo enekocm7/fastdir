@@ -359,6 +359,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Corbeille",
         "set.ops.perm" => "Supprimer définitivement",
         "set.ops.deletekey_cap" => "Shift+Delete fait toujours l'autre.",
+        "set.ops.keep_view" => "Rester sur l'élément actuel après une suppression",
+        "set.ops.keep_view_cap" => "À la fin d'une suppression, garder le curseur et le défilement là où ils sont au lieu d'aller dans le dossier de l'élément supprimé.",
         "set.ops.lastdest" => "Dernière destination de déplacement",
         "set.ops.notset" => "Non défini",
         "set.startup.title" => "Démarrage",

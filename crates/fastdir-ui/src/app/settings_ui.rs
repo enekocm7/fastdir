@@ -183,6 +183,7 @@ impl Render for SettingsView {
         let confirm_recycle_owner = self.owner.clone();
         let confirm_permanent_owner = self.owner.clone();
         let confirm_move_owner = self.owner.clone();
+        let keep_view_owner = self.owner.clone();
         let default_delete_owner = self.owner.clone();
         let dest_owner = self.owner.clone();
         let startup_owner = self.owner.clone();
@@ -1231,6 +1232,37 @@ impl Render for SettingsView {
                                                 },
                                             )),
                                     ),
+                            )
+                            .child(
+                                v_flex()
+                                    .gap_1()
+                                    .w_full()
+                                    .child(
+                                        h_flex()
+                                            .justify_between()
+                                            .items_center()
+                                            .w_full()
+                                            .gap_4()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .child(tr("set.ops.keep_view")),
+                                            )
+                                            .child(
+                                                Switch::new("settings-keep-view")
+                                                    .checked(ops.keep_selection_after_delete)
+                                                    .on_change(cx.listener(
+                                                        move |_, checked: &bool, _window, cx| {
+                                                            keep_view_owner.update(cx, |this, cx| {
+                                                                this.settings.ops.keep_selection_after_delete = *checked;
+                                                                this.settings.save();
+                                                                cx.notify();
+                                                            });
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(caption(tr("set.ops.keep_view_cap").to_string())),
                             )
                             .child(
                                 v_flex()

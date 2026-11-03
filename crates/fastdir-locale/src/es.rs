@@ -361,6 +361,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.ops.recycle" => "Reciclar",
         "set.ops.perm" => "Eliminar definitivamente",
         "set.ops.deletekey_cap" => "Mayús+Supr siempre hace lo otro.",
+        "set.ops.keep_view" => "Mantenerse en el elemento actual al eliminar",
+        "set.ops.keep_view_cap" => "Al terminar una eliminación, deja el cursor y el desplazamiento donde están en vez de ir a la carpeta del elemento eliminado.",
         "set.ops.lastdest" => "Último destino de traslado",
         "set.ops.notset" => "Sin definir",
         "set.startup.title" => "Inicio",
