@@ -302,6 +302,38 @@ Run the GUI-free test suite with:
 cargo test -p fastdir-core -p fastdir-treemap -p fastdir-updater -p fastdir-settings -p fastdir-cli
 ```
 
+### Benchmarks
+
+Scanner, tree-building and treemap benchmarks use
+[criterion](https://github.com/bheisler/criterion.rs) and work on Windows,
+Linux and macOS:
+
+```sh
+cargo bench -p fastdir-core       # scan (default, exclusions, 1 vs all threads), arena build, sorting
+cargo bench -p fastdir-treemap    # squarify layout for 1k / 10k / 100k nodes, CPU render
+```
+
+The scan benchmarks use a synthetic tree (200k files, 20k directories, a few
+huge folders, fixed seed) that is generated once in `target/fastdir-bench-tree`
+and reused; delete that folder to regenerate it. Throughput is reported in
+items per second next to the time. Run on an otherwise idle machine; these are
+**warm-cache** numbers.
+
+To check a change against a baseline:
+
+```sh
+git checkout main
+cargo bench -p fastdir-core -- --save-baseline main
+git checkout my-branch
+cargo bench -p fastdir-core -- --baseline main
+```
+
+For a **cold-cache** run before a release, scan a real folder after dropping the
+OS file cache: reboot (or on Linux `sync; echo 3 | sudo tee /proc/sys/vm/drop_caches`,
+on macOS `sudo purge`), then run
+`cargo run --release -p fastdir-cli -- scan <path>` once and note the time.
+Subsequent runs are warm.
+
 ### Building the installer locally
 
 Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then:
