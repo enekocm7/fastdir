@@ -81,10 +81,7 @@ impl FastDir {
         ) {
             Ok(filter) => filter,
             Err(error) => {
-                window.push_notification(
-                    Notification::warning(error).title(rejected),
-                    cx,
-                );
+                window.push_notification(Notification::warning(error).title(rejected), cx);
                 return false;
             }
         };
@@ -123,6 +120,7 @@ impl FastDir {
         if !matches!(self.phase, Phase::Ready) {
             return;
         }
+        self.leave_treemap(cx);
         self.search.update(cx, |input, cx| input.focus(window, cx));
     }
 
@@ -302,6 +300,7 @@ impl FastDir {
                     .icon(IconName::Funnel)
                     .label(label)
                     .tooltip(self.mod_tip("filter.tooltip"))
+                    .accessibility_label(self.mod_tip("filter.tooltip"))
                     .disabled(!ready)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_filters(&OpenFilters, window, cx)

@@ -174,6 +174,9 @@ impl FastDir {
             _ => "".into(),
         };
         h_flex()
+            .id("status-bar")
+            .role(Role::Status)
+            .aria_label(SharedString::from(format!("{left}  {right}")))
             .h(sp(26.))
             .flex_shrink_0()
             .px_3()

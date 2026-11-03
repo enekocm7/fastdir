@@ -536,6 +536,11 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 | Ctrl+Enter | Open with the default app |
 | Z | Zoom the treemap into the selected folder |
 | Shift+Z | Zoom the treemap out one folder |
+| F8 | Move keyboard focus to the treemap (and back) |
+| Tab / Shift+Tab | Cycle search box → list → treemap |
+| ↑ ↓ ← → *(treemap focused)* | Select the neighbouring cell; the list follows |
+| Enter / Backspace *(treemap focused)* | Zoom into the selected folder / zoom out |
+| Esc *(treemap focused)* | Give the keys back to the list |
 | Ctrl+E | Show in Explorer |
 | Ctrl+Shift+C | Copy the path |
 | F2 | Rename |
@@ -551,6 +556,28 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 | Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |
 | Ctrl+, | Open settings |
+
+### Accessibility
+
+- Everything is reachable by keyboard, including the treemap: press **F8**
+  (or click a cell) and the arrow keys walk between cells, with an accent
+  focus ring around the selected cell and the panel. The list selection
+  stays in sync.
+- **Tab / Shift+Tab** move between the search box, the list and the
+  treemap. Dialogs trap focus, close with Esc and give focus back to where
+  it was.
+- **Screen readers** (NVDA, Narrator, VoiceOver, Orca) work through GPUI's
+  AccessKit integration. Toolbar buttons have names, list rows expose name,
+  size and share plus their level / expanded / selected state, the status
+  bar is a status region, and a live region announces "scan started", the
+  scan summary and each selected item.
+- **Contrast:** text and button colours in both themes meet WCAG AA
+  (4.5:1); this is enforced by a unit test. The treemap highlight, age and
+  change colour modes always show a text legend, and selected rows use a
+  marker bar as well as a tint.
+- **OS settings:** a Windows high-contrast theme replaces the app palette,
+  "Show animations" off disables animations, and "Make text bigger"
+  multiplies the interface scale (Settings → Appearance goes up to 200 %).
 
 ## Building from source
 

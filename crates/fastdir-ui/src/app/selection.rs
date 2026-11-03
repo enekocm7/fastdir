@@ -30,6 +30,7 @@ impl FastDir {
         }
         let ix = ix.min(self.rows.len() - 1);
         self.selected = Some(ix);
+        self.leave_treemap(cx);
         self.marked.clear();
         self.anchor = Some(self.rows[ix].path.clone());
         self.list_scroll.scroll_to_item(ix, ScrollStrategy::Top);
@@ -129,6 +130,7 @@ impl FastDir {
     }
 
     pub(super) fn sync_treemap_selection(&mut self, cx: &mut Context<Self>) {
+        self.announce_selection(cx);
         let sel = self.selection();
         self.treemap.update(cx, |t, cx| t.set_selection(sel, cx));
     }
@@ -330,10 +332,16 @@ impl FastDir {
     }
 
     pub(super) fn select_prev(&mut self, _: &SelectPrev, _: &mut Window, cx: &mut Context<Self>) {
+        if self.treemap_move(treemap::Direction::Up, cx) {
+            return;
+        }
         let ix = self.current_row().unwrap_or(0).saturating_sub(1);
         self.step(ix, cx);
     }
     pub(super) fn select_next(&mut self, _: &SelectNext, _: &mut Window, cx: &mut Context<Self>) {
+        if self.treemap_move(treemap::Direction::Down, cx) {
+            return;
+        }
         let ix = self.current_row().map(|i| i + 1).unwrap_or(0);
         self.step(ix, cx);
     }
@@ -365,6 +373,9 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.treemap_move(treemap::Direction::Right, cx) {
+            return;
+        }
         if self.tab == ListTab::TopFiles {
             let ix = self.top_selected.unwrap_or(0);
             self.reveal_top_file(ix, window, cx);
@@ -394,6 +405,9 @@ impl FastDir {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.treemap_move(treemap::Direction::Left, cx) {
+            return;
+        }
         if self.tab != ListTab::Tree {
             return;
         }
@@ -410,6 +424,11 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.treemap.read(cx).has_keyboard_focus() {
+            // Enter zooms the treemap into the selected folder.
+            self.zoom_in(&ZoomIn, window, cx);
+            return;
+        }
         if self.tab == ListTab::TopFiles {
             let ix = self.top_selected.unwrap_or(0);
             self.reveal_top_file(ix, window, cx);
@@ -423,6 +442,11 @@ impl FastDir {
         }
     }
     pub(super) fn go_parent(&mut self, _: &GoParent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.treemap.read(cx).has_keyboard_focus() {
+            // Backspace zooms the treemap out one folder.
+            self.treemap.update(cx, |t, cx| t.zoom_out(cx));
+            return;
+        }
         if self.tab != ListTab::Tree {
             return;
         }
@@ -434,6 +458,105 @@ impl FastDir {
         if let Some(p) = (0..ix).rev().find(|&i| self.rows[i].depth < depth) {
             self.select_row(p, cx);
         }
+    }
+
+    /// Tell screen readers which item is selected (name, size and share).
+    fn announce_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.selected.and_then(|i| self.rows.get(i)) else {
+            return;
+        };
+        let Some(tree) = self.tree.clone() else { return };
+        let t = tree.read();
+        let Some(node) = t.get(&row.path) else { return };
+        let text = format!(
+            "{}, {}, {}",
+            self.display_name(t.name(node)),
+            self.bytes(node.size),
+            self.percent_of(&t, &row.path, node)
+        );
+        drop(t);
+        self.announce(text, cx);
+    }
+
+    // ------------------------------------------------------------------
+    // Treemap keyboard navigation
+    // ------------------------------------------------------------------
+
+    /// F8: move keyboard focus to the treemap (arrows move between cells,
+    /// Enter zooms in, Backspace / Shift+Z zoom out; Esc, F8 or a list
+    /// selection hands the keys back to the list).
+    pub(super) fn focus_treemap(
+        &mut self,
+        _: &FocusTreemap,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let on = !self.treemap.read(cx).has_keyboard_focus();
+        self.focus.focus(window, cx);
+        self.treemap
+            .update(cx, |t, cx| t.set_keyboard_focus(on, cx));
+        if on && self.selected_path().is_none() {
+            self.treemap_move(treemap::Direction::Down, cx);
+        }
+    }
+
+    /// Tab / Shift+Tab: move between the main regions (search box, list,
+    /// treemap). `step` is 1 for forward and 2 for backward (mod 3).
+    pub(super) fn cycle_region(
+        &mut self,
+        step: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.phase, Phase::Ready) {
+            return;
+        }
+        let search_focus = self.search.read(cx).focus_handle(cx);
+        let current = if self.treemap.read(cx).has_keyboard_focus() {
+            2
+        } else if search_focus.is_focused(window) {
+            0
+        } else {
+            1
+        };
+        match (current + step) % 3 {
+            0 => {
+                self.leave_treemap(cx);
+                self.search.update(cx, |input, cx| input.focus(window, cx));
+            }
+            1 => {
+                self.leave_treemap(cx);
+                self.focus.focus(window, cx);
+            }
+            _ => {
+                self.focus.focus(window, cx);
+                self.treemap
+                    .update(cx, |t, cx| t.set_keyboard_focus(true, cx));
+                if self.selected_path().is_none() {
+                    self.treemap_move(treemap::Direction::Down, cx);
+                }
+            }
+        }
+    }
+
+    pub(super) fn leave_treemap(&mut self, cx: &mut Context<Self>) {
+        if self.treemap.read(cx).has_keyboard_focus() {
+            self.treemap
+                .update(cx, |t, cx| t.set_keyboard_focus(false, cx));
+        }
+    }
+
+    /// While the treemap has keyboard focus, select the neighbouring cell.
+    /// Returns whether the key was consumed.
+    pub(super) fn treemap_move(&mut self, dir: treemap::Direction, cx: &mut Context<Self>) -> bool {
+        if !self.treemap.read(cx).has_keyboard_focus() {
+            return false;
+        }
+        if let Some(path) = self.treemap.read(cx).neighbor(dir) {
+            self.tab = ListTab::Tree;
+            self.reveal_in_list(path, ClickMode::Plain, cx);
+        }
+        true
     }
 
     // ------------------------------------------------------------------

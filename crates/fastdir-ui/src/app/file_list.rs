@@ -579,8 +579,21 @@ impl FastDir {
             } else {
                 fg
             };
+            // Screen readers announce name, size and share; the tree
+            // semantics (level, expanded, selected) are exposed natively.
+            let a11y_name = format!(
+                "{}, {}, {}",
+                self.display_name(tree.name(node)),
+                size_s,
+                pct_s
+            );
             let el = h_flex()
                 .id(("row", ix))
+                .role(Role::TreeItem)
+                .aria_label(a11y_name)
+                .aria_level(row.depth as usize + 1)
+                .aria_selected(is_sel)
+                .when(has_children, |d| d.aria_expanded(expanded))
                 .h(sp(ROW_H))
                 .w_full()
                 .text_xs()
@@ -1844,6 +1857,14 @@ impl FastDir {
                     out.push(
                         h_flex()
                             .id(("cat", ix))
+                            .role(Role::ListBoxOption)
+                            .aria_label(format!(
+                                "{}, {}, {}",
+                                fastdir_locale::category_name(category.id(), &lang),
+                                self.bytes(cat_total.bytes),
+                                format::percent_in(cat_total.bytes, total, &lang)
+                            ))
+                            .aria_selected(is_sel)
                             .relative()
                             .h(sp(ROW_H))
                             .w_full()
@@ -1957,6 +1978,14 @@ impl FastDir {
                     out.push(
                         h_flex()
                             .id(("owner", ix))
+                            .role(Role::ListBoxOption)
+                            .aria_label(format!(
+                                "{}, {}, {}",
+                                name,
+                                self.bytes(owner_total.size),
+                                format::percent_in(owner_total.size, total, &lang)
+                            ))
+                            .aria_selected(is_sel)
                             .h(sp(ROW_H))
                             .w_full()
                             .px_2()
@@ -2029,6 +2058,14 @@ impl FastDir {
                     out.push(
                         h_flex()
                             .id(("ext", ix))
+                            .role(Role::ListBoxOption)
+                            .aria_label(format!(
+                                "{}, {}, {}",
+                                e.name,
+                                self.bytes(e.bytes),
+                                format::percent_in(e.bytes, total, &lang)
+                            ))
+                            .aria_selected(is_sel)
                             .h(sp(ROW_H))
                             .w_full()
                             .px_2()
