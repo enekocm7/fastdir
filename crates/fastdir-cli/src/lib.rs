@@ -9,12 +9,15 @@
 //!   console (see [`attach_parent_console`]).
 
 pub mod args;
+pub mod diff;
 pub mod mcp;
 pub mod schema;
 mod signal;
 
-use args::{Command, Format, HelpTopic, OutputArgs, ScanArgs, ScanCommand, TopCommand};
-use fastdir_core::export::{ExportOptions, export_csv};
+use args::{
+    Command, DiffCommand, Format, HelpTopic, OutputArgs, ScanArgs, ScanCommand, TopCommand,
+};
+use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
 use fastdir_core::format;
 use fastdir_core::model::Tree;
 use fastdir_core::scanner::{self, Progress};
@@ -86,6 +89,7 @@ fn run_inline(args: &[OsString]) -> i32 {
                 HelpTopic::General => args::GENERAL_HELP,
                 HelpTopic::Scan => args::SCAN_HELP,
                 HelpTopic::Top => args::TOP_HELP,
+                HelpTopic::Diff => args::DIFF_HELP,
                 HelpTopic::Mcp => args::MCP_HELP,
             });
             Ok(())
@@ -96,6 +100,7 @@ fn run_inline(args: &[OsString]) -> i32 {
         }
         Command::Scan(c) => run_scan_command(&c),
         Command::Top(c) => run_top_command(&c),
+        Command::Diff(c) => run_diff_command(&c),
         Command::Mcp(c) => mcp::serve(c.allow_destructive).map_err(io_error),
     };
     match result {
@@ -306,6 +311,97 @@ fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
     }
 }
 
+/// A scan loaded from a saved document or taken now.
+struct LoadedScan {
+    tree: Tree,
+    side: diff::DiffSide,
+}
+
+fn classify_path_error(path: &Path, e: io::Error) -> CliError {
+    let shown = path.display();
+    match e.kind() {
+        io::ErrorKind::NotFound => {
+            CliError::new(exit::NOT_FOUND, format!("{shown}: path not found"))
+        }
+        io::ErrorKind::PermissionDenied => {
+            CliError::new(exit::PERMISSION, format!("{shown}: permission denied"))
+        }
+        _ => CliError::new(exit::ERROR, format!("{shown}: {e}")),
+    }
+}
+
+/// Read a saved `fastdir.scan` / export JSON document.
+fn load_saved_scan(path: &Path) -> Result<LoadedScan, CliError> {
+    let shown = path.display();
+    let meta = std::fs::metadata(path).map_err(|e| classify_path_error(path, e))?;
+    if !meta.is_file() {
+        return Err(CliError::new(
+            exit::NOT_FOUND,
+            format!("{shown}: not a saved scan file"),
+        ));
+    }
+    let file = std::fs::File::open(path).map_err(|e| classify_path_error(path, e))?;
+    let imported = import_json_with_meta(io::BufReader::new(file))
+        .map_err(|e| CliError::new(exit::ERROR, format!("{shown}: {e}")))?;
+    let side = diff::DiffSide::new(
+        imported.tree.root_path.to_string_lossy().into_owned(),
+        schema::iso_time(imported.scanned_at),
+    );
+    Ok(LoadedScan {
+        tree: imported.tree,
+        side,
+    })
+}
+
+/// Load the `new` side: a saved scan when `path` is a file, otherwise a
+/// fresh scan of the folder or drive.
+fn load_new_scan(path: &Path, args: &ScanArgs) -> Result<LoadedScan, CliError> {
+    let shown = path.display();
+    let meta = std::fs::metadata(path).map_err(|e| classify_path_error(path, e))?;
+    if meta.is_file() {
+        return load_saved_scan(path);
+    }
+    if !meta.is_dir() {
+        return Err(CliError::new(
+            exit::NOT_FOUND,
+            format!("{shown}: not a file or directory"),
+        ));
+    }
+    let scanned = scan_with_progress(args)?;
+    let side = diff::DiffSide::new(
+        scanned.meta.root.to_string_lossy().into_owned(),
+        Some(scanned.meta.scanned_at.clone()),
+    );
+    Ok(LoadedScan {
+        tree: scanned.tree,
+        side,
+    })
+}
+
+fn run_diff_command(c: &DiffCommand) -> Result<(), CliError> {
+    let old = load_saved_scan(&c.old)?;
+    let new = load_new_scan(&c.new, &c.scan)?;
+    let scan_diff = fastdir_core::diff::build(&old.tree, &new.tree);
+    let doc = diff::document(
+        &scan_diff,
+        &new.tree,
+        &old.side,
+        &new.side,
+        c.min_change,
+        c.max_depth,
+        c.limit,
+    );
+    match c.out.format {
+        Format::Json => write_json(&c.out, &doc),
+        Format::Csv => {
+            let mut w = open_output(&c.out)?;
+            w.write_all(diff::csv(&doc.entries).as_bytes())
+                .and_then(|_| w.flush())
+                .map_err(io_error)
+        }
+    }
+}
+
 /// Connect a GUI-subsystem process to the console it was started from, so
 /// `fastdir scan ...` can print. Redirected handles (pipes, files) are
 /// inherited regardless and are left alone; only missing ones are pointed
@@ -428,6 +524,134 @@ mod tests {
         assert_eq!(doc["tree"]["folders"], 1);
         assert_eq!(doc["tree"]["children"][0]["name"], "sub");
         let _ = std::fs::remove_file(&out);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn diff_compares_a_saved_scan_with_a_live_folder() {
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("a.bin"), vec![0u8; 1000]).unwrap();
+        std::fs::write(dir.join("gone.txt"), b"bye").unwrap();
+        let old =
+            std::env::temp_dir().join(format!("fastdir-cli-diff-old-{}.json", std::process::id()));
+        let new_scan =
+            std::env::temp_dir().join(format!("fastdir-cli-diff-new-{}.json", std::process::id()));
+        let diff_out =
+            std::env::temp_dir().join(format!("fastdir-cli-diff-out-{}.json", std::process::id()));
+        let csv_out =
+            std::env::temp_dir().join(format!("fastdir-cli-diff-out-{}.csv", std::process::id()));
+        assert_eq!(
+            run(vec![
+                "scan".into(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "-o".into(),
+                old.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+
+        std::fs::write(dir.join("sub").join("a.bin"), vec![0u8; 3000]).unwrap();
+        std::fs::remove_file(dir.join("gone.txt")).unwrap();
+        std::fs::write(dir.join("added.bin"), vec![0u8; 500]).unwrap();
+
+        assert_eq!(
+            run(vec![
+                "diff".into(),
+                old.clone().into_os_string(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "--pretty".into(),
+                "-o".into(),
+                diff_out.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let doc: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&diff_out).unwrap()).unwrap();
+        assert_eq!(doc["schema"], "fastdir.diff");
+        assert_eq!(doc["version"], 1);
+        assert_eq!(
+            doc["old"]["root"].as_str(),
+            Some(dir.to_string_lossy().as_ref())
+        );
+        assert!(doc["old"]["scanned_at"].is_string());
+        assert!(doc["new"]["scanned_at"].is_string());
+        // a.bin grew 2000, added.bin added 500, gone.txt removed 3.
+        assert_eq!(doc["total"]["delta"], 2000 + 500 - 3);
+        let entries = doc["entries"].as_array().unwrap();
+        let root_str = dir.to_string_lossy();
+        assert_eq!(entries[0]["path"].as_str(), Some(root_str.as_ref()));
+        assert_eq!(entries[0]["status"], "changed");
+        let statuses: Vec<&str> = entries
+            .iter()
+            .filter(|e| e["path"].as_str() != Some(root_str.as_ref()))
+            .map(|e| e["status"].as_str().unwrap())
+            .collect();
+        assert_eq!(statuses, ["changed", "changed", "added", "removed"]);
+
+        // Scan the new state too, then diff the two saved documents as CSV.
+        assert_eq!(
+            run(vec![
+                "scan".into(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "-o".into(),
+                new_scan.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        assert_eq!(
+            run(vec![
+                "diff".into(),
+                old.clone().into_os_string(),
+                new_scan.clone().into_os_string(),
+                "-q".into(),
+                "--format".into(),
+                "csv".into(),
+                "--min-change".into(),
+                "400".into(),
+                "-o".into(),
+                csv_out.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let csv = std::fs::read_to_string(&csv_out).unwrap();
+        assert!(csv.starts_with("path,type,status,old_size,new_size,delta,"));
+        assert!(!csv.contains("gone.txt"), "below --min-change");
+        assert!(csv.contains("added.bin"));
+        for path in [&old, &new_scan, &diff_out, &csv_out] {
+            let _ = std::fs::remove_file(path);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn diff_rejects_a_missing_or_non_scan_baseline() {
+        let missing = std::env::temp_dir().join("fastdir-cli-diff-definitely-missing.json");
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-diff-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            run(vec![
+                "diff".into(),
+                missing.into_os_string(),
+                dir.clone().into_os_string()
+            ]),
+            exit::NOT_FOUND
+        );
+        let plain = dir.join("plain.json");
+        std::fs::write(&plain, b"not json").unwrap();
+        assert_eq!(
+            run(vec![
+                "diff".into(),
+                plain.into_os_string(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+            ]),
+            exit::ERROR
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

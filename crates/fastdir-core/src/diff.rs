@@ -48,6 +48,10 @@ pub struct NodeChange {
     pub new_size: u64,
     /// `new_size - old_size` (never overflows for real file sizes).
     pub delta: i64,
+    /// Allocated size in the old scan (`0` when the node is new).
+    pub old_disk_size: u64,
+    /// Allocated size in the new scan.
+    pub new_disk_size: u64,
 }
 
 impl NodeChange {
@@ -199,6 +203,10 @@ pub fn build(old: &Tree, new: &Tree) -> ScanDiff {
                 old_size: diff.totals.old_size,
                 new_size: diff.totals.new_size,
                 delta: root_delta,
+                // The root node also carries the drive pseudo-items; report
+                // the scanned data so this row agrees with `totals`.
+                old_disk_size: old.scanned_disk_bytes(),
+                new_disk_size: new.scanned_disk_bytes(),
             },
         );
     }
@@ -237,6 +245,8 @@ impl ScanDiff {
                     old_size: old_node.size,
                     new_size: new_node.size,
                     delta,
+                    old_disk_size: old_node.disk_size,
+                    new_disk_size: new_node.disk_size,
                 },
             );
         }
@@ -296,6 +306,8 @@ impl ScanDiff {
                 old_size: 0,
                 new_size: node.size,
                 delta: node.size as i64,
+                old_disk_size: 0,
+                new_disk_size: node.disk_size,
             },
         );
         if node.is_dir() {
