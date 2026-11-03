@@ -30,6 +30,11 @@ culprit? Rename, move, recycle or delete it right there.
 - **Hard links counted once** - files sharing a file ID (for example under
   `C:\Windows\WinSxS`) are counted the first time and marked as `hard link`
   afterwards, so totals are not inflated.
+- **Colour by age** – switch the treemap from extension colours to a
+  new-to-old scale (under a week, a month, six months, a year, three years,
+  older). The legend below the treemap totals each bucket, the colour-blind
+  palette gets its own safe scale, and the file list can tint its *Last change*
+  column to match.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a
@@ -65,7 +70,8 @@ culprit? Rename, move, recycle or delete it right there.
   remembered between launches: window geometry, panel sizes, sort order, the
   last scanned path, size units (binary / decimal), relative or absolute
   dates, visible columns, percent base, treemap palettes (including a
-  colour-blind-safe one), flat shading, cell borders, list-only mode, excluded
+  colour-blind-safe one), flat shading, cell borders, age-tinted dates,
+  list-only mode, excluded
     paths, hidden/system skipping, junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
   frequency, per-action delete confirmations, whether the list stays on the
