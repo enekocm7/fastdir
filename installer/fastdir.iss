@@ -73,6 +73,16 @@ Root: HKA; Subkey: "Software\Classes\Drive\shell\FastDir"; ValueType: string; Va
 Root: HKA; Subkey: "Software\Classes\Drive\shell\FastDir"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
 Root: HKA; Subkey: "Software\Classes\Drive\shell\FastDir\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: contextmenu
 
+; The in-app Settings -> Integration toggle writes these under HKCU even when the
+; installer's contextmenu task was not chosen. dontcreatekey: never created at
+; install time, but removed on uninstall so no entry points at a deleted exe.
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\FastDir"; Flags: dontcreatekey uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Drive\shell\FastDir"; Flags: dontcreatekey uninsdeletekey
+
+[UninstallDelete]
+; In-app update download folder, in case the app was not relaunched to clean it.
+Type: filesandordirs; Name: "{%TEMP}\FastDir-update"
+
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 ; Silent in-app update (`/RELAUNCH=1`, passed by FastDir's updater): start the new version.
@@ -82,4 +92,25 @@ Filename: "{app}\{#AppExe}"; Flags: nowait skipifnotsilent; Check: RelaunchReque
 function RelaunchRequested: Boolean;
 begin
   Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
+{ Uninstall removes %APPDATA%\FastDir (config.toml, legacy settings.json).
+  Interactive: ask whether to keep it. Silent: removed unless /KEEPDATA is passed. }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+  Keep: Boolean;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+  DataDir := ExpandConstant('{userappdata}\{#AppName}');
+  if not DirExists(DataDir) then
+    Exit;
+  if UninstallSilent then
+    Keep := ExpandConstant('{param:KEEPDATA|0}') <> '0'
+  else
+    Keep := MsgBox('Also remove your FastDir settings?' + #13#10 + DataDir,
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON1) = IDNO;
+  if (not Keep) then
+    DelTree(DataDir, True, True, True);
 end;
