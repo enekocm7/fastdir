@@ -226,6 +226,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_dirs" => "Dossiers",
         "list.col_date" => "Dernière modification",
         "list.tree_tab" => "Arborescence",
+        "list.col_owner" => "Propriétaire",
+        "list.owner_col" => "Propriétaire",
+        "list.by_owner" => "Par propriétaire",
+        "list.unknown_owner" => "(inconnu)",
         "list.top_tab" => "Fichiers principaux ({n})",
         "list.no_match" => "Aucun élément ne correspond au filtre",
         "list.empty" => "Ce dossier est vide",
@@ -317,6 +321,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.threads" => "Threads d'analyse",
         "set.scan.threads_cap" => "Utilisé par la prochaine analyse (1-64).",
         "set.scan.partial" => "Afficher les résultats partiels pendant l'analyse",
+        "set.scan.owners" => "Collecter les propriétaires des fichiers",
+        "set.scan.owners_cap" => "Enregistre le propriétaire de chaque fichier pour la colonne Propriétaire et les totaux par utilisateur. Analyses plus lentes.",
         "set.scan.partial_cap" => {
             "Les dossiers terminés et un aperçu du treemap apparaissent avant la fin de l'analyse."
         }
@@ -365,6 +371,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.list.folders_col" => "Colonne de dossiers",
         "set.list.modified_col" => "Colonne de dernière modification",
         "set.list.disk_col" => "Colonne de taille sur disque",
+        "set.list.owner_col" => "Colonne Propriétaire",
         "tb.menu_hide_empty" => "Masquer les dossiers vides",
         "tb.tip_hide_empty" => "Masquer les dossiers vides (sans fichiers)",
         "set.list.hide_empty" => "Masquer les dossiers vides",

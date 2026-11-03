@@ -16,7 +16,7 @@ use crate::{CliError, Scanned, resolve_root};
 use fastdir_core::diff as core_diff;
 use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
 use fastdir_core::filter::{Filter, parse_size};
-use fastdir_core::model::{NodeKind, NodePath, Tree};
+use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
 use fastdir_core::scanner::{self, Progress, ScanOptions};
 use serde_json::{Value, json};
 use std::cmp::Reverse;
@@ -396,6 +396,7 @@ impl Server {
             follow_junctions: arg_bool(args, "follow_junctions", false)?,
             cross_volumes: false,
             threads,
+            collect_owners: false,
         };
         let i = self.scan(&path, &options)?;
         let s = &self.scans[i];
@@ -460,7 +461,12 @@ impl Server {
                 .iter()
                 .map(|p| {
                     let n = tree.get(p).expect("search hit is in the tree");
-                    entry_summary(tree, n, &tree.fs_path(p).unwrap_or_default())
+                    entry_summary(
+                        tree,
+                        n,
+                        &tree.fs_path(p).unwrap_or_default(),
+                        tree.owner_at(p),
+                    )
                 })
                 .collect::<Vec<_>>(),
         }))
@@ -472,7 +478,12 @@ impl Server {
         let s = &self.scans[i];
         let tree = &s.tree;
         let node = tree.get(&node_path).expect("located node exists");
-        let mut out = entry_summary(tree, node, &tree.fs_path(&node_path).unwrap_or_default());
+        let mut out = entry_summary(
+            tree,
+            node,
+            &tree.fs_path(&node_path).unwrap_or_default(),
+            tree.owner_at(&node_path),
+        );
         let share = |part: u64, whole: u64| {
             if whole == 0 {
                 0.0
@@ -743,24 +754,25 @@ fn scan_folder(path: &Path, options: &ScanOptions) -> Result<Scanned, ToolError>
 fn children_reply(tree: &Tree, node: &[u32], limit: usize, include_files: bool) -> Value {
     let dir = tree.get(node).expect("folder exists");
     let base = tree.fs_path(node).unwrap_or_default();
-    let children: Vec<_> = tree
+    let children: Vec<(usize, &Node)> = tree
         .children(dir)
         .iter()
-        .filter(|c| include_files || c.is_dir())
+        .enumerate()
+        .filter(|(_, c)| include_files || c.is_dir())
         .collect();
     let shown: Vec<Value> = children
         .iter()
         .take(limit)
-        .map(|c| entry_summary(tree, c, &base.join(tree.name(c))))
+        .map(|(i, c)| entry_summary(tree, c, &base.join(tree.name(c)), tree.child_owner(dir, *i)))
         .collect();
     let omitted = &children[shown.len()..];
     json!({
-        "entry": entry_summary(tree, dir, &base),
+        "entry": entry_summary(tree, dir, &base, tree.owner_at(node)),
         "children": shown,
         "total_children": children.len(),
         "omitted": {
             "count": omitted.len(),
-            "size": omitted.iter().map(|c| c.size).sum::<u64>(),
+            "size": omitted.iter().map(|(_, c)| c.size).sum::<u64>(),
         },
     })
 }

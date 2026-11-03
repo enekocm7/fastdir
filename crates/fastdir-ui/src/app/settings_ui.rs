@@ -140,7 +140,10 @@ impl Render for SettingsView {
         let lang_selected = if lang_setting == "system" {
             0
         } else {
-            lang_codes.iter().position(|c| *c == lang_current).unwrap_or(0)
+            lang_codes
+                .iter()
+                .position(|c| *c == lang_current)
+                .unwrap_or(0)
         };
         let lang_names: Vec<&'static str> = lang_codes
             .iter()
@@ -164,6 +167,7 @@ impl Render for SettingsView {
         let thread_owner = self.owner.clone();
         let thread_input = self.thread_input.clone();
         let partial_owner = self.owner.clone();
+        let owners_owner = self.owner.clone();
         let excluded_owner = self.owner.clone();
         let excluded_input = self.excluded_input.clone();
         let tm_show_owner = self.owner.clone();
@@ -187,6 +191,7 @@ impl Render for SettingsView {
         let col_folders_owner = self.owner.clone();
         let col_modified_owner = self.owner.clone();
         let col_disk_owner = self.owner.clone();
+        let col_owner_owner = self.owner.clone();
         let confirm_recycle_owner = self.owner.clone();
         let confirm_permanent_owner = self.owner.clone();
         let confirm_move_owner = self.owner.clone();
@@ -604,6 +609,37 @@ impl Render for SettingsView {
                                                 move |_, _checked: &bool, _window, cx| {
                                                     partial_owner.update(cx, |this, cx| {
                                                         this.toggle_partial_results(cx)
+                                                    });
+                                                },
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(
+                                                div().text_xs().child(tr("set.scan.owners")),
+                                            )
+                                            .child(caption(
+                                                tr("set.scan.owners_cap").to_string(),
+                                            )),
+                                    )
+                                    .child(
+                                        Switch::new("settings-collect-owners")
+                                            .checked(scan.collect_owners)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    owners_owner.update(cx, |this, cx| {
+                                                        this.settings.scan.collect_owners =
+                                                            *checked;
+                                                        this.settings.save();
+                                                        cx.notify();
                                                     });
                                                 },
                                             )),
@@ -1207,6 +1243,27 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
+                                    .child(div().text_xs().child(tr("set.list.owner_col")))
+                                    .child(
+                                        Switch::new("settings-col-owner")
+                                            .checked(list.show_owner)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    col_owner_owner.update(cx, |this, cx| {
+                                                        this.settings.list.show_owner = *checked;
+                                                        this.settings.save();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
                                     .child(div().text_xs().child(tr("set.list.hide_empty")))
                                     .child(
                                         Switch::new("settings-hide-empty")
@@ -1775,8 +1832,9 @@ impl FastDir {
         let lang = self.lang();
         self.treemap.update(cx, |t, cx| t.set_language(lang, cx));
         let placeholder = self.tr("search.placeholder");
-        self.search
-            .update(cx, |input, cx| input.set_placeholder(placeholder, window, cx));
+        self.search.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
         self.apply_theme(window, cx);
         self.apply_ui_scale(window, cx);
         self.refresh_treemap_options(cx);
@@ -1824,18 +1882,14 @@ impl FastDir {
         window.open_dialog(cx, move |dialog, window, _| {
             // Scale with the main window, within readable bounds.
             let width = (window.viewport_size().width * 0.7).clamp(px(680.), px(1000.));
-            dialog
-                .title(dlg_title)
-                .w(width)
-                .child(view.clone())
-                .footer(
-                    h_flex().w_full().justify_end().child(
-                        Button::new("settings-close")
-                            .outline()
-                            .label(dlg_close)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    ),
-                )
+            dialog.title(dlg_title).w(width).child(view.clone()).footer(
+                h_flex().w_full().justify_end().child(
+                    Button::new("settings-close")
+                        .outline()
+                        .label(dlg_close)
+                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                ),
+            )
         });
     }
 }

@@ -5,7 +5,8 @@
 //! so it can be tested and reused without a toolkit.
 //!
 //! - CSV is a flat table with one row per node:
-//!   `path,size,disk_size,items,files,folders,type,modified,modified_iso`.
+//!   `path,size,disk_size,items,files,folders,type,modified,modified_iso`, plus
+//!   an `owner` column when the scan collected owners.
 //! - JSON is a hierarchical snapshot of the subtree that
 //!   [`import_json`] can read back into a [`Tree`] (sizes, structure,
 //!   timestamps and drive pseudo-item kinds round-trip; UI-only flags such as
@@ -15,7 +16,9 @@
 //! the exported root rows are emitted (the root itself is depth 0), and
 //! `include_files == false` exports folders only.
 
-use crate::model::{Arena, DirBuilder, Node, NodeKind, NodePath, Subtree, Tree};
+use crate::model::{
+    Arena, DirBuilder, NO_OWNER, Node, NodeKind, NodePath, OwnerTable, Subtree, Tree,
+};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -160,8 +163,15 @@ pub fn export_csv(
     mut out: impl Write,
 ) -> io::Result<usize> {
     let rows = collect_rows(tree, root, options)?;
+    // The owner column only exists for scans that collected owners, so the
+    // default export keeps its existing shape.
+    let with_owner = tree.has_owners();
     let mut buf =
-        String::from("path,size,disk_size,items,files,folders,type,modified,modified_iso\n");
+        String::from("path,size,disk_size,items,files,folders,type,modified,modified_iso");
+    if with_owner {
+        buf.push_str(",owner");
+    }
+    buf.push('\n');
     for row in &rows {
         let node = *tree
             .get(&row.path)
@@ -179,6 +189,13 @@ pub fn export_csv(
             node.modified(),
             iso_time(node.modified()),
         ));
+        if with_owner {
+            buf.push(',');
+            push_field(
+                &mut buf,
+                tree.owner_name(tree.owner_at(&row.path)).unwrap_or(""),
+            );
+        }
         buf.push('\n');
     }
     out.write_all(buf.as_bytes())?;
@@ -203,6 +220,9 @@ struct JsonNode {
     dirs: u32,
     #[serde(default, deserialize_with = "de_modified")]
     modified: i64,
+    /// Display name of the owning account, when the scan collected owners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<JsonNode>,
 }
@@ -306,6 +326,7 @@ fn snapshot(
         files: node.files,
         dirs: node.dirs,
         modified: node.modified(),
+        owner: tree.owner_name(tree.owner_at(path)).map(str::to_owned),
         children,
     })
 }
@@ -361,7 +382,13 @@ pub fn export_to_file(
     }
 }
 
-fn build_dir(node: &JsonNode, arena: &mut Arena) -> io::Result<Node> {
+/// Build one directory (and its children) from a JSON node, interning the
+/// optional owner names into `owners`. Returns the node and its own owner.
+fn build_dir(
+    node: &JsonNode,
+    arena: &mut Arena,
+    owners: &mut OwnerTable,
+) -> io::Result<(Node, u16)> {
     if node.name.is_empty() {
         return Err(invalid("node without a name"));
     }
@@ -370,16 +397,25 @@ fn build_dir(node: &JsonNode, arena: &mut Arena) -> io::Result<Node> {
         if child.name.is_empty() {
             return Err(invalid("node without a name"));
         }
+        let owner = child
+            .owner
+            .as_deref()
+            .map(|name| owners.intern(name))
+            .unwrap_or(NO_OWNER);
         match parse_kind(&child.kind).ok_or_else(|| invalid("unknown node kind"))? {
             NodeKind::Dir => {
-                let dir = build_dir(child, arena)?;
-                builder.add_dir(&child.name, dir);
+                let (dir, dir_owner) = build_dir(child, arena, owners)?;
+                builder.add_dir_owned(&child.name, dir, dir_owner);
             }
             // Hard-link markers have no builder of their own; keep their
             // bytes as plain files so totals survive.
-            NodeKind::File => {
-                builder.add_file(&child.name, child.size, child.disk_size, child.modified)
-            }
+            NodeKind::File => builder.add_file_owned(
+                &child.name,
+                child.size,
+                child.disk_size,
+                child.modified,
+                owner,
+            ),
             kind @ (NodeKind::FreeSpace | NodeKind::Unknown) => {
                 builder.add_special(
                     kind,
@@ -391,7 +427,12 @@ fn build_dir(node: &JsonNode, arena: &mut Arena) -> io::Result<Node> {
             }
         }
     }
-    Ok(builder.commit(arena))
+    let own = node
+        .owner
+        .as_deref()
+        .map(|name| owners.intern(name))
+        .unwrap_or(NO_OWNER);
+    Ok((builder.commit(arena), own))
 }
 
 /// A scan read back from JSON, plus when it was taken.
@@ -447,9 +488,14 @@ pub fn import_json_with_meta(source: impl Read) -> io::Result<ImportedScan> {
     if kind != NodeKind::Dir {
         return Err(invalid("export root must be a folder"));
     }
-    let root = build_dir(&root, &mut arena)?;
+    let mut owners = OwnerTable::default();
+    let (root, root_owner) = build_dir(&root, &mut arena, &mut owners)?;
+    arena.set_owners(owners);
     Ok(ImportedScan {
-        tree: Tree::new(Subtree::new(arena, &root_name, root), root_path),
+        tree: Tree::new(
+            Subtree::new_owned(arena, &root_name, root, root_owner),
+            root_path,
+        ),
         scanned_at,
     })
 }
@@ -719,6 +765,42 @@ mod tests {
         let sub = tree.find(Path::new("/root/sub")).unwrap();
         assert_eq!(tree.get(&sub).unwrap().modified(), 1_700_000_160);
         assert!(tree.exts.iter().any(|e| &*e.name == ".txt"));
+    }
+
+    #[test]
+    fn exports_include_the_owner_when_collected() {
+        let mut table = crate::model::OwnerTable::default();
+        let alice = table.intern(r"DOMAIN\alice");
+        let mut arena = Arena::default();
+        let mut root = DirBuilder::new(0);
+        root.add_file_owned("a.txt", 5, 5, 0, alice);
+        let root = root.commit(&mut arena);
+        arena.set_owners(table);
+        let tree = Tree::new(
+            Subtree::new_owned(arena, "root", root, alice),
+            PathBuf::from("/root"),
+        );
+
+        let mut csv = Vec::new();
+        export_csv(&tree, &[], &ExportOptions::default(), &mut csv).unwrap();
+        let text = String::from_utf8(csv).unwrap();
+        let mut lines = text.lines();
+        assert_eq!(lines.next().unwrap(), format!("{},owner", header()));
+        let row = lines.find(|line| line.contains("a.txt")).unwrap();
+        assert!(row.ends_with(r#"DOMAIN\alice"#), "{row}");
+
+        let mut json = Vec::new();
+        export_json(&tree, &[], &ExportOptions::default(), &mut json).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(doc["root"]["owner"], r"DOMAIN\alice");
+        assert_eq!(doc["root"]["children"][0]["owner"], r"DOMAIN\alice");
+
+        // The owner round-trips through the JSON document.
+        let back = import_json(json.as_slice()).unwrap();
+        assert!(back.has_owners());
+        let a = back.find(Path::new("/root/a.txt")).unwrap();
+        assert_eq!(back.owner_name(back.owner_at(&a)), Some(r"DOMAIN\alice"));
+        assert_eq!(back.owner_name(back.root_owner()), Some(r"DOMAIN\alice"));
     }
 
     #[test]

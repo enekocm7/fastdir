@@ -51,6 +51,7 @@ pub struct ScanArgs {
     pub follow_junctions: bool,
     pub cross_volumes: bool,
     pub skip_hidden_system: bool,
+    pub collect_owners: bool,
     pub quiet: bool,
 }
 
@@ -62,6 +63,7 @@ impl ScanArgs {
             follow_junctions: self.follow_junctions,
             cross_volumes: self.cross_volumes,
             threads: self.threads,
+            collect_owners: self.collect_owners,
         }
     }
 }
@@ -251,6 +253,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     let mut follow_junctions = false;
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
+    let mut collect_owners = false;
     let mut quiet = false;
     let mut format = Format::Json;
     let mut output = None;
@@ -298,6 +301,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--follow-junctions" => follow_junctions = true,
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
@@ -329,6 +333,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
         follow_junctions,
         cross_volumes,
         skip_hidden_system,
+        collect_owners,
         quiet,
     };
     let out = OutputArgs {
@@ -355,6 +360,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut follow_junctions = false;
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
+    let mut collect_owners = false;
     let mut quiet = false;
     let mut format = Format::Json;
     let mut output = None;
@@ -399,6 +405,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--follow-junctions" => follow_junctions = true,
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
@@ -434,6 +441,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
         follow_junctions,
         cross_volumes,
         skip_hidden_system,
+        collect_owners,
         quiet,
     };
     Ok(Command::Diff(DiffCommand {
@@ -507,6 +515,7 @@ Scanning:
   --follow-junctions      descend into junctions and symlinked folders
   --cross-volumes         with --follow-junctions, also enter other volumes
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
+  --owners                record each file's owner (Owner column, per-user totals)
   -q, --quiet             no progress or summary on stderr
 ";
 
@@ -523,7 +532,7 @@ Output:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, -q/--quiet   as for `fastdir scan`
+  --skip-hidden, --owners, -q/--quiet   as for `fastdir scan`
 ";
 
 pub const DIFF_HELP: &str = "\
@@ -549,6 +558,7 @@ Scanning (only when <new> is a folder):
   --follow-junctions      descend into junctions and symlinked folders
   --cross-volumes         with --follow-junctions, also enter other volumes
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
+  --owners                record each file's owner (Owner column, per-user totals)
   -q, --quiet             no progress or summary on stderr
 ";
 
@@ -637,6 +647,7 @@ mod tests {
         assert!(!c.scan.follow_junctions);
         assert!(!c.scan.cross_volumes);
         assert!(!c.scan.skip_hidden_system);
+        assert!(!c.scan.collect_owners);
         assert!(!c.scan.quiet);
     }
 
@@ -657,6 +668,7 @@ mod tests {
             "--follow-junctions",
             "--cross-volumes",
             "--skip-system",
+            "--owners",
             "-q",
             "--pretty",
             "dir",
@@ -669,11 +681,12 @@ mod tests {
         assert_eq!(c.scan.threads, Some(8));
         assert_eq!(c.scan.exclude, vec!["node_modules", "*.tmp"]);
         assert!(c.scan.follow_junctions && c.scan.cross_volumes);
-        assert!(c.scan.skip_hidden_system && c.scan.quiet);
+        assert!(c.scan.skip_hidden_system && c.scan.quiet && c.scan.collect_owners);
         assert_eq!(c.scan.path, PathBuf::from("dir"));
         let opts = c.scan.scan_options();
         assert_eq!(opts.threads, Some(8));
         assert!(opts.skip_hidden_system && opts.follow_junctions && opts.cross_volumes);
+        assert!(opts.collect_owners);
     }
 
     #[test]
@@ -737,6 +750,7 @@ mod tests {
             "4",
             "--exclude",
             "node_modules",
+            "--owners",
             "-q",
         ]) {
             Command::Diff(c) => c,
@@ -753,7 +767,7 @@ mod tests {
         assert_eq!(c.limit, Some(10));
         assert_eq!(c.scan.threads, Some(4));
         assert_eq!(c.scan.exclude, vec!["node_modules"]);
-        assert!(c.scan.quiet);
+        assert!(c.scan.quiet && c.scan.collect_owners);
 
         let defaults = match parse_ok(&["diff", "old.json", "new.json"]) {
             Command::Diff(c) => c,

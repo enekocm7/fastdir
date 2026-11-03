@@ -58,6 +58,9 @@ pub struct EntryView<'a> {
     pub path: PathBuf,
     pub depth: usize,
     pub shape: TreeShape,
+    /// Owner index in `tree.owners()` ([`fastdir_core::model::NO_OWNER`] when
+    /// unknown or not collected).
+    pub owner: u16,
 }
 
 impl EntryView<'_> {
@@ -82,6 +85,9 @@ impl Serialize for EntryView<'_> {
         st.serialize_field("modified", &iso_time(node.modified()))?;
         st.serialize_field("error", &node.error())?;
         st.serialize_field("hard_link", &node.hard_link())?;
+        if let Some(owner) = self.tree.owner_name(self.owner) {
+            st.serialize_field("owner", owner)?;
+        }
         if is_dir {
             let lists = self.lists_children();
             // Truncated: the folder has entries that were cut off by
@@ -111,7 +117,7 @@ impl Serialize for Children<'_, '_> {
             return s.serialize_seq(Some(0))?.end();
         }
         let mut seq = s.serialize_seq(None)?;
-        for child in p.tree.children(p.node) {
+        for (i, child) in p.tree.children(p.node).iter().enumerate() {
             if !child.is_dir() && !p.shape.include_files {
                 continue;
             }
@@ -121,6 +127,7 @@ impl Serialize for Children<'_, '_> {
                 path: p.path.join(p.tree.name(child)),
                 depth: p.depth + 1,
                 shape: p.shape,
+                owner: p.tree.child_owner(p.node, i),
             })?;
         }
         seq.end()
@@ -172,6 +179,7 @@ impl Serialize for ScanDoc<'_> {
                 path,
                 depth: 0,
                 shape: self.shape,
+                owner: self.tree.owner_at(self.subtree),
             },
         )?;
         st.end()
@@ -179,7 +187,7 @@ impl Serialize for ScanDoc<'_> {
 }
 
 /// A node without its children, for MCP replies and `top` totals.
-pub fn entry_summary(tree: &Tree, node: &Node, path: &Path) -> Value {
+pub fn entry_summary(tree: &Tree, node: &Node, path: &Path, owner: u16) -> Value {
     let mut v = json!({
         "name": tree.name(node),
         "path": path.to_string_lossy(),
@@ -199,6 +207,9 @@ pub fn entry_summary(tree: &Tree, node: &Node, path: &Path) -> Value {
     {
         v["extension"] = json!(ext);
     }
+    if let Some(owner) = tree.owner_name(owner) {
+        v["owner"] = json!(owner);
+    }
     v
 }
 
@@ -206,14 +217,18 @@ pub fn entry_summary(tree: &Tree, node: &Node, path: &Path) -> Value {
 pub fn file_entry(tree: &Tree, f: &FileEntry) -> Value {
     let path = tree.fs_path(&f.path).unwrap_or_default();
     let ext = tree.exts.get(f.ext as usize).map(|e| e.name.to_string());
-    json!({
+    let mut v = json!({
         "name": &*f.name,
         "path": path.to_string_lossy(),
         "extension": ext,
         "size": f.size,
         "disk_size": f.disk_size,
         "modified": iso_time(f.modified),
-    })
+    });
+    if let Some(owner) = tree.owner_name(f.owner) {
+        v["owner"] = json!(owner);
+    }
+    v
 }
 
 /// `fastdir top` output.
@@ -249,16 +264,26 @@ pub fn csv_field(field: &str) -> String {
 
 /// `fastdir top --format csv` output.
 pub fn top_csv(tree: &Tree, files: &[FileEntry]) -> String {
-    let mut out = String::from("path,size,disk_size,modified_iso\n");
+    let with_owner = tree.has_owners();
+    let mut out = String::from("path,size,disk_size,modified_iso");
+    if with_owner {
+        out.push_str(",owner");
+    }
+    out.push('\n');
     for f in files {
         let path = tree.fs_path(&f.path).unwrap_or_default();
         out.push_str(&csv_field(&path.to_string_lossy()));
         out.push_str(&format!(
-            ",{},{},{}\n",
+            ",{},{},{}",
             f.size,
             f.disk_size,
             iso_time(f.modified).unwrap_or_default()
         ));
+        if with_owner {
+            out.push(',');
+            out.push_str(&csv_field(tree.owner_name(f.owner).unwrap_or("")));
+        }
+        out.push('\n');
     }
     out
 }
@@ -469,6 +494,51 @@ pub(crate) mod tests {
         assert_eq!(files[0]["name"], "big.iso");
         assert_eq!(files[0]["extension"], ".iso");
         assert_eq!(files[1]["name"], "a.txt");
+    }
+
+    #[test]
+    fn owner_fields_appear_only_when_collected() {
+        let mut table = fastdir_core::model::OwnerTable::default();
+        let alice = table.intern(r"DOMAIN\alice");
+        let mut arena = Arena::default();
+        let mut dir = DirBuilder::new(0);
+        dir.add_file_owned("a.txt", 10, 10, 0, alice);
+        let node = dir.commit(&mut arena);
+        arena.set_owners(table);
+        let tree = Tree::new(
+            Subtree::new_owned(arena, "root", node, alice),
+            PathBuf::from("root"),
+        );
+        let meta = meta();
+        let doc = serde_json::to_value(ScanDoc {
+            meta: &meta,
+            tree: &tree,
+            subtree: &[],
+            shape: FULL,
+        })
+        .unwrap();
+        assert_eq!(doc["tree"]["owner"], r"DOMAIN\alice");
+        assert_eq!(doc["tree"]["children"][0]["owner"], r"DOMAIN\alice");
+
+        let top = top_doc(&meta, &tree, &tree.top_files(5), 5);
+        assert_eq!(top["files"][0]["owner"], r"DOMAIN\alice");
+        assert!(
+            top_csv(&tree, &tree.top_files(5))
+                .starts_with("path,size,disk_size,modified_iso,owner\n")
+        );
+
+        // Without collection the fields stay absent and the CSV shape is
+        // unchanged.
+        let plain = sample_tree();
+        let doc = serde_json::to_value(ScanDoc {
+            meta: &meta,
+            tree: &plain,
+            subtree: &[],
+            shape: FULL,
+        })
+        .unwrap();
+        assert!(doc["tree"].get("owner").is_none());
+        assert!(!top_csv(&plain, &plain.top_files(5)).contains("owner"));
     }
 
     #[test]
