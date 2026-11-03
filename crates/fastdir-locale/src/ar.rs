@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} عناصر",
         "tb.op_cancelling" => "جارٍ الإلغاء…",
+        "tb.op_queued" => "{n} في الانتظار",
+        "tb.op_cancel_all" => "إلغاء كل الطابور",
         "tb.title_scanning" => "جارٍ فحص {path}",
         "tb.drive_free" => "{free} حرة من {total}",
         "home.title" => "ما الذي يستخدم مساحة القرص؟",

@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} 項目",
         "tb.op_cancelling" => "キャンセル中…",
+        "tb.op_queued" => "待機中 {n} 件",
+        "tb.op_cancel_all" => "待機中をすべてキャンセル",
         "tb.title_scanning" => "{path} をスキャン中",
         "tb.drive_free" => "{total} 中 {free} の空き",
         "home.title" => "ディスクを使っているのは何？",

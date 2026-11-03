@@ -36,6 +36,7 @@ impl FastDir {
         let update_entity = entity.clone();
         let focus = self.focus.clone();
         let busy = self.is_busy();
+        let refreshing = self.is_refreshing();
 
         h_flex()
             .h(px(42.))
@@ -143,7 +144,7 @@ impl FastDir {
             )
             .child(
                 tool("move", IconName::FolderInput, self.mod_tip("tb.tip_move"))
-                    .disabled(!has_sel || is_root || busy || special)
+                    .disabled(!has_sel || is_root || refreshing || special)
                     .on_click(cx.listener(|this, _, w, cx| this.move_item(&MoveItem, w, cx))),
             )
             .child(
@@ -152,7 +153,7 @@ impl FastDir {
                     IconName::Recycle,
                     self.tr_fmt("tb.tip_recycle", &[("trash", self.trash_name())]),
                 )
-                .disabled(!has_sel || is_root || busy || special)
+                .disabled(!has_sel || is_root || refreshing || special)
                 .on_click(cx.listener(|this, _, w, cx| this.trash_item(&TrashItem, w, cx))),
             )
             .child(
@@ -161,7 +162,7 @@ impl FastDir {
                     .ghost()
                     .icon(Icon::new(IconName::Trash).text_color(theme.danger))
                     .tooltip(self.tr("tb.tip_delete"))
-                    .disabled(!has_sel || is_root || busy || special)
+                    .disabled(!has_sel || is_root || refreshing || special)
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
             .child(Separator::vertical().h(px(20.)).mx_1())
@@ -447,6 +448,7 @@ impl FastDir {
             .load(Ordering::Relaxed)
             .min(op.total_bytes);
         let cancelling = op.progress.is_cancelled();
+        let queued = self.op_queue.len();
         let (done, total) = if op.by_bytes && op.total_bytes > 0 {
             (bytes, op.total_bytes)
         } else {
@@ -506,6 +508,83 @@ impl FastDir {
                     .disabled(cancelling)
                     .on_click(cx.listener(|this, _, _, cx| this.cancel_op(cx))),
             )
+            .when(queued > 0, |row| {
+                let entity = cx.entity().downgrade();
+                let list_entity = entity.clone();
+                let fg = cx.theme().foreground;
+                let hover_bg = cx.theme().list_hover;
+                row.child(
+                    Popover::new("op-queue")
+                        .anchor(Anchor::TopRight)
+                        .trigger(
+                            Button::new("op-queue-trigger")
+                                .ghost()
+                                .small()
+                                .label(self.tr_fmt("tb.op_queued", &[("n", &queued.to_string())]))
+                                .dropdown_caret(true),
+                        )
+                        .content(move |_, _, cx| {
+                            let items: Vec<(u64, SharedString)> = list_entity
+                                .upgrade()
+                                .map(|e| {
+                                    e.read(cx)
+                                        .op_queue
+                                        .iter()
+                                        .map(|op| (op.id, op.label.clone()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            v_flex().w(px(360.)).max_h(px(280.)).overflow_y_hidden().children(
+                                items.into_iter().map(|(id, label)| {
+                                    let group = SharedString::from(format!("queued-{id}"));
+                                    let entity = entity.clone();
+                                    h_flex()
+                                        .group(group.clone())
+                                        .gap_2()
+                                        .px_2()
+                                        .py_1()
+                                        .rounded_md()
+                                        .text_xs()
+                                        .text_color(fg)
+                                        .hover(move |s| s.bg(hover_bg))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .text_ellipsis()
+                                                .child(label),
+                                        )
+                                        .child(
+                                            Button::new(("op-queued-cancel", id))
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::Close)
+                                                .invisible()
+                                                .group_hover(group, |s| s.visible())
+                                                .on_click(cx.listener(move |_, _, _, cx| {
+                                                    entity
+                                                        .update(cx, |this, cx| {
+                                                            this.cancel_queued(id, cx)
+                                                        })
+                                                        .ok();
+                                                    cx.notify();
+                                                })),
+                                        )
+                                }),
+                            )
+                        }),
+                )
+                .child(
+                    Button::new("op-cancel-all")
+                        .ghost()
+                        .small()
+                        .icon(IconName::CircleStop)
+                        .tooltip(self.tr("tb.op_cancel_all"))
+                        .on_click(cx.listener(|this, _, _, cx| this.cancel_all_ops(cx))),
+                )
+            })
             .into_any_element()
     }
 

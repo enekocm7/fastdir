@@ -141,6 +141,12 @@ impl FastDir {
     }
 
     /// A file operation (refresh, delete, move) is running.
+    /// Whether a refresh is running. Deletes and moves just queue behind each
+    /// other, but cannot start while the tree is being re-scanned.
+    pub(super) fn is_refreshing(&self) -> bool {
+        self.busy.is_some()
+    }
+
     pub(super) fn is_busy(&self) -> bool {
         self.busy.is_some() || self.op.is_some()
     }

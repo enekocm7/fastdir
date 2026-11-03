@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} Elemente",
         "tb.op_cancelling" => "Wird abgebrochen…",
+        "tb.op_queued" => "{n} in Warteschlange",
+        "tb.op_cancel_all" => "Gesamte Warteschlange abbrechen",
         "tb.title_scanning" => "Scanne {path}",
         "tb.drive_free" => "{free} frei von {total}",
         "home.title" => "Was belegt meine Festplatte?",

@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} items",
         "tb.op_cancelling" => "Annuleren…",
+        "tb.op_queued" => "{n} in wachtrij",
+        "tb.op_cancel_all" => "Hele wachtrij annuleren",
         "tb.title_scanning" => "{path} scannen",
         "tb.drive_free" => "{free} vrij van {total}",
         "home.title" => "Wat gebruikt mijn schijfruimte?",
