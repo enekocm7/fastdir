@@ -306,6 +306,14 @@ impl FastDir {
                 ..
             }) => self.start_move(targets, dest, window, cx),
             Some(PendingOp {
+                targets,
+                kind: PendingKind::Compress { options },
+                ..
+            }) => match options {
+                Some(options) => self.start_compress(targets, options, window, cx),
+                None => self.start_uncompress(targets, window, cx),
+            },
+            Some(PendingOp {
                 kind: PendingKind::Action { run },
                 label,
                 ..
@@ -509,7 +517,7 @@ impl FastDir {
     }
 
     /// Clear the running operation. Returns whether it was cancelled.
-    fn end_op(&mut self) -> bool {
+    pub(super) fn end_op(&mut self) -> bool {
         self._op_ticker = None;
         self.op.take().is_some_and(|op| op.progress.is_cancelled())
     }
@@ -1077,7 +1085,7 @@ fn measure(path: &std::path::Path, options: &scanner::ScanOptions) -> Subtree {
 }
 
 /// The first few failed paths with their reasons, one per line.
-fn failure_list_in(failed: &[(PathBuf, String)], lang: &str) -> String {
+pub(super) fn failure_list_in(failed: &[(PathBuf, String)], lang: &str) -> String {
     const SHOWN: usize = 5;
     let mut lines: Vec<String> = failed
         .iter()

@@ -3,6 +3,7 @@
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
 use fastdir_core::categories::{CategoryMap, FileCategory};
+use fastdir_core::compress;
 use fastdir_core::diff::{ChangeStatus, ScanDiff};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
@@ -71,6 +72,8 @@ actions!(
         CopyName,
         RenameItem,
         MoveItem,
+        CompressItem,
+        UncompressItem,
         TrashItem,
         DeleteItem,
         RefreshItem,
@@ -101,6 +104,7 @@ actions!(
 
 mod actions_ui;
 mod compare;
+mod compress_ui;
 mod context_menu;
 mod dialogs;
 mod export;
@@ -356,6 +360,10 @@ struct FileOp {
 enum PendingKind {
     Delete { permanent: bool },
     Move { dest: PathBuf },
+    /// `None` uncompresses; `Some` compresses with these options.
+    Compress {
+        options: Option<compress::CompressOptions>,
+    },
     Action { run: actions_ui::ActionRun },
 }
 
@@ -419,6 +427,8 @@ pub struct FastDir {
     filter: Filter,
     filter_form: FilterForm,
     export_form: ExportForm,
+    /// Algorithm and options of the Compress dialog.
+    compress_form: compress_ui::CompressForm,
     /// The N largest files in the whole scan, sorted by `top_sort`.
     top_files: Vec<FileEntry>,
     /// The last top-files computation is stale and should run again when the
@@ -631,6 +641,7 @@ impl FastDir {
             filter: Filter::default(),
             filter_form: FilterForm::default(),
             export_form: ExportForm::default(),
+            compress_form: compress_ui::CompressForm::default(),
             top_files: Vec::new(),
             top_stale: true,
             top_selected: None,
@@ -1264,6 +1275,8 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::copy_name))
             .on_action(cx.listener(Self::rename_item))
             .on_action(cx.listener(Self::move_item))
+            .on_action(cx.listener(Self::compress_item))
+            .on_action(cx.listener(Self::uncompress_item))
             .on_action(cx.listener(Self::trash_item))
             .on_action(cx.listener(Self::delete_item))
             .on_action(cx.listener(Self::refresh_item))

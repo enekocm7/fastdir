@@ -58,7 +58,7 @@ impl OpProgress {
         self.cancel.load(Ordering::Relaxed)
     }
 
-    fn add(&self, items: u64, bytes: u64) {
+    pub(crate) fn add(&self, items: u64, bytes: u64) {
         self.items.fetch_add(items, Ordering::Relaxed);
         self.bytes.fetch_add(bytes, Ordering::Relaxed);
     }
