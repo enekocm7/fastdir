@@ -16,7 +16,7 @@ use crate::{CliError, Scanned, resolve_root};
 use fastdir_core::diff as core_diff;
 use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
 use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
-use fastdir_core::filter::{Filter, parse_size};
+use fastdir_core::filter::{Filter, parse_modified, parse_size};
 use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
 use fastdir_core::scanner::{self, Progress, ScanOptions};
 use serde_json::{Value, json};
@@ -36,10 +36,11 @@ const MAX_LIMIT: usize = 1000;
 
 const INSTRUCTIONS: &str = "FastDir analyzes disk usage. Call scan_path on a folder or drive \
 first (it can take a while on a whole drive), then use get_children to drill down, \
-largest_files for cleanup candidates, search to find entries by name or glob, find_duplicates \
-for groups of identical files, and path_info for one entry. compare_scans shows what changed \
-since a cached scan or a saved JSON scan. Results come from the in-memory scan; call scan_path \
-again to refresh. Sizes are bytes; `disk_size` is the allocated size on disk.";
+largest_files for cleanup candidates (optionally filtered by name, size, extension or date), \
+search to find entries by name or glob, find_duplicates for groups of identical files, and \
+path_info for one entry. compare_scans shows what changed since a cached scan or a saved JSON \
+scan. Results come from the in-memory scan; call scan_path again to refresh. Sizes are bytes; \
+`disk_size` is the allocated size on disk.";
 
 // JSON-RPC error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -223,10 +224,18 @@ impl Server {
             }),
             json!({
                 "name": "largest_files",
-                "description": "The largest files anywhere under a folder, largest first. Hard links are counted once.",
+                "description": "The largest files anywhere under a folder, largest first. Hard links are counted once. Optional filters choose which files are ranked.",
                 "inputSchema": {
                     "type": "object",
-                    "properties": { "path": path, "limit": limit(20) },
+                    "properties": {
+                        "path": path,
+                        "limit": limit(20),
+                        "query": { "type": "string", "default": "", "description": "Name substring, or a glob when it contains * or ? (matched against the whole name)" },
+                        "min_size": { "type": ["string", "integer"], "description": "Only files at least this large: bytes, or a size such as 500MB or 1.5 GB (binary units)" },
+                        "extension": { "type": ["string", "array"], "items": { "type": "string" }, "description": "Only files with one of these extensions, e.g. .iso or [\".iso\", \".img\"]" },
+                        "newer_than": { "type": "string", "description": "Only files modified on/after this date (2026-01-01) or within this age (30d, 6m, 1y)" },
+                        "older_than": { "type": "string", "description": "Only files modified on/before this date or older than this age" },
+                    },
                     "required": ["path"],
                 },
                 "annotations": read_only,
@@ -240,7 +249,9 @@ impl Server {
                         "path": path,
                         "query": { "type": "string", "default": "" },
                         "min_size": { "type": ["string", "integer"], "description": "Bytes, or a size such as 500MB or 1.5 GB (binary units)" },
-                        "extension": { "type": "string", "description": "Only files with this extension, e.g. .iso" },
+                        "extension": { "type": ["string", "array"], "items": { "type": "string" }, "description": "Only files with one of these extensions, e.g. .iso or [\".iso\", \".img\"]" },
+                        "newer_than": { "type": "string", "description": "Only entries modified on/after this date (2026-01-01) or within this age (30d, 6m, 1y)" },
+                        "older_than": { "type": "string", "description": "Only entries modified on/before this date or older than this age" },
                         "type": { "type": "string", "enum": ["any", "file", "dir"], "default": "any" },
                         "limit": limit(50),
                     },
@@ -449,9 +460,12 @@ impl Server {
     fn largest_files(&mut self, args: &Value) -> ToolResult {
         let path = arg_path(args)?;
         let limit = arg_limit(args, 20)?;
+        let filter = mcp_filter(args)?;
         let (i, node, scanned) = self.locate(&path)?;
         let s = &self.scans[i];
-        let files = s.tree.top_files_in(&node, limit);
+        let files = s.tree.top_files_in_where(&node, limit, |node, name, ext| {
+            filter.matches(name, node, ext)
+        });
         Ok(json!({
             "path": s.tree.fs_path(&node).unwrap_or_default().to_string_lossy(),
             "scanned_now": scanned,
@@ -462,21 +476,13 @@ impl Server {
     fn search(&mut self, args: &Value) -> ToolResult {
         let path = arg_path(args)?;
         let limit = arg_limit(args, 50)?;
-        let query = arg_str(args, "query")?.unwrap_or_default();
-        let min_size = match args.get("min_size") {
-            None | Some(Value::Null) => String::new(),
-            Some(Value::Number(n)) => n.to_string(),
-            Some(Value::String(s)) => s.clone(),
-            Some(_) => return tool_err("min_size must be a number of bytes or a size string"),
-        };
-        let extension = arg_str(args, "extension")?.unwrap_or_default();
+        let filter = mcp_filter(args)?;
         let kind = match arg_str(args, "type")?.as_deref() {
             None | Some("any") => None,
             Some("file") => Some(NodeKind::File),
             Some("dir") => Some(NodeKind::Dir),
             Some(other) => return tool_err(format!("type must be any, file or dir, got {other}")),
         };
-        let filter = Filter::parse(&query, &min_size, &extension, "", "").map_err(ToolError)?;
         let (i, node, scanned) = self.locate(&path)?;
         let tree = &self.scans[i].tree;
         let (total, hits) = search_tree(tree, &node, &filter, kind, limit);
@@ -723,6 +729,7 @@ impl Server {
                         max_depth,
                         include_files,
                     },
+                    filter: None,
                 },
             )
             .map_err(io::Error::from),
@@ -986,6 +993,68 @@ fn arg_size(args: &Value, name: &str) -> Result<u64, ToolError> {
     }
 }
 
+/// Build the shared name/size/extension/date filter from a tool's arguments.
+fn mcp_filter(args: &Value) -> Result<Filter, ToolError> {
+    let query = arg_str(args, "query")?
+        .filter(|q| !q.trim().is_empty())
+        .or(arg_str(args, "name")?)
+        .unwrap_or_default();
+    let min_size = arg_size(args, "min_size")?;
+    let mut extensions = Vec::new();
+    arg_string_list(args, "extension", &mut extensions)?;
+    arg_string_list(args, "extensions", &mut extensions)?;
+    arg_string_list(args, "ext", &mut extensions)?;
+    let newer_than = arg_modified(args, "newer_than", false)?;
+    let older_than = arg_modified(args, "older_than", true)?;
+    if let (Some(after), Some(before)) = (newer_than, older_than)
+        && after > before
+    {
+        return tool_err("newer_than is later than older_than");
+    }
+    Ok(Filter::with_extensions(
+        &query,
+        min_size,
+        &extensions,
+        newer_than,
+        older_than,
+    ))
+}
+
+/// A string or an array of strings, appended to `out`.
+fn arg_string_list(args: &Value, name: &str, out: &mut Vec<String>) -> Result<(), ToolError> {
+    match args.get(name) {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::String(one)) => {
+            out.push(one.clone());
+            Ok(())
+        }
+        Some(Value::Array(items)) => {
+            for item in items {
+                match item.as_str() {
+                    Some(item) => out.push(item.to_string()),
+                    None => {
+                        return tool_err(format!("{name} must be a string or a list of strings"));
+                    }
+                }
+            }
+            Ok(())
+        }
+        Some(_) => tool_err(format!("{name} must be a string or a list of strings")),
+    }
+}
+
+/// A date or age argument (`newer_than` / `older_than`).
+fn arg_modified(args: &Value, name: &str, end: bool) -> Result<Option<i64>, ToolError> {
+    match arg_str(args, name)? {
+        Some(raw) if !raw.trim().is_empty() => parse_modified(&raw, end).map(Some).ok_or_else(|| {
+            ToolError(format!(
+                "{name} must be a date such as 2026-01-01 or an age such as 30d, 6m or 1y, got {raw:?}"
+            ))
+        }),
+        _ => Ok(None),
+    }
+}
+
 fn arg_bool(args: &Value, name: &str, default: bool) -> Result<bool, ToolError> {
     match args.get(name) {
         None | Some(Value::Null) => Ok(default),
@@ -1161,6 +1230,49 @@ mod tests {
         assert_eq!(names, ["big.iso", "a.txt"]);
         let top_docs = ok(&mut s, "largest_files", json!({ "path": docs }));
         assert_eq!(top_docs["files"].as_array().unwrap().len(), 2);
+        let top_iso = ok(
+            &mut s,
+            "largest_files",
+            json!({ "path": root, "extension": ".iso", "min_size": "500" }),
+        );
+        assert_eq!(top_iso["files"].as_array().unwrap().len(), 1);
+        assert_eq!(top_iso["files"][0]["name"], "big.iso");
+        let top_two = ok(
+            &mut s,
+            "largest_files",
+            json!({ "path": root, "extension": [".iso", ".md"] }),
+        );
+        let names: Vec<&str> = top_two["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["big.iso", "b.md"]);
+        let top_md = ok(
+            &mut s,
+            "largest_files",
+            json!({ "path": root, "query": "*.md" }),
+        );
+        assert_eq!(top_md["files"][0]["name"], "b.md");
+        let top_new = ok(
+            &mut s,
+            "largest_files",
+            json!({ "path": root, "newer_than": "2000-01-01" }),
+        );
+        assert_eq!(top_new["files"].as_array().unwrap().len(), 3);
+        let top_old = ok(
+            &mut s,
+            "largest_files",
+            json!({ "path": root, "older_than": "1y" }),
+        );
+        assert!(top_old["files"].as_array().unwrap().is_empty());
+        let (err, _) = call(
+            &mut s,
+            "largest_files",
+            json!({ "path": root, "newer_than": "soon" }),
+        );
+        assert!(err);
 
         let found = ok(&mut s, "search", json!({ "path": root, "query": "*.md" }));
         assert_eq!(found["total_matches"], 1);
@@ -1169,6 +1281,18 @@ mod tests {
         assert_eq!(dirs["total_matches"], 1);
         let big = ok(&mut s, "search", json!({ "path": root, "min_size": 500 }));
         assert_eq!(big["total_matches"], 1);
+        let recent = ok(
+            &mut s,
+            "search",
+            json!({ "path": root, "newer_than": "2000-01-01" }),
+        );
+        assert_eq!(recent["total_matches"], 4);
+        let old = ok(
+            &mut s,
+            "search",
+            json!({ "path": root, "older_than": "1y" }),
+        );
+        assert_eq!(old["total_matches"], 0);
         let (err, _) = call(
             &mut s,
             "search",

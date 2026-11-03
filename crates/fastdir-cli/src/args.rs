@@ -4,7 +4,7 @@
 //! keeps the GUI binary (which forwards subcommands here) lean. Options accept
 //! both `--name value` and `--name=value`; `--` ends option parsing.
 
-use fastdir_core::filter::parse_size;
+use fastdir_core::filter::{Filter, parse_modified, parse_size};
 use fastdir_core::scanner::ScanOptions;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -96,6 +96,9 @@ pub struct ScanCommand {
     pub out: OutputArgs,
     pub max_depth: Option<usize>,
     pub include_files: bool,
+    /// Name, size, extension and date restrictions (matches everything when
+    /// inactive).
+    pub filter: Filter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +106,8 @@ pub struct TopCommand {
     pub scan: ScanArgs,
     pub out: OutputArgs,
     pub limit: usize,
+    /// Chooses which files are ranked.
+    pub filter: Filter,
 }
 
 /// `fastdir diff <old.json> <new.json|path>`.
@@ -327,6 +332,11 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     let mut max_depth = None;
     let mut include_files = true;
     let mut limit = DEFAULT_TOP_LIMIT;
+    let mut name_filter = String::new();
+    let mut min_size = 0u64;
+    let mut extensions = Vec::new();
+    let mut newer_than = None;
+    let mut older_than = None;
     let is_scan = topic == HelpTopic::Scan;
     let mut positional_only = false;
 
@@ -350,6 +360,11 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
                 | "--max-depth"
                 | "--limit"
                 | "-n"
+                | "--name"
+                | "--min-size"
+                | "--ext"
+                | "--newer-than"
+                | "--older-than"
         );
         if inline.is_some() && !takes_value {
             return err(format!("{name} does not take a value"));
@@ -388,12 +403,45 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--limit" | "-n" if !is_scan => {
                 limit = parse_number(name, &cur.value(name, inline)?, 1)?
             }
+            "--name" => name_filter = cur.value(name, inline)?,
+            "--min-size" => {
+                let raw = cur.value(name, inline)?;
+                min_size = parse_size(&raw).ok_or_else(|| {
+                    UsageError(format!(
+                        "--min-size expects a size such as 500MB or 1.5GiB, got \"{raw}\""
+                    ))
+                })?;
+            }
+            "--ext" => extensions.push(cur.value(name, inline)?),
+            "--newer-than" => {
+                let raw = cur.value(name, inline)?;
+                newer_than = Some(parse_modified(&raw, false).ok_or_else(|| {
+                    UsageError(format!(
+                        "--newer-than expects a date such as 2026-01-01 or an age such as 30d, 6m or 1y, got \"{raw}\""
+                    ))
+                })?);
+            }
+            "--older-than" => {
+                let raw = cur.value(name, inline)?;
+                older_than = Some(parse_modified(&raw, true).ok_or_else(|| {
+                    UsageError(format!(
+                        "--older-than expects a date such as 2026-01-01 or an age such as 30d, 6m or 1y, got \"{raw}\""
+                    ))
+                })?);
+            }
             _ => return err(format!("unknown option \"{name}\"")),
         }
+    }
+    if let (Some(after), Some(before)) = (newer_than, older_than)
+        && after > before
+    {
+        return err("--newer-than is later than --older-than");
     }
     let Some(path) = path else {
         return err("missing <path> to scan");
     };
+    let filter =
+        Filter::with_extensions(&name_filter, min_size, &extensions, newer_than, older_than);
     let scan = ScanArgs {
         path: normalize_path(&path),
         threads,
@@ -416,9 +464,15 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             out,
             max_depth,
             include_files,
+            filter,
         })
     } else {
-        Command::Top(TopCommand { scan, out, limit })
+        Command::Top(TopCommand {
+            scan,
+            out,
+            limit,
+            filter,
+        })
     })
 }
 
@@ -713,6 +767,17 @@ Output:
                           (0 = just <path>); sizes still count everything
   --no-files              only include folders
 
+Filtering:
+  --name <text|glob>      only entries whose name matches; a glob when it
+                          contains * or ? (case-insensitive)
+  --min-size <size>       only entries at least this large (500MB, 1.5 GiB)
+  --ext <ext>             only files with this extension (repeatable)
+  --newer-than <when>     modified on/after a date (2026-01-01) or within an
+                          age (30d, 6m, 1y)
+  --older-than <when>     modified on/before a date or older than an age
+  Matching entries and their ancestors are kept; folder totals still count
+  everything below them.
+
 Scanning:
   --threads <n>           scan threads, 1-64 (default: automatic)
   --exclude <glob>        skip entries whose name matches (repeatable)
@@ -735,6 +800,10 @@ Output:
   --format json|csv       output format (default: json)
   -o, --output <file|->   write to a file instead of stdout
   --pretty                indent the JSON
+
+Filtering (chooses which files are ranked):
+  --name <text|glob>, --min-size <size>, --ext <ext>,
+  --newer-than <when>, --older-than <when>   as for `fastdir scan`
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
@@ -907,6 +976,43 @@ mod tests {
         assert!(!c.scan.skip_hidden_system);
         assert!(!c.scan.collect_owners);
         assert!(!c.scan.quiet);
+        assert!(!c.filter.is_active());
+    }
+
+    #[test]
+    fn scan_and_top_filters() {
+        let c = scan_cmd(&[
+            "scan",
+            "dir",
+            "--name",
+            "*.iso",
+            "--min-size",
+            "1.5 GiB",
+            "--ext",
+            "iso",
+            "--ext=.img",
+            "--newer-than",
+            "2026-01-01",
+            "--older-than",
+            "30d",
+        ]);
+        assert_eq!(c.filter.query(), "*.iso");
+        assert_eq!(c.filter.min_size(), 3 * 1024 * 1024 * 1024 / 2);
+        assert_eq!(
+            c.filter.extensions(),
+            [".iso".to_string(), ".img".to_string()]
+        );
+        assert!(c.filter.modified_after().is_some());
+        assert!(c.filter.modified_before().is_some());
+        assert!(c.filter.is_active());
+
+        match parse_ok(&["top", "dir", "--name", "readme", "--ext", ".TXT"]) {
+            Command::Top(t) => {
+                assert_eq!(t.filter.query(), "readme");
+                assert_eq!(t.filter.extensions(), [".txt".to_string()]);
+            }
+            other => panic!("expected top, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1155,6 +1261,21 @@ mod tests {
         assert!(parse_err(&["scan", "a", "--max-depth", "x"]).contains("whole number"));
         assert!(parse_err(&["scan", "a", "--quiet=yes"]).contains("does not take a value"));
         assert!(parse_err(&["scan", "a", "--bogus"]).contains("--bogus"));
+        assert!(parse_err(&["scan", "a", "--min-size", "lots"]).contains("--min-size"));
+        assert!(parse_err(&["top", "a", "--newer-than", "yesterday"]).contains("--newer-than"));
+        assert!(parse_err(&["scan", "a", "--older-than", "soon"]).contains("--older-than"));
+        assert!(
+            parse_err(&[
+                "scan",
+                "a",
+                "--newer-than",
+                "2026-02-01",
+                "--older-than",
+                "2026-01-01"
+            ])
+            .contains("later")
+        );
+        assert!(parse_err(&["duplicates", "a", "--name", "x"]).contains("--name"));
         // Options of the other command are rejected, not silently ignored.
         assert!(parse_err(&["scan", "a", "--limit", "3"]).contains("--limit"));
         assert!(parse_err(&["top", "a", "--max-depth", "3"]).contains("--max-depth"));
