@@ -17,3 +17,4 @@ pub mod fsops;
 pub mod integration;
 pub mod model;
 pub mod scanner;
+pub mod sysprefs;

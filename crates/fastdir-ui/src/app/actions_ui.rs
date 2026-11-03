@@ -592,6 +592,7 @@ impl SettingsView {
                             .small()
                             .icon(IconName::Pencil)
                             .tooltip(tr("set.actions.edit"))
+                            .accessibility_label(tr("set.actions.edit"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let action = this.owner.read(cx).settings.actions.get(ix).cloned();
                                 if let Some(action) = action {
@@ -607,6 +608,7 @@ impl SettingsView {
                             .small()
                             .icon(IconName::Trash)
                             .tooltip(tr("set.actions.delete"))
+                            .accessibility_label(tr("set.actions.delete"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if this
                                     .action_editor

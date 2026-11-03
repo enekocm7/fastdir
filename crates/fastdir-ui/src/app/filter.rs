@@ -300,6 +300,7 @@ impl FastDir {
                     .icon(IconName::Funnel)
                     .label(label)
                     .tooltip(self.mod_tip("filter.tooltip"))
+                    .accessibility_label(self.mod_tip("filter.tooltip"))
                     .disabled(!ready)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_filters(&OpenFilters, window, cx)

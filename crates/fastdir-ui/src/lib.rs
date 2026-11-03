@@ -36,6 +36,8 @@ pub fn run() {
             };
             Theme::change(mode, None, cx);
             app::apply_accent(cx);
+            // Respect the OS "reduce motion" setting.
+            cx.set_reduce_motion(fastdir_core::sysprefs::query().reduce_motion);
             app::apply_ui_scale(settings.appearance.ui_scale, cx);
             app::bind_keys(cx);
 

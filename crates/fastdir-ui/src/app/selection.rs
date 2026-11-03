@@ -130,6 +130,7 @@ impl FastDir {
     }
 
     pub(super) fn sync_treemap_selection(&mut self, cx: &mut Context<Self>) {
+        self.announce_selection(cx);
         let sel = self.selection();
         self.treemap.update(cx, |t, cx| t.set_selection(sel, cx));
     }
@@ -459,6 +460,24 @@ impl FastDir {
         }
     }
 
+    /// Tell screen readers which item is selected (name, size and share).
+    fn announce_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.selected.and_then(|i| self.rows.get(i)) else {
+            return;
+        };
+        let Some(tree) = self.tree.clone() else { return };
+        let t = tree.read();
+        let Some(node) = t.get(&row.path) else { return };
+        let text = format!(
+            "{}, {}, {}",
+            self.display_name(t.name(node)),
+            self.bytes(node.size),
+            self.percent_of(&t, &row.path, node)
+        );
+        drop(t);
+        self.announce(text, cx);
+    }
+
     // ------------------------------------------------------------------
     // Treemap keyboard navigation
     // ------------------------------------------------------------------
@@ -478,6 +497,45 @@ impl FastDir {
             .update(cx, |t, cx| t.set_keyboard_focus(on, cx));
         if on && self.selected_path().is_none() {
             self.treemap_move(treemap::Direction::Down, cx);
+        }
+    }
+
+    /// Tab / Shift+Tab: move between the main regions (search box, list,
+    /// treemap). `step` is 1 for forward and 2 for backward (mod 3).
+    pub(super) fn cycle_region(
+        &mut self,
+        step: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.phase, Phase::Ready) {
+            return;
+        }
+        let search_focus = self.search.read(cx).focus_handle(cx);
+        let current = if self.treemap.read(cx).has_keyboard_focus() {
+            2
+        } else if search_focus.is_focused(window) {
+            0
+        } else {
+            1
+        };
+        match (current + step) % 3 {
+            0 => {
+                self.leave_treemap(cx);
+                self.search.update(cx, |input, cx| input.focus(window, cx));
+            }
+            1 => {
+                self.leave_treemap(cx);
+                self.focus.focus(window, cx);
+            }
+            _ => {
+                self.focus.focus(window, cx);
+                self.treemap
+                    .update(cx, |t, cx| t.set_keyboard_focus(true, cx));
+                if self.selected_path().is_none() {
+                    self.treemap_move(treemap::Direction::Down, cx);
+                }
+            }
         }
     }
 

@@ -82,6 +82,8 @@ actions!(
         ZoomIn,
         ZoomOut,
         FocusTreemap,
+        FocusNextRegion,
+        FocusPrevRegion,
         ToggleFreeSpace,
         ToggleUnknown,
         FocusSearch,
@@ -154,6 +156,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("z", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
         KeyBinding::new("f8", FocusTreemap, Some(CONTEXT)),
+        KeyBinding::new("tab", FocusNextRegion, Some(CONTEXT)),
+        KeyBinding::new("shift-tab", FocusPrevRegion, Some(CONTEXT)),
         KeyBinding::new("f6", ToggleFreeSpace, Some(CONTEXT)),
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
         KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
@@ -207,7 +211,9 @@ const BASE_MONO_FONT_SIZE: f32 = 13.;
 /// size from `Theme::font_size` on every frame, so the scale must live there;
 /// a direct `Window::set_rem_size` would be overwritten before the next paint.
 pub fn apply_ui_scale(scale: f32, cx: &mut App) {
-    let scale = scale.clamp(0.5, 2.0);
+    // Windows "Make text bigger" multiplies on top of the chosen scale.
+    let text_scale = fastdir_core::sysprefs::query().text_scale;
+    let scale = (scale.clamp(0.5, 2.0) * text_scale).clamp(0.5, 3.0);
     let theme = Theme::global_mut(cx);
     theme.font_size = px(BASE_FONT_SIZE * scale);
     theme.mono_font_size = px(BASE_MONO_FONT_SIZE * scale);
@@ -393,6 +399,8 @@ enum Phase {
 
 pub struct FastDir {
     focus: FocusHandle,
+    /// Last message for screen readers (rendered into a polite live region).
+    announcement: SharedString,
     drives: Vec<Drive>,
     phase: Phase,
     /// Whether the home screen lists drives (off for the "open nothing"
@@ -616,6 +624,7 @@ impl FastDir {
         });
         let mut this = Self {
             focus,
+            announcement: SharedString::default(),
             drives: drives::list(),
             phase: Phase::Home,
             home_drives,
@@ -1054,6 +1063,7 @@ impl FastDir {
                             .icon(IconName::Shield)
                             .label(self.tr("banner.restart_admin"))
                             .tooltip(self.tr("banner.restart_tip"))
+                            .accessibility_label(self.tr("banner.restart_tip"))
                             .on_click(cx.listener(move |this, _, w, cx| {
                                 this.restart_elevated(root.clone(), w, cx)
                             })),
@@ -1171,6 +1181,15 @@ impl FastDir {
         window.refresh();
     }
 
+    /// Queue a message for screen readers.
+    pub(super) fn announce(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let text = text.into();
+        if self.announcement != text {
+            self.announcement = text;
+            cx.notify();
+        }
+    }
+
     pub(super) fn ui_scale(&self) -> f32 {
         self.settings.appearance.ui_scale.clamp(0.5, 2.0)
     }
@@ -1279,6 +1298,12 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::zoom_in))
             .on_action(cx.listener(Self::zoom_out))
             .on_action(cx.listener(Self::focus_treemap))
+            .on_action(cx.listener(|this, _: &FocusNextRegion, w, cx| {
+                this.cycle_region(1, w, cx)
+            }))
+            .on_action(cx.listener(|this, _: &FocusPrevRegion, w, cx| {
+                this.cycle_region(2, w, cx)
+            }))
             .on_action(cx.listener(Self::toggle_free_space))
             .on_action(cx.listener(Self::toggle_unknown))
             .on_action(cx.listener(Self::focus_search))
@@ -1319,6 +1344,21 @@ impl Render for FastDir {
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))
             .child(self.render_status(cx))
+            .child(
+                // Invisible live region: screen readers read changes to its
+                // name politely (scan progress, completion, the selection).
+                div()
+                    .id("announcer")
+                    .role(Role::Status)
+                    .aria_label(self.announcement.clone())
+                    .a11y_synthetic_children(|builder| {
+                        builder
+                            .parent_node()
+                            .set_live(gpui_kit::accesskit::Live::Polite);
+                    })
+                    .absolute()
+                    .size(px(1.)),
+            )
     }
 }
 
@@ -1356,6 +1396,79 @@ pub fn apply_accent(cx: &mut App) {
     t.ring = blue.into();
     t.list_active = blue.opacity(if dark { 0.22 } else { 0.14 }).into();
     t.list_active_border = blue.into();
+    apply_contrast_fixes(theme);
+    apply_high_contrast(theme);
+}
+
+/// Set a colour and its derived token together.
+macro_rules! set_color {
+    ($theme:expr, $($field:ident = $value:expr),+ $(,)?) => {
+        $({
+            let v: Hsla = $value;
+            $theme.colors.$field = v;
+            $theme.tokens.$field = v.into();
+        })+
+    };
+}
+
+/// WCAG AA (4.5:1 for text) corrections to the stock theme, checked by
+/// `theme_text_pairs_meet_wcag_aa` below.
+fn apply_contrast_fixes(theme: &mut Theme) {
+    if theme.mode.is_dark() {
+        // White button text on the dark-mode blue was 3.7:1.
+        set_color!(
+            theme,
+            button_primary = rgb(0x2563eb).into(),
+            button_primary_hover = rgb(0x1d4ed8).into(),
+            button_primary_active = rgb(0x1e40af).into(),
+        );
+    } else {
+        // Secondary text on tinted rows was 4.35:1; red error text 3.8:1.
+        set_color!(
+            theme,
+            muted_foreground = rgb(MUTED_FG_LIGHT).into(),
+            danger = rgb(DANGER_LIGHT).into(),
+        );
+    }
+}
+
+/// Muted text colour (light theme) and the error colour used for text.
+pub(crate) const MUTED_FG_LIGHT: u32 = 0x525252;
+pub(crate) const DANGER_LIGHT: u32 = 0xb91c1c;
+
+/// Follow the OS high-contrast theme: its window / text / selection colours
+/// replace the app palette, and every border becomes a visible line.
+fn apply_high_contrast(theme: &mut Theme) {
+    let Some(hc) = fastdir_core::sysprefs::high_contrast_colors() else {
+        return;
+    };
+    let c = |(r, g, b): (u8, u8, u8)| -> Hsla {
+        rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32).into()
+    };
+    let (window, text) = (c(hc.window), c(hc.text));
+    let (highlight, highlight_text) = (c(hc.highlight), c(hc.highlight_text));
+    set_color!(
+        theme,
+        background = window,
+        foreground = text,
+        popover = window,
+        popover_foreground = text,
+        muted = window,
+        muted_foreground = text,
+        border = text,
+        input = text,
+        list_even = window,
+        list_head = window,
+        list_hover = highlight,
+        list_active = highlight,
+        list_active_border = highlight_text,
+        primary = highlight,
+        primary_foreground = highlight_text,
+        button_primary = highlight,
+        button_primary_foreground = highlight_text,
+        ring = c(hc.hotlight),
+        link = c(hc.hotlight),
+    );
 }
 
 /// The app logo (same SVG the exe icon is generated from).
@@ -1368,4 +1481,38 @@ fn logo() -> Arc<Image> {
         ))
     })
     .clone()
+}
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::{DANGER_LIGHT, MUTED_FG_LIGHT};
+    use fastdir_core::sysprefs::contrast_ratio;
+
+    fn rgb(v: u32) -> (u8, u8, u8) {
+        ((v >> 16) as u8, (v >> 8) as u8, v as u8)
+    }
+
+    #[test]
+    fn theme_text_pairs_meet_wcag_aa() {
+        let white = rgb(0xffffff);
+        let neutral_50 = rgb(0xfafafa);
+        let neutral_100 = rgb(0xf5f5f5);
+        // Light theme: muted text on every surface it appears on.
+        for bg in [white, neutral_50, neutral_100] {
+            let r = contrast_ratio(rgb(MUTED_FG_LIGHT), bg);
+            assert!(r >= 4.5, "muted text on {bg:?}: {r:.2}");
+            let r = contrast_ratio(rgb(DANGER_LIGHT), bg);
+            assert!(r >= 4.5, "error text on {bg:?}: {r:.2}");
+        }
+        // Dark theme: white label on the primary button states.
+        for fill in [0x2563eb, 0x1d4ed8, 0x1e40af] {
+            let r = contrast_ratio(white, rgb(fill));
+            assert!(r >= 4.5, "button {fill:#x}: {r:.2}");
+        }
+        // Dark theme: muted text (neutral-400) and blue accents on neutral-950.
+        let bg = rgb(0x0a0a0a);
+        assert!(contrast_ratio(rgb(0xa3a3a3), bg) >= 4.5);
+        assert!(contrast_ratio(rgb(0x3b82f6), bg) >= 4.5);
+        assert!(contrast_ratio(rgb(0xf87171), bg) >= 4.5);
+    }
 }

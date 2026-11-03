@@ -25,6 +25,8 @@ impl FastDir {
             .map(|d| d.used())
             .filter(|&u| u > 0);
         let progress = Arc::new(Progress::default());
+        let started_msg = self.tr("a11y.scan_started");
+        self.announce(started_msg, cx);
         self.phase = Phase::Scanning {
             progress: progress.clone(),
             root: root.clone(),
@@ -188,6 +190,19 @@ impl FastDir {
             0
         };
         self.phase = Phase::Ready;
+        if let Some(tree) = &self.tree {
+            let t = tree.read();
+            let done = self.tr_fmt(
+                "scan.done_files",
+                &[
+                    ("files", &self.count(t.root().files as u64)),
+                    ("size", &self.bytes(t.root().size)),
+                    ("dur", &format::duration(elapsed)),
+                ],
+            );
+            drop(t);
+            self.announce(done, cx);
+        }
         // Keep the folder the user was browsing selected across the finish.
         let selected_fs = self.selected_fs_path().map(|(_, fs, _)| fs);
         self.marked.clear();
@@ -519,6 +534,7 @@ impl FastDir {
                                 .icon(IconName::Shield)
                                 .label(self.tr("home.restart_admin"))
                                 .tooltip(self.tr("home.restart_tip"))
+                                .accessibility_label(self.tr("home.restart_tip"))
                                 .on_click(cx.listener(|this, _, w, cx| {
                                     this.restart_elevated(None, w, cx)
                                 })),
@@ -644,6 +660,7 @@ impl FastDir {
                                     .icon(IconName::Shield)
                                     .label(self.tr("scan.restart_admin"))
                                     .tooltip(self.tr("scan.restart_rescan_tip"))
+                                    .accessibility_label(self.tr("scan.restart_rescan_tip"))
                                     .on_click(cx.listener(move |this, _, w, cx| {
                                         this.restart_elevated(Some(root.clone()), w, cx)
                                     })),

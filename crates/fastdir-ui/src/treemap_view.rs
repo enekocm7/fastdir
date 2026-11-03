@@ -827,10 +827,16 @@ impl Render for TreemapView {
         let breadcrumb = has_tree.then(|| self.render_breadcrumb(cx));
         let legend = self
             .render_age_legend(cx)
-            .or_else(|| self.render_change_legend(cx));
+            .or_else(|| self.render_change_legend(cx))
+            .or_else(|| self.render_highlight_legend(cx));
+        let a11y_label = fastdir_locale::t(&self.lang, "a11y.treemap");
+        let a11y_hint = fastdir_locale::t(&self.lang, "a11y.treemap_hint");
 
         let body = div()
             .id("treemap")
+            .role(Role::Group)
+            .aria_label(a11y_label)
+            .aria_description(a11y_hint)
             .relative()
             .flex_1()
             .min_h_0()
@@ -900,6 +906,41 @@ impl Render for TreemapView {
 }
 
 impl TreemapView {
+    /// Text legend for the extension / category highlight, so the dimming of
+    /// the other cells is not the only cue.
+    fn render_highlight_legend(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let tree = self.tree.as_ref()?.read();
+        let name: String = if let Some(rank) = self.highlight {
+            tree.exts.get(rank as usize)?.name.to_string()
+        } else if let Some(index) = self.highlight_category {
+            let category = fastdir_core::categories::FileCategory::ALL
+                .get(index as usize)
+                .copied()?;
+            fastdir_locale::category_name(category.id(), &self.lang).to_string()
+        } else {
+            return None;
+        };
+        let theme = cx.theme();
+        Some(
+            h_flex()
+                .w_full()
+                .flex_shrink_0()
+                .px_2()
+                .py_1()
+                .border_t_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(fastdir_locale::fmt(
+                    &self.lang,
+                    "tree.highlight",
+                    &[("name", &name)],
+                ))
+                .into_any_element(),
+        )
+    }
+
     /// Bytes in each age bucket under the zoomed folder, shown while
     /// [`ColorMode::Age`] is active.
     fn render_age_legend(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

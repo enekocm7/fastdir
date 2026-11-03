@@ -510,6 +510,7 @@ Or in any client's JSON configuration:
 | Z | Zoom the treemap into the selected folder |
 | Shift+Z | Zoom the treemap out one folder |
 | F8 | Move keyboard focus to the treemap (and back) |
+| Tab / Shift+Tab | Cycle search box → list → treemap |
 | ↑ ↓ ← → *(treemap focused)* | Select the neighbouring cell; the list follows |
 | Enter / Backspace *(treemap focused)* | Zoom into the selected folder / zoom out |
 | Esc *(treemap focused)* | Give the keys back to the list |
@@ -535,14 +536,21 @@ Or in any client's JSON configuration:
   (or click a cell) and the arrow keys walk between cells, with an accent
   focus ring around the selected cell and the panel. The list selection
   stays in sync.
-- **Screen readers:** GPUI does not yet expose an accessibility tree
-  (no UI Automation / AccessKit integration), so NVDA, Narrator and
-  VoiceOver cannot read toolbar buttons, rows or dialogs. This is a known
-  upstream limitation; see
-  [zed-industries/zed#7992](https://github.com/zed-industries/zed/issues/7992).
-  Scan progress and the selected item are always shown as text in the
-  status bar. Tab-order, dialog focus trapping, high-contrast / reduce-motion
-  detection and a 200 % scaling audit are tracked as follow-ups.
+- **Tab / Shift+Tab** move between the search box, the list and the
+  treemap. Dialogs trap focus, close with Esc and give focus back to where
+  it was.
+- **Screen readers** (NVDA, Narrator, VoiceOver, Orca) work through GPUI's
+  AccessKit integration. Toolbar buttons have names, list rows expose name,
+  size and share plus their level / expanded / selected state, the status
+  bar is a status region, and a live region announces "scan started", the
+  scan summary and each selected item.
+- **Contrast:** text and button colours in both themes meet WCAG AA
+  (4.5:1); this is enforced by a unit test. The treemap highlight, age and
+  change colour modes always show a text legend, and selected rows use a
+  marker bar as well as a tint.
+- **OS settings:** a Windows high-contrast theme replaces the app palette,
+  "Show animations" off disables animations, and "Make text bigger"
+  multiplies the interface scale (Settings → Appearance goes up to 200 %).
 
 ## Building from source
 

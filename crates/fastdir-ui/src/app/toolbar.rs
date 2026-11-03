@@ -164,6 +164,7 @@ impl FastDir {
                     .ghost()
                     .icon(Icon::new(IconName::Trash).text_color(theme.danger))
                     .tooltip(self.tr("tb.tip_delete"))
+                    .accessibility_label(self.tr("tb.tip_delete"))
                     .disabled(!has_sel || is_root || refreshing || special || !self.can_touch_selected())
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
@@ -577,6 +578,7 @@ impl FastDir {
                     .icon(IconName::CircleStop)
                     .label(self.tr("action.cancel"))
                     .tooltip(self.tr("action.cancel_esc"))
+                    .accessibility_label(self.tr("action.cancel_esc"))
                     .disabled(cancelling)
                     .on_click(cx.listener(|this, _, _, cx| this.cancel_op(cx))),
             )
@@ -654,6 +656,7 @@ impl FastDir {
                         .small()
                         .icon(IconName::CircleStop)
                         .tooltip(self.tr("tb.op_cancel_all"))
+                        .accessibility_label(self.tr("tb.op_cancel_all"))
                         .on_click(cx.listener(|this, _, _, cx| this.cancel_all_ops(cx))),
                 )
             })
@@ -702,5 +705,11 @@ impl FastDir {
 /// Toolbar icon button with a tooltip. The tip accepts static text and
 /// platform-composed strings alike.
 fn tool(id: &'static str, icon: IconName, tip: impl Into<SharedString>) -> Button {
-    Button::new(id).ghost().small().icon(icon).tooltip(tip)
+    let tip = tip.into();
+    Button::new(id)
+        .ghost()
+        .small()
+        .icon(icon)
+        .accessibility_label(tip.clone())
+        .tooltip(tip)
 }
