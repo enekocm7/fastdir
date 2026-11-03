@@ -1,5 +1,5 @@
 ; Inno Setup script for FastDir.
-; Build: iscc /DAppVersion=0.3.0 /DSourceExe=..\target\release\fastdir.exe /DSourceCliExe=..\target\release\fastdir-cli.exe /DIconFile=..\target\fastdir.ico fastdir.iss
+; Build: iscc /DAppVersion=0.3.1 /DSourceExe=..\target\release\fastdir.exe /DSourceCliExe=..\target\release\fastdir-cli.exe /DIconFile=..\target\fastdir.ico fastdir.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
