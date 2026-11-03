@@ -65,6 +65,7 @@ actions!(
         OpenItem,
         RevealItem,
         CopyPath,
+        CopyName,
         RenameItem,
         MoveItem,
         TrashItem,
@@ -1097,6 +1098,7 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::open_selected))
             .on_action(cx.listener(Self::reveal_selected))
             .on_action(cx.listener(Self::copy_path))
+            .on_action(cx.listener(Self::copy_name))
             .on_action(cx.listener(Self::rename_item))
             .on_action(cx.listener(Self::move_item))
             .on_action(cx.listener(Self::trash_item))

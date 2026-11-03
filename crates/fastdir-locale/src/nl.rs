@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "Tonen in Bestanden",
         "menu.export" => "Resultaten exporteren…",
         "menu.copy_path" => "Pad kopiëren",
+        "menu.copy_name" => "Naam kopiëren",
         "menu.zoom_in" => "Inzoomen",
         "menu.zoom_out" => "Uitzoomen",
         "menu.rename" => "Naam wijzigen…",

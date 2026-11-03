@@ -55,6 +55,32 @@ impl FastDir {
         );
     }
 
+    pub(super) fn copy_name(&mut self, _: &CopyName, window: &mut Window, cx: &mut Context<Self>) {
+        let targets = self.targets();
+        if targets.is_empty() {
+            return;
+        }
+        let text = targets
+            .iter()
+            .map(|t| {
+                t.fs
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| t.fs.display().to_string())
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        window.push_notification(
+            if targets.len() > 1 {
+                self.tr("dlg.copied_many")
+            } else {
+                self.tr("dlg.copied_one")
+            },
+            cx,
+        );
+    }
+
     pub(super) fn trash_item(
         &mut self,
         _: &TrashItem,

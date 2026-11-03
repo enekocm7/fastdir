@@ -25,6 +25,7 @@ impl FastDir {
                 multi || special,
             )
             .menu_with_icon_and_disabled(self.tr("menu.copy_path"), IconName::Copy, Box::new(CopyPath), special)
+            .menu_with_icon_and_disabled(self.tr("menu.copy_name"), IconName::Copy, Box::new(CopyName), special)
             .separator()
             .menu_with_icon_and_disabled(
                 self.tr("menu.zoom_in"),

@@ -18,6 +18,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "menu.show_files" => "파일에서 보기",
         "menu.export" => "결과 내보내기…",
         "menu.copy_path" => "경로 복사",
+        "menu.copy_name" => "이름 복사",
         "menu.zoom_in" => "확대",
         "menu.zoom_out" => "축소",
         "menu.rename" => "이름 바꾸기…",
