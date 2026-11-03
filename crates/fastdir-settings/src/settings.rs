@@ -852,6 +852,28 @@ fn parse_legacy_toml(text: &str) -> Option<Settings> {
         .map(Settings::from)
 }
 
+/// Strictly reads only the `[scan]` section of a config file, for the
+/// command line. Unlike [`Settings::load`], a missing or invalid file is an
+/// error rather than a silent fall back to defaults. `path` of `None` means
+/// the default [`config_path`]. A file without a `[scan]` section yields the
+/// default scan settings.
+pub fn load_scan_settings(path: Option<&std::path::Path>) -> Result<ScanSettings, String> {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct OnlyScan {
+        scan: ScanSettings,
+    }
+    let path = match path {
+        Some(p) => p.to_path_buf(),
+        None => config_path().ok_or("cannot locate the default config file")?,
+    };
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read config file {}: {e}", path.display()))?;
+    toml::from_str::<OnlyScan>(&text)
+        .map(|c| c.scan)
+        .map_err(|e| format!("invalid config file {}: {e}", path.display()))
+}
+
 impl Settings {
     /// Missing or unreadable files give the defaults. A flat `config.toml`
     /// or a JSON `settings.json` from an older version is migrated to the
@@ -1240,5 +1262,53 @@ mod tests {
         assert_eq!(s.appearance.theme, ThemePreference::System);
         assert_eq!(s.list.sort, SortSettings::default());
         assert_eq!(s.list.top_files_limit, default_top_files_limit());
+    }
+
+    #[test]
+    fn scan_settings_load_is_strict() {
+        let dir = std::env::temp_dir().join(format!("fastdir-scan-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("ok.toml");
+        std::fs::write(
+            &ok,
+            "[scan]
+excluded = [\"*.tmp\"]
+follow_junctions = true
+thread_count = 4
+",
+        )
+        .unwrap();
+        let s = load_scan_settings(Some(&ok)).unwrap();
+        assert_eq!(s.excluded, vec!["*.tmp".to_string()]);
+        assert!(s.follow_junctions);
+        assert_eq!(s.thread_count, Some(4));
+
+        let none = dir.join("none.toml");
+        std::fs::write(
+            &none,
+            "[treemap]
+show = false
+",
+        )
+        .unwrap();
+        assert_eq!(
+            load_scan_settings(Some(&none)).unwrap(),
+            ScanSettings::default()
+        );
+
+        let bad = dir.join("bad.toml");
+        std::fs::write(
+            &bad,
+            "[scan
+nope",
+        )
+        .unwrap();
+        assert!(
+            load_scan_settings(Some(&bad))
+                .unwrap_err()
+                .contains("invalid")
+        );
+        assert!(load_scan_settings(Some(&dir.join("missing.toml"))).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

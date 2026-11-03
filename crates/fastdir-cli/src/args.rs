@@ -18,6 +18,7 @@ const CLI_WORDS: &[&str] = &[
     "duplicates",
     "diff",
     "mcp",
+    "config",
     "help",
     "version",
     "--help",
@@ -43,6 +44,14 @@ pub enum Format {
     Csv,
 }
 
+/// Where `--config` reads scan settings from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigSource {
+    /// `%APPDATA%\FastDir\config.toml` (or the platform equivalent).
+    Default,
+    File(PathBuf),
+}
+
 /// Options shared by every command that runs a scan.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanArgs {
@@ -54,6 +63,9 @@ pub struct ScanArgs {
     pub skip_hidden_system: bool,
     pub collect_owners: bool,
     pub quiet: bool,
+    /// `--config`: layer the `[scan]` section of a config file underneath
+    /// these flags. `None` leaves config files alone.
+    pub config: Option<ConfigSource>,
 }
 
 impl ScanArgs {
@@ -126,6 +138,15 @@ pub struct DuplicatesCommand {
 pub struct McpCommand {
     /// Expose `recycle_path` / `delete_path`. Off by default.
     pub allow_destructive: bool,
+    /// `--config`: scan settings applied to every scan the server runs.
+    pub config: Option<ConfigSource>,
+}
+
+/// `fastdir config`: print the effective scan options.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigCommand {
+    /// Defaults to the standard config file.
+    pub source: ConfigSource,
 }
 
 /// Which help text to print.
@@ -137,6 +158,7 @@ pub enum HelpTopic {
     Duplicates,
     Diff,
     Mcp,
+    Config,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +170,7 @@ pub enum Command {
     Duplicates(DuplicatesCommand),
     Diff(DiffCommand),
     Mcp(McpCommand),
+    Config(ConfigCommand),
 }
 
 /// Default number of files `top` reports.
@@ -206,6 +229,26 @@ impl Cursor {
     }
 }
 
+impl Cursor {
+    /// `--config` takes an optional file: `--config=<file>`, or a following
+    /// argument ending in `.toml`. A bare `--config` means the default file.
+    /// (Any other following argument stays a path to scan.)
+    fn config_source(&mut self, inline: Option<&str>) -> ConfigSource {
+        if let Some(v) = inline {
+            return ConfigSource::File(normalize_path(v));
+        }
+        let next_is_toml = self
+            .args
+            .as_slice()
+            .first()
+            .is_some_and(|a| a.to_ascii_lowercase().ends_with(".toml"));
+        if next_is_toml && let Some(v) = self.args.next() {
+            return ConfigSource::File(normalize_path(&v));
+        }
+        ConfigSource::Default
+    }
+}
+
 fn parse_number(name: &str, raw: &str, min: usize) -> Result<usize, UsageError> {
     match raw.trim().parse::<usize>() {
         Ok(n) if n >= min => Ok(n),
@@ -254,6 +297,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, UsageError> {
             Some("duplicates") => Ok(Command::Help(HelpTopic::Duplicates)),
             Some("diff") => Ok(Command::Help(HelpTopic::Diff)),
             Some("mcp") => Ok(Command::Help(HelpTopic::Mcp)),
+            Some("config") => Ok(Command::Help(HelpTopic::Config)),
             Some(other) => err(format!("unknown command \"{other}\"")),
         },
         "scan" => parse_scan_like(cur, HelpTopic::Scan),
@@ -261,6 +305,7 @@ pub fn parse(args: &[OsString]) -> Result<Command, UsageError> {
         "duplicates" => parse_duplicates(cur),
         "diff" => parse_diff(cur),
         "mcp" => parse_mcp(cur),
+        "config" => parse_config(cur),
         other if other.starts_with('-') => err(format!("unknown option \"{other}\"")),
         other => err(format!("unknown command \"{other}\"")),
     }
@@ -275,6 +320,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     let mut skip_hidden_system = false;
     let mut collect_owners = false;
     let mut quiet = false;
+    let mut config = None;
     let mut format = Format::Json;
     let mut output = None;
     let mut pretty = false;
@@ -296,6 +342,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
         let takes_value = matches!(
             name,
             "--threads"
+                | "--config"
                 | "--exclude"
                 | "--format"
                 | "--output"
@@ -323,6 +370,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
+            "--config" => config = Some(cur.config_source(inline)),
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
@@ -355,6 +403,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
         skip_hidden_system,
         collect_owners,
         quiet,
+        config,
     };
     let out = OutputArgs {
         format,
@@ -381,6 +430,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut quiet = false;
+    let mut config = None;
     let mut format = Format::Json;
     let mut output = None;
     let mut pretty = false;
@@ -401,6 +451,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
         let takes_value = matches!(
             name,
             "--threads"
+                | "--config"
                 | "--exclude"
                 | "--format"
                 | "--output"
@@ -428,6 +479,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--quiet" | "-q" => quiet = true,
+            "--config" => config = Some(cur.config_source(inline)),
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
@@ -464,6 +516,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             skip_hidden_system,
             collect_owners: false,
             quiet,
+            config,
         },
         out: OutputArgs {
             format,
@@ -485,6 +538,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut skip_hidden_system = false;
     let mut collect_owners = false;
     let mut quiet = false;
+    let mut config = None;
     let mut format = Format::Json;
     let mut output = None;
     let mut pretty = false;
@@ -502,6 +556,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
         let takes_value = matches!(
             name,
             "--threads"
+                | "--config"
                 | "--exclude"
                 | "--format"
                 | "--output"
@@ -530,6 +585,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
+            "--config" => config = Some(cur.config_source(inline)),
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
@@ -566,6 +622,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
         skip_hidden_system,
         collect_owners,
         quiet,
+        config,
     };
     Ok(Command::Diff(DiffCommand {
         old: normalize_path(&positional[0]),
@@ -582,17 +639,38 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     }))
 }
 
-fn parse_mcp(cur: Cursor) -> Result<Command, UsageError> {
+fn parse_mcp(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut allow_destructive = false;
-    for arg in cur.args {
-        match arg.as_str() {
+    let mut config = None;
+    while let Some(arg) = cur.args.next() {
+        let (name, inline) = split_eq(&arg);
+        match name {
             "--help" | "-h" => return Ok(Command::Help(HelpTopic::Mcp)),
-            "--allow-destructive" => allow_destructive = true,
+            "--allow-destructive" if inline.is_none() => allow_destructive = true,
+            "--config" => config = Some(cur.config_source(inline)),
             other if other.starts_with('-') => return err(format!("unknown option \"{other}\"")),
             other => return err(format!("unexpected argument \"{other}\"")),
         }
     }
-    Ok(Command::Mcp(McpCommand { allow_destructive }))
+    Ok(Command::Mcp(McpCommand {
+        allow_destructive,
+        config,
+    }))
+}
+
+fn parse_config(mut cur: Cursor) -> Result<Command, UsageError> {
+    let mut source = ConfigSource::Default;
+    while let Some(arg) = cur.args.next() {
+        let (name, inline) = split_eq(&arg);
+        match name {
+            "--help" | "-h" => return Ok(Command::Help(HelpTopic::Config)),
+            "--config" => source = cur.config_source(inline),
+            other if other.starts_with('-') => return err(format!("unknown option \"{other}\"")),
+            // `fastdir config <file>` is accepted as shorthand.
+            other => source = ConfigSource::File(normalize_path(other)),
+        }
+    }
+    Ok(Command::Config(ConfigCommand { source }))
 }
 
 pub const GENERAL_HELP: &str = "\
@@ -606,6 +684,7 @@ Usage:
                                   list groups of identical files and the space they waste
   fastdir diff <old> <new>        show what changed between two scans
   fastdir mcp [options]           run an MCP server on stdin/stdout
+  fastdir config [<file>]         print the scan options a config file gives
   fastdir help [<command>]        show help for a command
   fastdir --version               print the version
 
@@ -642,6 +721,8 @@ Scanning:
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
   --owners                record each file's owner (Owner column, per-user totals)
   -q, --quiet             no progress or summary on stderr
+  --config[=<file>]       use the [scan] section of config.toml (default file, or
+                          <file>); flags override it, --exclude adds to it
 ";
 
 pub const TOP_HELP: &str = "\
@@ -657,7 +738,7 @@ Output:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --owners, -q/--quiet   as for `fastdir scan`
+  --skip-hidden, --owners, -q/--quiet, --config   as for `fastdir scan`
 ";
 
 pub const DUPLICATES_HELP: &str = "\
@@ -682,7 +763,7 @@ Duplicates:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, -q/--quiet   as for `fastdir scan`
+  --skip-hidden, -q/--quiet, --config   as for `fastdir scan`
 ";
 
 pub const DIFF_HELP: &str = "\
@@ -709,10 +790,23 @@ Scanning (only when <new> is a folder):
   --cross-volumes         with --follow-junctions, also enter other volumes
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
   -q, --quiet             no progress or summary on stderr
+  --config[=<file>]       use the [scan] section of config.toml (default file, or
+                          <file>); flags override it, --exclude adds to it
+";
+
+pub const CONFIG_HELP: &str = "\
+Usage: fastdir config [<file> | --config[=<file>]]
+
+Prints, as JSON, the scan options that `--config` would apply: the [scan]
+section of the default config.toml (%APPDATA%\\FastDir\\config.toml on
+Windows) or of <file>. Other sections are ignored. A missing or invalid file
+is an error (exit code 2).
+
+Commands only read the file when given --config; without it nothing changes.
 ";
 
 pub const MCP_HELP: &str = "\
-Usage: fastdir mcp [--allow-destructive]
+Usage: fastdir mcp [--allow-destructive] [--config[=<file>]]
 
 Runs a Model Context Protocol server over stdio (newline-delimited JSON-RPC).
 Scans are kept in memory, so follow-up questions about the same folder do
@@ -721,6 +815,12 @@ not rescan it.
 Tools: scan_path, get_children, largest_files, search, path_info,
 find_duplicates, compare_scans, export_scan. With --allow-destructive,
 recycle_path and delete_path are also offered; they are off by default.
+
+--config[=<file>] applies the [scan] section of config.toml (exclusions,
+hidden/system skipping, junctions, volumes, threads) to every scan the server
+runs, so the agent sees the same scan as the app. Per-call arguments add to
+or override it. A missing or invalid file stops the server with exit code 2.
+Without --config the file is ignored.
 ";
 
 #[cfg(test)]
@@ -995,16 +1095,53 @@ mod tests {
         assert_eq!(
             parse_ok(&["mcp"]),
             Command::Mcp(McpCommand {
-                allow_destructive: false
+                allow_destructive: false,
+                config: None
             })
         );
         assert_eq!(
             parse_ok(&["mcp", "--allow-destructive"]),
             Command::Mcp(McpCommand {
-                allow_destructive: true
+                allow_destructive: true,
+                config: None
             })
         );
         assert!(parse_err(&["mcp", "--nope"]).contains("--nope"));
+    }
+
+    #[test]
+    fn config_flag() {
+        let c = scan_cmd(&["scan", "data", "--config"]);
+        assert_eq!(c.scan.config, Some(ConfigSource::Default));
+        assert_eq!(c.scan.path, PathBuf::from("data"));
+        // A bare --config before the path must not swallow it.
+        let c = scan_cmd(&["scan", "--config", "data"]);
+        assert_eq!(c.scan.config, Some(ConfigSource::Default));
+        assert_eq!(c.scan.path, PathBuf::from("data"));
+        let c = scan_cmd(&["scan", "--config=my.toml", "x"]);
+        assert_eq!(c.scan.config, Some(ConfigSource::File("my.toml".into())));
+        let c = scan_cmd(&["scan", "--config", "my.toml", "x"]);
+        assert_eq!(c.scan.config, Some(ConfigSource::File("my.toml".into())));
+        assert_eq!(scan_cmd(&["scan", "x"]).scan.config, None);
+        assert_eq!(
+            parse_ok(&["mcp", "--config"]),
+            Command::Mcp(McpCommand {
+                allow_destructive: false,
+                config: Some(ConfigSource::Default)
+            })
+        );
+        assert_eq!(
+            parse_ok(&["config", "a.toml"]),
+            Command::Config(ConfigCommand {
+                source: ConfigSource::File("a.toml".into())
+            })
+        );
+        assert_eq!(
+            parse_ok(&["config"]),
+            Command::Config(ConfigCommand {
+                source: ConfigSource::Default
+            })
+        );
     }
 
     #[test]
