@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} öğe",
         "tb.op_cancelling" => "İptal ediliyor…",
+        "tb.op_queued" => "{n} sırada",
+        "tb.op_cancel_all" => "Tüm sırayı iptal et",
         "tb.title_scanning" => "{path} taranıyor",
         "tb.drive_free" => "{total} içinden {free} boş",
         "home.title" => "Diskimi ne kullanıyor?",

@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} položek",
         "tb.op_cancelling" => "Rušení…",
+        "tb.op_queued" => "{n} ve frontě",
+        "tb.op_cancel_all" => "Zrušit celou frontu",
         "tb.title_scanning" => "Skenování {path}",
         "tb.drive_free" => "{free} volných z {total}",
         "home.title" => "Co zabírá můj disk?",

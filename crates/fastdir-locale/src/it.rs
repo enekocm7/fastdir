@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} elementi",
         "tb.op_cancelling" => "Annullamento…",
+        "tb.op_queued" => "{n} in coda",
+        "tb.op_cancel_all" => "Annulla tutta la coda",
         "tb.title_scanning" => "Analisi di {path}",
         "tb.drive_free" => "{free} liberi su {total}",
         "home.title" => "Cosa sta occupando il mio disco?",

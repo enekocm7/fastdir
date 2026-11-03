@@ -78,6 +78,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "tb.op_bytes" => "{done} / {total}",
         "tb.op_items" => "{done} / {total} 项",
         "tb.op_cancelling" => "正在取消…",
+        "tb.op_queued" => "队列中 {n} 项",
+        "tb.op_cancel_all" => "取消全部排队",
         "tb.title_scanning" => "正在扫描 {path}",
         "tb.drive_free" => "{total} 中可用 {free}",
         "home.title" => "什么占用了我的磁盘？",

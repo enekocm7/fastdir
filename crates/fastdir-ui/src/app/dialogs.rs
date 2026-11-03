@@ -83,7 +83,7 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.is_busy() {
+        if self.is_refreshing() {
             return;
         }
         let targets = self.targets();
@@ -197,6 +197,7 @@ impl FastDir {
         });
     }
 
+    /// Queue a delete; it starts right away when nothing else is running.
     pub(super) fn run_delete(
         &mut self,
         targets: Vec<Target>,
@@ -204,10 +205,68 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let label = self.delete_label(&targets, permanent).into();
+        let kind = PendingKind::Delete { permanent };
+        self.enqueue(targets, kind, label, window, cx);
+    }
+
+    /// Queue a move; it starts right away when nothing else is running.
+    pub(super) fn run_move(
+        &mut self,
+        srcs: Vec<Target>,
+        dest_dir: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let label = self.move_label(&srcs, &dest_dir).into();
+        let kind = PendingKind::Move { dest: dest_dir };
+        self.enqueue(srcs, kind, label, window, cx);
+    }
+
+    fn enqueue(
+        &mut self,
+        targets: Vec<Target>,
+        kind: PendingKind,
+        label: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.next_op_id += 1;
+        self.op_queue.push_back(PendingOp {
+            id: self.next_op_id,
+            targets,
+            kind,
+            label,
+        });
+        if self.op.is_none() {
+            self.start_next_op(window, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// Start the next queued operation, if any.
+    fn start_next_op(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.op_queue.pop_front() {
+            Some(PendingOp {
+                targets,
+                kind: PendingKind::Delete { permanent },
+                ..
+            }) => self.start_delete(targets, permanent, window, cx),
+            Some(PendingOp {
+                targets,
+                kind: PendingKind::Move { dest },
+                ..
+            }) => self.start_move(targets, dest, window, cx),
+            None => cx.notify(),
+        }
+    }
+
+    fn delete_label(&self, targets: &[Target], permanent: bool) -> String {
         let total = targets.len();
         let lang = self.settings.locale.language.clone();
         let trash = fastdir_locale::trash_name(&lang);
-        let label = match targets.as_slice() {
+        match targets {
             [one] if permanent => fastdir_locale::fmt(
                 &lang,
                 "dlg.op_deleting",
@@ -226,7 +285,18 @@ impl FastDir {
                 "dlg.op_recycling_n",
                 &[("total", &total.to_string()), ("trash", trash)],
             ),
-        };
+        }
+    }
+
+    fn start_delete(
+        &mut self,
+        targets: Vec<Target>,
+        permanent: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let total = targets.len();
+        let label = self.delete_label(&targets, permanent);
         let progress = self.begin_op(
             label,
             targets.iter().map(|t| t.items).sum(),
@@ -342,6 +412,7 @@ impl FastDir {
                         cx,
                     );
                 }
+                this.start_next_op(window, cx);
             })
             .ok();
         })
@@ -391,11 +462,25 @@ impl FastDir {
         self.op.take().is_some_and(|op| op.progress.is_cancelled())
     }
 
+    /// Cancel the running operation only; queued ones carry on.
     pub(super) fn cancel_op(&mut self, cx: &mut Context<Self>) {
         if let Some(op) = &self.op {
             op.progress.cancel();
             cx.notify();
         }
+    }
+
+    /// Drop one queued operation before it starts.
+    pub(super) fn cancel_queued(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.op_queue.retain(|op| op.id != id);
+        cx.notify();
+    }
+
+    /// Cancel the running operation and drop everything queued behind it.
+    pub(super) fn cancel_all_ops(&mut self, cx: &mut Context<Self>) {
+        self.op_queue.clear();
+        self.cancel_op(cx);
+        cx.notify();
     }
 
     /// Replace the node for the folder `fs` with a freshly scanned `node`.
@@ -562,7 +647,7 @@ impl FastDir {
     }
 
     pub(super) fn move_item(&mut self, _: &MoveItem, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_busy() {
+        if self.is_refreshing() {
             return;
         }
         let targets = self.targets();
@@ -646,16 +731,10 @@ impl FastDir {
         });
     }
 
-    pub(super) fn run_move(
-        &mut self,
-        srcs: Vec<Target>,
-        dest_dir: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn move_label(&self, srcs: &[Target], dest_dir: &std::path::Path) -> String {
         let total = srcs.len();
         let lang = self.settings.locale.language.clone();
-        let label = match srcs.as_slice() {
+        match srcs {
             [one] => fastdir_locale::fmt(
                 &lang,
                 "move.op_one",
@@ -672,7 +751,18 @@ impl FastDir {
                     ("dest", &dest_dir.display().to_string()),
                 ],
             ),
-        };
+        }
+    }
+
+    fn start_move(
+        &mut self,
+        srcs: Vec<Target>,
+        dest_dir: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let total = srcs.len();
+        let label = self.move_label(&srcs, &dest_dir);
         let progress = self.begin_op(
             label,
             srcs.iter().map(|t| t.items).sum(),
@@ -811,6 +901,7 @@ impl FastDir {
                         cx,
                     );
                 }
+                this.start_next_op(window, cx);
             })
             .ok();
         })

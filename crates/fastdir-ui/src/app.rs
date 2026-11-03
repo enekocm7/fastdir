@@ -6,6 +6,8 @@ use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
 use fastdir_core::filter::Filter;
 use fastdir_core::format;
+use std::collections::VecDeque;
+use gpui_kit::component::popover::Popover;
 use fastdir_core::fsops;
 use fastdir_core::integration;
 use fastdir_core::model::{FileEntry, NO_EXT, Node, NodePath, Subtree, Tree};
@@ -264,6 +266,22 @@ struct FileOp {
     by_bytes: bool,
 }
 
+/// What a queued file operation does.
+#[derive(Clone)]
+enum PendingKind {
+    Delete { permanent: bool },
+    Move { dest: PathBuf },
+}
+
+/// A delete or move waiting for the running one to finish. The targets are
+/// snapshotted when it is queued.
+struct PendingOp {
+    id: u64,
+    label: SharedString,
+    targets: Vec<Target>,
+    kind: PendingKind,
+}
+
 #[derive(Clone)]
 struct Row {
     path: NodePath,
@@ -336,6 +354,9 @@ pub struct FastDir {
     top_split: Entity<ResizableState>,
     busy: Option<SharedString>,
     op: Option<FileOp>,
+    /// Operations waiting to run after `op`, in order.
+    op_queue: VecDeque<PendingOp>,
+    next_op_id: u64,
     settings: Settings,
     /// A newer release the user can install.
     available: Option<Arc<Release>>,
@@ -487,6 +508,8 @@ impl FastDir {
             top_split,
             busy: None,
             op: None,
+            op_queue: VecDeque::new(),
+            next_op_id: 0,
             settings,
             available: None,
             checking: false,
