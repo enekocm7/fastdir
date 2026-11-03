@@ -420,6 +420,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Každé nastavení se vrátí na výchozí. Poloha okna a velikosti panelů zůstanou zachovány."
         }
         "set.reset.ok" => "Obnovit",
+        "menu.open_scan" => "Otevřít sken…",
+        "tb.tip_open_scan" => "Otevřít uložený sken… ({mod}+Shift+O)",
+        "home.open_scan" => "Otevřít uložený sken…",
+        "saved.title" => "Uložený sken: {path}",
+        "saved.banner" => "Uložený sken · {root} · {when}",
+        "saved.status" => "Uložený sken · {when}",
+        "saved.missing" => "Tato složka na tomto počítači není; operace se soubory jsou vypnuté. Spusťte skenování znovu a vyberte skutečnou složku.",
+        "saved.rescan" => "Znovu prohledat složku",
+        "saved.opening" => "Otevírání uloženého skenu…",
+        "saved.err_title" => "Sken se nepodařilo otevřít",
+        "saved.err_body" => "Soubor {path} se nepodařilo otevřít: {error}",
+        "saved.missing_item" => "Tato položka na tomto počítači není, takže ji nelze změnit.",
         _ => return None,
     })
 }

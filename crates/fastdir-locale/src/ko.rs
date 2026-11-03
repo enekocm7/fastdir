@@ -420,6 +420,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "모든 설정이 기본값으로 돌아갑니다. 창 위치와 패널 크기는 유지됩니다."
         }
         "set.reset.ok" => "초기화",
+        "menu.open_scan" => "스캔 열기…",
+        "tb.tip_open_scan" => "저장된 스캔 열기… ({mod}+Shift+O)",
+        "home.open_scan" => "저장된 스캔 열기…",
+        "saved.title" => "저장된 스캔: {path}",
+        "saved.banner" => "저장된 스캔 · {root} · {when}",
+        "saved.status" => "저장된 스캔 · {when}",
+        "saved.missing" => "이 폴더가 이 컴퓨터에 없습니다. 파일 작업이 비활성화되어 있습니다. 실제 폴더를 선택하려면 다시 스캔하세요.",
+        "saved.rescan" => "폴더 다시 스캔",
+        "saved.opening" => "저장된 스캔을 여는 중…",
+        "saved.err_title" => "스캔을 열 수 없습니다",
+        "saved.err_body" => "{path}을(를) 열 수 없습니다: {error}",
+        "saved.missing_item" => "이 항목이 이 컴퓨터에 없어 변경할 수 없습니다.",
         _ => return None,
     })
 }

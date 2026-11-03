@@ -113,7 +113,30 @@ grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
 fastdir.exe              open the drive overview
 fastdir.exe D:\          scan a drive right away
 fastdir.exe "C:\Users"   scan a folder right away
+fastdir.exe scan.json    open a scan saved earlier
 ```
+
+### Opening a saved scan
+
+A scan exported from the GUI (JSON) or written by `fastdir-cli scan` can be
+opened again without rescanning, which is handy when the data came from a
+server, a NAS or another machine:
+
+- **Open scan…** in the toolbar `…` menu or on the drive overview
+  (`Ctrl+Shift+O`), with a `.json` file picker.
+- Pass the file on the command line (`fastdir.exe scan.json`) or drop it on
+  the window.
+- A banner marks the tree as a **saved scan** and shows the root and the time
+  it was scanned.
+- Rename, move, recycle, delete, open and reveal only work when the selected
+  path still exists on this machine. **Rescan** starts a real scan of the
+  saved root (or asks for a folder when it no longer exists).
+
+JSON is a browsing snapshot: hard-link markers and drive pseudo-items
+(`<Free space>`, `<Unknown>`) come back as plain files, so their bytes are
+kept but the UI cannot tell them apart. Opening a truncated document
+(`--max-depth` or `--no-files`) also means totals only reflect the entries
+that were written.
 
 ### Command line (for scripts and agents)
 

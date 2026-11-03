@@ -438,6 +438,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "يعود كل إعداد إلى قيمته الافتراضية. تُحفظ موضع النافذة وأحجام اللوحات."
         }
         "set.reset.ok" => "إعادة تعيين",
+        "menu.open_scan" => "فتح مسح…",
+        "tb.tip_open_scan" => "فتح مسح محفوظ… ({mod}+Shift+O)",
+        "home.open_scan" => "فتح مسح محفوظ…",
+        "saved.title" => "مسح محفوظ: {path}",
+        "saved.banner" => "مسح محفوظ · {root} · {when}",
+        "saved.status" => "مسح محفوظ · {when}",
+        "saved.missing" => "هذا المجلد غير موجود على هذا الجهاز؛ عمليات الملفات معطّلة. أعد المسح لاختيار مجلد حقيقي.",
+        "saved.rescan" => "إعادة مسح المجلد",
+        "saved.opening" => "جارٍ فتح المسح المحفوظ…",
+        "saved.err_title" => "تعذّر فتح المسح",
+        "saved.err_body" => "تعذّر فتح {path}: {error}",
+        "saved.missing_item" => "هذا العنصر غير موجود على هذا الجهاز، لذا لا يمكن تغييره.",
         _ => return None,
     })
 }

@@ -426,6 +426,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Każde ustawienie wraca do wartości domyślnej. Pozycja okna i rozmiary paneli zostaną zachowane."
         }
         "set.reset.ok" => "Resetuj",
+        "menu.open_scan" => "Otwórz skan…",
+        "tb.tip_open_scan" => "Otwórz zapisany skan… ({mod}+Shift+O)",
+        "home.open_scan" => "Otwórz zapisany skan…",
+        "saved.title" => "Zapisany skan: {path}",
+        "saved.banner" => "Zapisany skan · {root} · {when}",
+        "saved.status" => "Zapisany skan · {when}",
+        "saved.missing" => "Ten folder nie znajduje się na tym komputerze; operacje na plikach są wyłączone. Zeskanuj ponownie, aby wybrać rzeczywisty folder.",
+        "saved.rescan" => "Zeskanuj folder ponownie",
+        "saved.opening" => "Otwieranie zapisanego skanu…",
+        "saved.err_title" => "Nie można otworzyć skanu",
+        "saved.err_body" => "Nie można otworzyć {path}: {error}",
+        "saved.missing_item" => "Ten element nie znajduje się na tym komputerze, więc nie można go zmienić.",
         _ => return None,
     })
 }

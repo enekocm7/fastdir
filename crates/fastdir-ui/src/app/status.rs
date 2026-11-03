@@ -67,6 +67,15 @@ impl FastDir {
         };
         let right: SharedString = match (&self.phase, &self.tree) {
             (Phase::Scanning { progress, .. }, _) => progress.current.lock().clone().into(),
+            (Phase::Ready, Some(_)) if self.saved.is_some() => {
+                let when = self
+                    .saved
+                    .as_ref()
+                    .filter(|saved| saved.scanned_at > 0)
+                    .map(|saved| self.date(saved.scanned_at))
+                    .unwrap_or_else(|| "—".to_string());
+                self.tr_fmt("saved.status", &[("when", &when)]).into()
+            }
             (Phase::Ready, Some(t)) => {
                 let t = t.read();
                 let (elapsed, cancelled) = self.last_scan.unwrap_or_default();

@@ -11,11 +11,15 @@ impl FastDir {
         Some((path, fs, is_dir))
     }
 
-    pub(super) fn open_selected(&mut self, _: &OpenItem, _: &mut Window, _: &mut Context<Self>) {
+    pub(super) fn open_selected(&mut self, _: &OpenItem, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_multi() || self.selected_is_special() {
             return;
         }
         if let Some((_, p, _)) = self.selected_fs_path() {
+            if !self.can_touch_path(&p) {
+                self.notify_saved_missing(window, cx);
+                return;
+            }
             fsops::open(&p);
         }
     }
@@ -23,13 +27,17 @@ impl FastDir {
     pub(super) fn reveal_selected(
         &mut self,
         _: &RevealItem,
-        _: &mut Window,
-        _: &mut Context<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
         if self.is_multi() || self.selected_is_special() {
             return;
         }
         if let Some((_, p, _)) = self.selected_fs_path() {
+            if !self.can_touch_path(&p) {
+                self.notify_saved_missing(window, cx);
+                return;
+            }
             fsops::reveal(&p);
         }
     }
@@ -124,6 +132,10 @@ impl FastDir {
                 ),
                 cx,
             );
+            return;
+        }
+        if !self.targets_on_disk(&targets) {
+            self.notify_saved_missing(window, cx);
             return;
         }
         // Per-action confirmations; skip the dialog when this action is set
@@ -231,6 +243,11 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The confirmation dialog may outlive the item on disk.
+        if !self.targets_on_disk(&targets) {
+            self.notify_saved_missing(window, cx);
+            return;
+        }
         let label = self.delete_label(&targets, permanent).into();
         let kind = PendingKind::Delete { permanent };
         self.enqueue(targets, kind, label, window, cx);
@@ -244,6 +261,10 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.targets_on_disk(&srcs) {
+            self.notify_saved_missing(window, cx);
+            return;
+        }
         let label = self.move_label(&srcs, &dest_dir).into();
         let kind = PendingKind::Move { dest: dest_dir };
         self.enqueue(srcs, kind, label, window, cx);
@@ -548,6 +569,10 @@ impl FastDir {
         let Some((path, fs, _)) = self.selected_fs_path() else {
             return;
         };
+        if !self.can_touch_path(&fs) {
+            self.notify_saved_missing(window, cx);
+            return;
+        }
         if path.is_empty() {
             return;
         }
@@ -644,6 +669,10 @@ impl FastDir {
         if new_name.trim() == old {
             return true;
         }
+        if !self.can_touch_path(&fs) {
+            self.notify_saved_missing(window, cx);
+            return false;
+        }
         match fsops::rename(&fs, &new_name) {
             Ok(dest) => {
                 let new_path = self.tree.as_ref().and_then(|tree| {
@@ -678,6 +707,10 @@ impl FastDir {
         }
         let targets = self.targets();
         if targets.is_empty() || targets.iter().any(|t| t.path.is_empty()) {
+            return;
+        }
+        if !self.targets_on_disk(&targets) {
+            self.notify_saved_missing(window, cx);
             return;
         }
         let srcs = targets;
@@ -947,6 +980,10 @@ impl FastDir {
         let Some((path, fs, is_dir)) = self.selected_fs_path() else {
             return;
         };
+        if !self.can_touch_path(&fs) {
+            self.notify_saved_missing(window, cx);
+            return;
+        }
         if path.is_empty() {
             self.rescan(&Rescan, window, cx);
             return;

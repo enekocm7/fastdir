@@ -186,14 +186,22 @@ pub fn export_csv(
 }
 
 /// A JSON snapshot of one node and everything below it.
+///
+/// The field aliases let [`import_json_with_meta`] read both this crate's
+/// export (`kind`, `dirs`, numeric `modified`) and the `fastdir.scan`
+/// documents the CLI writes (`type`, `folders`, ISO-8601 `modified`).
 #[derive(Serialize, Deserialize)]
 struct JsonNode {
     name: String,
+    #[serde(alias = "type")]
     kind: String,
     size: u64,
     disk_size: u64,
+    #[serde(default)]
     files: u32,
+    #[serde(default, alias = "folders")]
     dirs: u32,
+    #[serde(default, deserialize_with = "de_modified")]
     modified: i64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<JsonNode>,
@@ -206,6 +214,50 @@ struct JsonDoc {
     root_path: String,
     exported_at: i64,
     root: JsonNode,
+}
+
+/// `root` is an object in this crate's export and the scanned path in the
+/// CLI's `fastdir.scan` document.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DocRoot {
+    Path(String),
+    Node(JsonNode),
+}
+
+/// Everything the reader accepts: either [`JsonDoc`] or a CLI `fastdir.scan`
+/// document (which carries the tree under `tree`).
+#[derive(Deserialize)]
+struct ImportDoc {
+    version: u32,
+    #[serde(default)]
+    root_path: Option<String>,
+    #[serde(default)]
+    exported_at: Option<i64>,
+    #[serde(default)]
+    scanned_at: Option<String>,
+    #[serde(default)]
+    root: Option<DocRoot>,
+    #[serde(default)]
+    tree: Option<JsonNode>,
+}
+
+/// Read a timestamp that is either Unix seconds (this crate's export) or an
+/// ISO-8601 UTC string (the CLI's documents, or `null`).
+fn de_modified<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    use serde::Deserialize as _;
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(match value {
+        Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(0),
+        Some(serde_json::Value::String(s)) => parse_iso_secs(&s).unwrap_or(0),
+        _ => 0,
+    })
+}
+
+fn parse_iso_secs(text: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|dt| dt.timestamp())
 }
 
 const JSON_VERSION: u32 = 1;
@@ -331,12 +383,23 @@ fn build_dir(node: &JsonNode, arena: &mut Arena) -> io::Result<Node> {
     Ok(builder.commit(arena))
 }
 
-/// Read back a [`export_json`] snapshot into a [`Tree`].
+/// A scan read back from JSON, plus when it was taken.
+pub struct ImportedScan {
+    pub tree: Tree,
+    /// Unix seconds. The GUI's export stores the export time; a CLI
+    /// `fastdir.scan` document stores the scan time. `0` when unknown.
+    pub scanned_at: i64,
+}
+
+/// Read back a [`export_json`] snapshot or a CLI `fastdir.scan` document into
+/// a [`Tree`], with the scan/export timestamp.
 ///
 /// Structure, sizes and timestamps round trip; extension stats are rebuilt
-/// from the imported names.
-pub fn import_json(source: impl Read) -> io::Result<Tree> {
-    let doc: JsonDoc =
+/// from the imported names. Hard-link markers and drive pseudo-item kinds
+/// become plain files, since [`DirBuilder`] has no builder for them: totals
+/// survive, but the UI can no longer tell those entries apart.
+pub fn import_json_with_meta(source: impl Read) -> io::Result<ImportedScan> {
+    let doc: ImportDoc =
         serde_json::from_reader(source).map_err(|e| invalid(format!("invalid export: {e}")))?;
     if doc.version != JSON_VERSION {
         return Err(invalid(format!(
@@ -344,21 +407,48 @@ pub fn import_json(source: impl Read) -> io::Result<Tree> {
             doc.version
         )));
     }
-    if doc.root.name.is_empty() {
+    // This crate's export: `root_path` + a `root` object. The CLI's
+    // `fastdir.scan`: a `root` path string + the tree under `tree`.
+    let (root, root_path, scanned_at) = match (doc.root, doc.tree) {
+        (Some(DocRoot::Node(root)), _) => {
+            let path = doc
+                .root_path
+                .ok_or_else(|| invalid("export without a root path"))?;
+            (root, path, doc.exported_at.unwrap_or(0))
+        }
+        (Some(DocRoot::Path(path)), Some(root)) => (
+            root,
+            path,
+            doc.scanned_at
+                .as_deref()
+                .and_then(parse_iso_secs)
+                .unwrap_or(0),
+        ),
+        _ => return Err(invalid("export without a tree")),
+    };
+    if root.name.is_empty() {
         return Err(invalid("export without a root name"));
     }
-    let root_path = PathBuf::from(doc.root_path);
+    let root_name = root.name.clone();
+    let root_path = PathBuf::from(root_path);
     let mut arena = Arena::default();
-    let kind = parse_kind(&doc.root.kind).ok_or_else(|| invalid("unknown node kind"))?;
-    let root = if kind == NodeKind::Dir {
-        build_dir(&doc.root, &mut arena)?
-    } else {
+    let kind = parse_kind(&root.kind).ok_or_else(|| invalid("unknown node kind"))?;
+    if kind != NodeKind::Dir {
         return Err(invalid("export root must be a folder"));
-    };
-    Ok(Tree::new(
-        Subtree::new(arena, &doc.root.name, root),
-        root_path,
-    ))
+    }
+    let root = build_dir(&root, &mut arena)?;
+    Ok(ImportedScan {
+        tree: Tree::new(Subtree::new(arena, &root_name, root), root_path),
+        scanned_at,
+    })
+}
+
+/// Read back a [`export_json`] snapshot into a [`Tree`].
+///
+/// Structure, sizes and timestamps round trip; extension stats are rebuilt
+/// from the imported names.
+pub fn import_json(source: impl Read) -> io::Result<Tree> {
+    import_json_with_meta(source).map(|scan| scan.tree)
 }
 
 #[cfg(test)]
@@ -541,5 +631,75 @@ mod tests {
         let wrong_version =
             br#"{"version":99,"root_path":"/x","exported_at":0,"root":{"name":"x","kind":"dir","size":0,"disk_size":0,"files":0,"dirs":0,"modified":0}}"#;
         assert!(import_json(wrong_version.as_slice()).is_err());
+    }
+
+    #[test]
+    fn import_reads_a_cli_scan_document() {
+        // The shape `fastdir-cli scan` writes: `root` is a path, the tree is
+        // under `tree`, kinds are `type`, folders are `folders`, and
+        // timestamps are ISO-8601 (or null).
+        let doc = br#"{
+            "schema": "fastdir.scan",
+            "version": 1,
+            "fastdir_version": "0.2.0",
+            "root": "/root",
+            "scanned_at": "2023-11-14T22:15:00Z",
+            "elapsed_ms": 12,
+            "errors": 0,
+            "tree": {
+                "name": "root", "path": "/root", "type": "dir",
+                "size": 50, "disk_size": 50, "items": 3,
+                "files": 3, "folders": 1,
+                "modified": "2023-11-14T22:20:00Z",
+                "error": false, "hard_link": false, "truncated": false,
+                "children": [
+                    {"name": "sub", "path": "/root/sub", "type": "dir",
+                     "size": 20, "disk_size": 20, "items": 2,
+                     "files": 2, "folders": 0,
+                     "modified": null, "error": false, "hard_link": false,
+                     "truncated": false,
+                     "children": [
+                        {"name": "a.txt", "path": "/root/sub/a.txt", "type": "file",
+                         "size": 5, "disk_size": 4096, "items": 1,
+                         "files": 1, "folders": 0,
+                         "modified": "2023-11-14T22:15:00Z",
+                         "error": false, "hard_link": false},
+                        {"name": "b.bin", "path": "/root/sub/b.bin", "type": "file",
+                         "size": 15, "disk_size": 15, "items": 1,
+                         "files": 1, "folders": 0,
+                         "modified": "2023-11-14T22:16:00Z",
+                         "error": false, "hard_link": false}
+                     ]},
+                    {"name": "c.txt", "path": "/root/c.txt", "type": "file",
+                     "size": 30, "disk_size": 30, "items": 1,
+                     "files": 1, "folders": 0,
+                     "modified": "2023-11-14T22:17:00Z",
+                     "error": false, "hard_link": false}
+                ]
+            }
+        }"#;
+        let loaded = import_json_with_meta(doc.as_slice()).unwrap();
+        assert_eq!(loaded.scanned_at, 1_700_000_100);
+        let tree = loaded.tree;
+        assert_eq!(tree.root_path, PathBuf::from("/root"));
+        assert_eq!(tree.root().size, 50);
+        assert_eq!(tree.root().files, 3);
+        assert_eq!(tree.root().dirs, 1);
+        let a = tree.find(Path::new("/root/sub/a.txt")).unwrap();
+        assert_eq!(tree.get(&a).unwrap().size, 5);
+        assert_eq!(tree.get(&a).unwrap().modified(), 1_700_000_100);
+        // A null CLI timestamp becomes "unknown".
+        let sub = tree.find(Path::new("/root/sub")).unwrap();
+        assert_eq!(tree.get(&sub).unwrap().modified(), 1_700_000_160);
+        assert!(tree.exts.iter().any(|e| &*e.name == ".txt"));
+    }
+
+    #[test]
+    fn import_rejects_a_document_without_a_tree() {
+        let no_tree = br#"{"schema":"fastdir.scan","version":1,"root":"/x"}"#;
+        assert!(import_json(no_tree.as_slice()).is_err());
+        let no_path =
+            br#"{"version":1,"root":{"name":"x","kind":"dir","size":0,"disk_size":0,"files":0,"dirs":0,"modified":0}}"#;
+        assert!(import_json(no_path.as_slice()).is_err());
     }
 }

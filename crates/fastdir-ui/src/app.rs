@@ -74,6 +74,7 @@ actions!(
         Rescan,
         StopScan,
         OpenFolder,
+        OpenScan,
         ToggleTheme,
         ZoomIn,
         ZoomOut,
@@ -91,6 +92,7 @@ mod dialogs;
 mod export;
 mod file_list;
 mod filter;
+mod open_scan;
 mod platform;
 mod scan_state;
 mod selection;
@@ -101,6 +103,7 @@ mod update_ui;
 
 use self::export::ExportForm;
 use self::filter::FilterForm;
+use self::open_scan::SavedScan;
 
 const CONTEXT: &str = "FastDir";
 
@@ -130,6 +133,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-r", Rescan, Some(CONTEXT)),
         KeyBinding::new("escape", StopScan, Some(CONTEXT)),
         KeyBinding::new("ctrl-o", OpenFolder, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-o", OpenScan, Some(CONTEXT)),
         KeyBinding::new("ctrl-t", ToggleTheme, Some(CONTEXT)),
         KeyBinding::new("z", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("shift-z", ZoomOut, Some(CONTEXT)),
@@ -151,6 +155,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-f5", Rescan, Some(CONTEXT)),
         KeyBinding::new("cmd-r", Rescan, Some(CONTEXT)),
         KeyBinding::new("cmd-o", OpenFolder, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-o", OpenScan, Some(CONTEXT)),
         KeyBinding::new("cmd-t", ToggleTheme, Some(CONTEXT)),
         KeyBinding::new("cmd-f", FocusSearch, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-f", OpenFilters, Some(CONTEXT)),
@@ -333,6 +338,8 @@ pub struct FastDir {
     /// startup mode until the user goes home or starts a scan).
     home_drives: bool,
     tree: Option<Arc<RwLock<Tree>>>,
+    /// Set while the visible tree came from a saved JSON document.
+    saved: Option<SavedScan>,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
     /// Folders that could not be read in the last finished scan (access denied).
@@ -469,20 +476,30 @@ impl FastDir {
         );
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        // `fastdir <path>` starts scanning right away; otherwise the startup
-        // mode decides: re-scan the last path, or open the drive overview.
-        let startup_path = initial_path.or_else(|| {
-            (settings.startup.mode == StartupMode::Last)
+        // `fastdir <folder>` scans right away, `fastdir <scan>.json` opens a
+        // saved scan; otherwise the startup mode decides: re-scan the last
+        // path, or open the drive overview.
+        let initial = initial_path.as_deref().and_then(open_scan::classify_open_path);
+        let startup_path = match &initial {
+            Some(open_scan::OpenTarget::Folder(path)) => Some(path.clone()),
+            Some(open_scan::OpenTarget::SavedScan(_)) => None,
+            None => (settings.startup.mode == StartupMode::Last)
                 .then(|| settings.startup.last_path.clone())
                 .flatten()
                 .map(PathBuf::from)
-                .filter(|p| p.is_dir())
-        });
+                .filter(|p| p.is_dir()),
+        };
         // "Open nothing" shows a blank home until the user scans or goes home.
-        let home_drives = startup_path.is_some() || settings.startup.mode != StartupMode::Empty;
+        let home_drives =
+            initial.is_some() || startup_path.is_some() || settings.startup.mode != StartupMode::Empty;
         if let Some(path) = startup_path {
             cx.defer_in(window, move |this: &mut Self, window, cx| {
                 this.start_scan(path, window, cx)
+            });
+        }
+        if let Some(open_scan::OpenTarget::SavedScan(path)) = initial {
+            cx.defer_in(window, move |this: &mut Self, window, cx| {
+                this.load_saved_scan(path, window, cx)
             });
         }
         cx.defer_in(window, |this: &mut Self, window, cx| {
@@ -502,6 +519,7 @@ impl FastDir {
             phase: Phase::Home,
             home_drives,
             tree: None,
+            saved: None,
             scan_root: None,
             last_scan: None,
             last_errors: 0,
@@ -563,11 +581,10 @@ impl FastDir {
                     let Some(path) = request.flatten() else {
                         continue;
                     };
-                    if !path.is_dir() {
-                        continue;
-                    }
-                    this.update_in(cx, |this, window, cx| this.start_scan(path, window, cx))
-                        .ok();
+                    this.update_in(cx, |this, window, cx| {
+                        this.open_path_arg(path, window, cx)
+                    })
+                    .ok();
                 }
             }));
         }
@@ -806,7 +823,9 @@ impl FastDir {
         let entity = cx.entity().downgrade();
         let main_height = panel_px(self.settings.panels.main.first().copied(), 420.);
         let ext_width = panel_px(self.settings.panels.top.get(1).copied(), 330.);
-        let banner = self.render_elevate_banner(cx);
+        let banner = self
+            .render_saved_banner(cx)
+            .or_else(|| self.render_elevate_banner(cx));
         let lists = h_resizable("top-split")
             .with_state(&self.top_split)
             .on_resize({
@@ -1140,6 +1159,7 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::rescan))
             .on_action(cx.listener(Self::stop_scan))
             .on_action(cx.listener(Self::open_folder))
+            .on_action(cx.listener(Self::open_scan))
             .on_action(cx.listener(Self::toggle_theme))
             .on_action(cx.listener(Self::zoom_in))
             .on_action(cx.listener(Self::zoom_out))
@@ -1149,6 +1169,11 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::open_filters))
             .on_action(cx.listener(Self::open_export))
             .on_action(cx.listener(Self::open_settings))
+            .on_drop::<ExternalPaths>(cx.listener(
+                |this, paths: &ExternalPaths, window, cx| {
+                    this.open_dropped(paths, window, cx)
+                },
+            ))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))
             .child(div().flex_1().min_h_0().w_full().child(body))

@@ -420,6 +420,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "すべての設定が既定値に戻ります。ウィンドウ位置とパネルサイズは保持されます。"
         }
         "set.reset.ok" => "リセット",
+        "menu.open_scan" => "スキャンを開く…",
+        "tb.tip_open_scan" => "保存したスキャンを開く… ({mod}+Shift+O)",
+        "home.open_scan" => "保存したスキャンを開く…",
+        "saved.title" => "保存したスキャン: {path}",
+        "saved.banner" => "保存したスキャン · {root} · {when}",
+        "saved.status" => "保存したスキャン · {when}",
+        "saved.missing" => "このフォルダーはこのコンピューターにありません。ファイル操作は無効です。再スキャンして実際のフォルダーを選択してください。",
+        "saved.rescan" => "フォルダーを再スキャン",
+        "saved.opening" => "保存したスキャンを開いています…",
+        "saved.err_title" => "スキャンを開けませんでした",
+        "saved.err_body" => "{path} を開けませんでした: {error}",
+        "saved.missing_item" => "この項目はこのコンピューターにないため変更できません。",
         _ => return None,
     })
 }

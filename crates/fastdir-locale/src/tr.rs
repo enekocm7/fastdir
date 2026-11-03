@@ -390,6 +390,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.reset.title" => "Tüm ayarlar sıfırlansın mı?",
         "set.reset.body" => "Her ayar varsayılanına döner. Pencere konumu ve panel boyutları korunur.",
         "set.reset.ok" => "Sıfırla",
+        "menu.open_scan" => "Tarama aç…",
+        "tb.tip_open_scan" => "Kaydedilmiş taramayı aç… ({mod}+Shift+O)",
+        "home.open_scan" => "Kaydedilmiş taramayı aç…",
+        "saved.title" => "Kaydedilmiş tarama: {path}",
+        "saved.banner" => "Kaydedilmiş tarama · {root} · {when}",
+        "saved.status" => "Kaydedilmiş tarama · {when}",
+        "saved.missing" => "Bu klasör bu makinede yok; dosya işlemleri devre dışı. Gerçek bir klasör seçmek için yeniden tarayın.",
+        "saved.rescan" => "Klasörü yeniden tara",
+        "saved.opening" => "Kaydedilmiş tarama açılıyor…",
+        "saved.err_title" => "Tarama açılamadı",
+        "saved.err_body" => "{path} açılamadı: {error}",
+        "saved.missing_item" => "Bu öğe bu makinede yok, bu yüzden değiştirilemez.",
         _ => return None,
     })
 }

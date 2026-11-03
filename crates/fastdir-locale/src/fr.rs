@@ -418,6 +418,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Chaque paramètre revient à sa valeur par défaut. La position de la fenêtre et les panneaux sont conservés."
         }
         "set.reset.ok" => "Réinitialiser",
+        "menu.open_scan" => "Ouvrir une analyse…",
+        "tb.tip_open_scan" => "Ouvrir une analyse enregistrée… ({mod}+Maj+O)",
+        "home.open_scan" => "Ouvrir une analyse enregistrée…",
+        "saved.title" => "Analyse enregistrée : {path}",
+        "saved.banner" => "Analyse enregistrée · {root} · {when}",
+        "saved.status" => "Analyse enregistrée · {when}",
+        "saved.missing" => "Ce dossier n'existe pas sur cette machine ; les opérations sur les fichiers sont désactivées. Relancez l'analyse pour choisir un vrai dossier.",
+        "saved.rescan" => "Réanalyser le dossier",
+        "saved.opening" => "Ouverture de l'analyse enregistrée…",
+        "saved.err_title" => "Impossible d'ouvrir l'analyse",
+        "saved.err_body" => "Impossible d'ouvrir {path} : {error}",
+        "saved.missing_item" => "Cet élément n'existe pas sur cette machine et ne peut donc pas être modifié.",
         _ => return None,
     })
 }

@@ -420,6 +420,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "所有设置都将恢复默认值。窗口位置和面板大小将保留。"
         }
         "set.reset.ok" => "重置",
+        "menu.open_scan" => "打开扫描…",
+        "tb.tip_open_scan" => "打开已保存的扫描… ({mod}+Shift+O)",
+        "home.open_scan" => "打开已保存的扫描…",
+        "saved.title" => "已保存的扫描：{path}",
+        "saved.banner" => "已保存的扫描 · {root} · {when}",
+        "saved.status" => "已保存的扫描 · {when}",
+        "saved.missing" => "此文件夹不在这台计算机上，文件操作已禁用。请重新扫描以选择真实文件夹。",
+        "saved.rescan" => "重新扫描文件夹",
+        "saved.opening" => "正在打开已保存的扫描…",
+        "saved.err_title" => "无法打开扫描",
+        "saved.err_body" => "无法打开 {path}：{error}",
+        "saved.missing_item" => "此项目不在这台计算机上，无法修改。",
         _ => return None,
     })
 }
