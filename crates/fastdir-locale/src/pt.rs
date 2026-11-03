@@ -418,6 +418,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Cada configuração volta ao padrão. A posição da janela e os painéis são mantidos."
         }
         "set.reset.ok" => "Redefinir",
+        "menu.open_scan" => "Abrir análise…",
+        "tb.tip_open_scan" => "Abrir uma análise guardada… ({mod}+Shift+O)",
+        "home.open_scan" => "Abrir uma análise guardada…",
+        "saved.title" => "Análise guardada: {path}",
+        "saved.banner" => "Análise guardada · {root} · {when}",
+        "saved.status" => "Análise guardada · {when}",
+        "saved.missing" => "Esta pasta não existe nesta máquina; as operações de ficheiros estão desativadas. Volte a analisar para escolher uma pasta real.",
+        "saved.rescan" => "Reanalisar pasta",
+        "saved.opening" => "A abrir análise guardada…",
+        "saved.err_title" => "Não foi possível abrir a análise",
+        "saved.err_body" => "Não foi possível abrir {path}: {error}",
+        "saved.missing_item" => "Este item não existe nesta máquina, por isso não pode ser alterado.",
         _ => return None,
     })
 }

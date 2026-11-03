@@ -418,6 +418,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Jede Einstellung kehrt zum Standard zurück. Fensterposition und Panelgrößen bleiben erhalten."
         }
         "set.reset.ok" => "Zurücksetzen",
+        "menu.open_scan" => "Scan öffnen…",
+        "tb.tip_open_scan" => "Gespeicherten Scan öffnen… ({mod}+Umschalt+O)",
+        "home.open_scan" => "Gespeicherten Scan öffnen…",
+        "saved.title" => "Gespeicherter Scan: {path}",
+        "saved.banner" => "Gespeicherter Scan · {root} · {when}",
+        "saved.status" => "Gespeicherter Scan · {when}",
+        "saved.missing" => "Dieser Ordner ist auf diesem Rechner nicht vorhanden; Dateioperationen sind deaktiviert. Scannen Sie erneut, um einen echten Ordner zu wählen.",
+        "saved.rescan" => "Ordner neu scannen",
+        "saved.opening" => "Gespeicherter Scan wird geöffnet…",
+        "saved.err_title" => "Scan konnte nicht geöffnet werden",
+        "saved.err_body" => "Konnte {path} nicht öffnen: {error}",
+        "saved.missing_item" => "Dieses Element ist auf diesem Rechner nicht vorhanden und kann nicht geändert werden.",
         _ => return None,
     })
 }

@@ -31,6 +31,7 @@ impl FastDir {
             expected,
         };
         self.home_drives = true;
+        self.saved = None;
         self.scan_root = Some(root.clone());
         self.settings.startup.last_path = Some(root.to_string_lossy().into_owned());
         self.settings.save();
@@ -250,6 +251,22 @@ impl FastDir {
     }
 
     pub(super) fn rescan(&mut self, _: &Rescan, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saved.is_some() {
+            // A saved scan has no fresh data: scan the real folder, or ask
+            // for one when it no longer exists on this machine.
+            let root = self.scan_root.clone();
+            match root {
+                Some(root) if root.is_dir() => self.start_scan(root, window, cx),
+                _ => {
+                    window.push_notification(
+                        Notification::warning(self.tr("saved.missing")),
+                        cx,
+                    );
+                    self.open_folder(&OpenFolder, window, cx);
+                }
+            }
+            return;
+        }
         if let Some(root) = self.scan_root.clone() {
             self.start_scan(root, window, cx);
         }
@@ -284,6 +301,7 @@ impl FastDir {
         }
         self.phase = Phase::Home;
         self.home_drives = true;
+        self.saved = None;
         self.tree = None;
         self.rows.clear();
         self.selected = None;
@@ -333,11 +351,26 @@ impl FastDir {
                         ),
                 )
                 .child(
-                    Button::new("scan-folder")
-                        .outline()
-                        .icon(IconName::FolderSearch)
-                        .label(self.tr("home.scan_folder"))
-                        .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            Button::new("scan-folder")
+                                .outline()
+                                .icon(IconName::FolderSearch)
+                                .label(self.tr("home.scan_folder"))
+                                .on_click(cx.listener(|this, _, w, cx| {
+                                    this.open_folder(&OpenFolder, w, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("open-scan")
+                                .outline()
+                                .icon(IconName::FileText)
+                                .label(self.tr("home.open_scan"))
+                                .on_click(cx.listener(|this, _, w, cx| {
+                                    this.open_scan(&OpenScan, w, cx)
+                                })),
+                        ),
                 );
         }
         let show_admin = !elevate::is_elevated();
@@ -455,6 +488,15 @@ impl FastDir {
                             .label(self.tr("home.scan_folder"))
                             .on_click(
                                 cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("open-scan")
+                            .outline()
+                            .icon(IconName::FileText)
+                            .label(self.tr("home.open_scan"))
+                            .on_click(
+                                cx.listener(|this, _, w, cx| this.open_scan(&OpenScan, w, cx)),
                             ),
                     )
                     .when(show_admin, |d| {

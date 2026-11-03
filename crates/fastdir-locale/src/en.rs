@@ -390,6 +390,18 @@ pub const KEYS: &[&str] = &[
     "set.reset.title",
     "set.reset.body",
     "set.reset.ok",
+    "menu.open_scan",
+    "tb.tip_open_scan",
+    "home.open_scan",
+    "saved.title",
+    "saved.banner",
+    "saved.status",
+    "saved.missing",
+    "saved.rescan",
+    "saved.opening",
+    "saved.err_title",
+    "saved.err_body",
+    "saved.missing_item",
 ];
 
 /// English lookup. Returns `None` for unknown keys.
@@ -806,6 +818,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Every setting returns to its default. The window position and panel sizes are kept."
         }
         "set.reset.ok" => "Reset",
+        "menu.open_scan" => "Open scan…",
+        "tb.tip_open_scan" => "Open a saved scan… ({mod}+Shift+O)",
+        "home.open_scan" => "Open a saved scan…",
+        "saved.title" => "Saved scan: {path}",
+        "saved.banner" => "Saved scan · {root} · {when}",
+        "saved.status" => "Saved scan · {when}",
+        "saved.missing" => "This folder is not on this machine; file operations are disabled. Rescan to pick a real folder.",
+        "saved.rescan" => "Rescan folder",
+        "saved.opening" => "Opening saved scan…",
+        "saved.err_title" => "Could not open the scan",
+        "saved.err_body" => "Could not open {path}: {error}",
+        "saved.missing_item" => "This item is not on this machine, so it cannot be changed.",
         _ => return None,
     })
 }

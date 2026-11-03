@@ -418,6 +418,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Ogni impostazione torna al valore predefinito. La posizione della finestra e le dimensioni dei pannelli vengono mantenute."
         }
         "set.reset.ok" => "Reimposta",
+        "menu.open_scan" => "Apri analisi…",
+        "tb.tip_open_scan" => "Apri un'analisi salvata… ({mod}+Maiusc+O)",
+        "home.open_scan" => "Apri un'analisi salvata…",
+        "saved.title" => "Analisi salvata: {path}",
+        "saved.banner" => "Analisi salvata · {root} · {when}",
+        "saved.status" => "Analisi salvata · {when}",
+        "saved.missing" => "Questa cartella non è presente su questo computer; le operazioni sui file sono disattivate. Riesegui la scansione per scegliere una cartella reale.",
+        "saved.rescan" => "Riscansiona cartella",
+        "saved.opening" => "Apertura dell'analisi salvata…",
+        "saved.err_title" => "Impossibile aprire l'analisi",
+        "saved.err_body" => "Impossibile aprire {path}: {error}",
+        "saved.missing_item" => "Questo elemento non è presente su questo computer e non può essere modificato.",
         _ => return None,
     })
 }

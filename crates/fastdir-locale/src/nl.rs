@@ -418,6 +418,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Elke instelling keert terug naar de standaardwaarde. Vensterpositie en paneelgroottes blijven behouden."
         }
         "set.reset.ok" => "Opnieuw instellen",
+        "menu.open_scan" => "Scan openen…",
+        "tb.tip_open_scan" => "Een opgeslagen scan openen… ({mod}+Shift+O)",
+        "home.open_scan" => "Een opgeslagen scan openen…",
+        "saved.title" => "Opgeslagen scan: {path}",
+        "saved.banner" => "Opgeslagen scan · {root} · {when}",
+        "saved.status" => "Opgeslagen scan · {when}",
+        "saved.missing" => "Deze map staat niet op deze computer; bestandsbewerkingen zijn uitgeschakeld. Scan opnieuw om een echte map te kiezen.",
+        "saved.rescan" => "Map opnieuw scannen",
+        "saved.opening" => "Opgeslagen scan wordt geopend…",
+        "saved.err_title" => "Kan de scan niet openen",
+        "saved.err_body" => "Kan {path} niet openen: {error}",
+        "saved.missing_item" => "Dit item staat niet op deze computer en kan daarom niet worden gewijzigd.",
         _ => return None,
     })
 }

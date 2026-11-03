@@ -420,6 +420,18 @@ pub fn get(key: &str) -> Option<&'static str> {
             "Cada ajuste vuelve a su valor predeterminado. Se conservan la posición de la ventana y los paneles."
         }
         "set.reset.ok" => "Restablecer",
+        "menu.open_scan" => "Abrir análisis…",
+        "tb.tip_open_scan" => "Abrir un análisis guardado… ({mod}+Mayús+O)",
+        "home.open_scan" => "Abrir un análisis guardado…",
+        "saved.title" => "Análisis guardado: {path}",
+        "saved.banner" => "Análisis guardado · {root} · {when}",
+        "saved.status" => "Análisis guardado · {when}",
+        "saved.missing" => "Esta carpeta no está en este equipo; las operaciones de archivos están desactivadas. Reanaliza para elegir una carpeta real.",
+        "saved.rescan" => "Reanalizar carpeta",
+        "saved.opening" => "Abriendo análisis guardado…",
+        "saved.err_title" => "No se pudo abrir el análisis",
+        "saved.err_body" => "No se pudo abrir {path}: {error}",
+        "saved.missing_item" => "Este elemento no está en este equipo, así que no se puede modificar.",
         _ => return None,
     })
 }
