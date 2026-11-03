@@ -38,6 +38,19 @@ impl DriveKind {
             DriveKind::Unknown => "Drive",
         }
     }
+
+    /// Stable id for localization (`fixed`, `removable`, `network`,
+    /// `optical`, `ram`, `unknown`); see `fastdir_locale::drive_kind`.
+    pub fn id(self) -> &'static str {
+        match self {
+            DriveKind::Fixed => "fixed",
+            DriveKind::Removable => "removable",
+            DriveKind::Network => "network",
+            DriveKind::Optical => "optical",
+            DriveKind::Ram => "ram",
+            DriveKind::Unknown => "unknown",
+        }
+    }
 }
 
 impl Drive {
@@ -54,13 +67,19 @@ impl Drive {
     }
 
     pub fn title(&self) -> String {
+        self.title_in(self.kind.label())
+    }
+
+    /// Drive title with a pre-localized kind label
+    /// (from `fastdir_locale::drive_kind`).
+    pub fn title_in(&self, kind_label: &str) -> String {
         let letter = self
             .path
             .to_string_lossy()
             .trim_end_matches('\\')
             .to_string();
         if self.label.is_empty() {
-            format!("{} ({})", self.kind.label(), letter)
+            format!("{} ({})", kind_label, letter)
         } else {
             format!("{} ({})", self.label, letter)
         }

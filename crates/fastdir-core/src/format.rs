@@ -29,76 +29,51 @@ pub fn bytes_with(n: u64, decimal: bool) -> String {
 }
 
 pub fn count(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
+    count_in(n, "en")
+}
+
+/// Integer with locale digit grouping (`1234567` → `1,234,567` in English,
+/// `1.234.567` in German, `1 234 567` in French).
+pub fn count_in(n: u64, lang: &str) -> String {
+    fastdir_locale::format_count(n, lang)
 }
 
 pub fn percent(part: u64, whole: u64) -> String {
-    if whole == 0 {
-        return "—".into();
-    }
-    format!("{:.1}%", part as f64 * 100.0 / whole as f64)
+    percent_in(part, whole, "en")
+}
+
+/// Percentage with one decimal in the locale's decimal separator.
+pub fn percent_in(part: u64, whole: u64, lang: &str) -> String {
+    fastdir_locale::format_percent(part, whole, lang)
 }
 
 pub fn date(unix: i64) -> String {
-    date_with(unix, false)
+    date_in(unix, "en")
+}
+
+/// Absolute timestamp in the locale's date order.
+pub fn date_in(unix: i64, lang: &str) -> String {
+    fastdir_locale::format_date(unix, lang)
+}
+
+pub fn date_with(unix: i64, relative: bool) -> String {
+    date_with_in(unix, relative, "en")
 }
 
 /// Timestamp formatting: absolute (`2026-11-02 12:30`) or relative
 /// (`3 days ago`), for the file list's "Last Change" column.
-pub fn date_with(unix: i64, relative: bool) -> String {
+pub fn date_with_in(unix: i64, relative: bool, lang: &str) -> String {
     if unix <= 0 {
         return String::new();
     }
     if !relative {
-        return match chrono::DateTime::from_timestamp(unix, 0) {
-            Some(dt) => dt
-                .with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string(),
-            None => String::new(),
-        };
+        return fastdir_locale::format_date(unix, lang);
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(unix);
-    let secs = now.saturating_sub(unix);
-    if secs < 10 {
-        return "just now".into();
-    }
-    const MIN: i64 = 60;
-    const HOUR: i64 = 3_600;
-    const DAY: i64 = 86_400;
-    const WEEK: i64 = 7 * DAY;
-    const MONTH: i64 = 30 * DAY;
-    const YEAR: i64 = 365 * DAY;
-    let (v, unit) = if secs < HOUR {
-        (secs / MIN, "minute")
-    } else if secs < DAY {
-        (secs / HOUR, "hour")
-    } else if secs < WEEK {
-        (secs / DAY, "day")
-    } else if secs < MONTH {
-        (secs / WEEK, "week")
-    } else if secs < YEAR {
-        (secs / MONTH, "month")
-    } else {
-        (secs / YEAR, "year")
-    };
-    let v = v.max(1);
-    if v == 1 {
-        format!("1 {unit} ago")
-    } else {
-        format!("{v} {unit}s ago")
-    }
+    fastdir_locale::format_relative_secs(now.saturating_sub(unix), lang)
 }
 
 pub fn duration(d: std::time::Duration) -> String {

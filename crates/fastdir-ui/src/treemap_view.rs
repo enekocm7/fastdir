@@ -142,6 +142,8 @@ pub struct TreemapView {
     min_cell: f32,
     /// Format hover sizes with decimal (SI) units instead of binary ones.
     decimal_sizes: bool,
+    /// Resolved UI language code for hover labels and hints.
+    lang: String,
     /// The tree is still being scanned, so previews are throttled.
     partial: bool,
     last_render: Option<Instant>,
@@ -177,6 +179,7 @@ impl TreemapView {
             borders: false,
             min_cell: 1.0,
             decimal_sizes: false,
+            lang: "en".to_string(),
             partial: false,
             last_render: None,
             _task: None,
@@ -204,6 +207,16 @@ impl TreemapView {
         changed |= set_if_diff(&mut self.min_cell, opts.min_cell);
         changed |= set_if_diff(&mut self.decimal_sizes, decimal_sizes);
         if changed {
+            cx.notify();
+        }
+    }
+
+    /// Switch the language of hover labels and hints. Cached hover text is
+    /// dropped so it is rebuilt in the new language on the next mouse move.
+    pub fn set_language(&mut self, lang: &str, cx: &mut Context<Self>) {
+        if self.lang != lang {
+            self.lang = lang.to_string();
+            self.hover = None;
             cx.notify();
         }
     }
@@ -463,15 +476,29 @@ impl TreemapView {
                 node.size
             };
             let link = if node.hard_link() {
-                "  ·  hard link"
+                fastdir_locale::t(&self.lang, "tree.hover_link")
             } else {
                 ""
             };
-            let label = format!(
-                "{}  —  {}{link}",
-                full.display(),
-                format::bytes_with(size, self.decimal_sizes)
-            );
+            let label = {
+                // A trailing pseudo-item name is translated (`C:\<Free space>`).
+                let raw = full.display().to_string();
+                let tail = full.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let mut text = raw;
+                if let Some(local) = fastdir_locale::special_display(tail, &self.lang) {
+                    text.truncate(text.len() - tail.len());
+                    text.push_str(local);
+                }
+                fastdir_locale::fmt(
+                    &self.lang,
+                    "tree.hover",
+                    &[
+                        ("path", &text),
+                        ("size", &format::bytes_with(size, self.decimal_sizes)),
+                        ("link", link),
+                    ],
+                )
+            };
             Some((p, label.into()))
         });
         cx.notify();
@@ -622,7 +649,7 @@ impl Render for TreemapView {
                         .justify_center()
                         .text_sm()
                         .text_color(muted)
-                        .child("Treemap appears here after a scan"),
+                        .child(fastdir_locale::t(&self.lang, "tree.empty")),
                 )
             })
             .when(self.rendering && self.image.is_none() && has_tree, |this| {
@@ -634,7 +661,7 @@ impl Render for TreemapView {
                         .justify_center()
                         .text_sm()
                         .text_color(muted)
-                        .child("Rendering treemap…"),
+                        .child(fastdir_locale::t(&self.lang, "tree.rendering")),
                 )
             })
             .when_some(self.hover.as_ref(), |this, (_, label)| {
@@ -675,10 +702,9 @@ impl TreemapView {
                 let Some(child) = t.children(node).get(i as usize) else {
                     break;
                 };
-                parts.push((
-                    t.name(child).to_string().into(),
-                    self.zoom[..=depth].to_vec(),
-                ));
+                let name = fastdir_locale::special_display(t.name(child), &self.lang)
+                    .unwrap_or_else(|| t.name(child));
+                parts.push((name.to_string().into(), self.zoom[..=depth].to_vec()));
                 node = child;
             }
         }
@@ -737,9 +763,9 @@ impl TreemapView {
                     })),
             )
             .child(div().flex_shrink_0().text_color(muted).child(if zoomed {
-                "Z zoom in · Shift+Z zoom out"
+                fastdir_locale::t(&self.lang, "tree.zoom_hint")
             } else {
-                "Z to zoom into a folder"
+                fastdir_locale::t(&self.lang, "tree.zoom_tip")
             }))
     }
 }

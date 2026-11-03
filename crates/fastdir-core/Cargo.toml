@@ -13,6 +13,8 @@ serde.workspace = true
 serde_json.workspace = true
 trash.workspace = true
 
+fastdir-locale.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 

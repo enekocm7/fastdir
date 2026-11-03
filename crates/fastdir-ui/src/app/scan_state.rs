@@ -61,7 +61,9 @@ impl FastDir {
             t.set_selection(vec![Vec::new()], cx);
             t.set_partial(self.settings.scan.show_partial_results, cx);
         });
-        window.set_window_title(&format!("FastDir — scanning {}", root.display()));
+        window.set_window_title(
+            &self.tr_fmt("win.scanning", &[("path", &root.display().to_string())]),
+        );
 
         let p = progress.clone();
         let scan_tree = tree.clone();
@@ -165,10 +167,12 @@ impl FastDir {
                 tree.scanned_bytes(),
             )
         };
-        let title = format!(
-            "FastDir — {}{}",
-            root_path.display(),
-            if cancelled { " (incomplete)" } else { "" }
+        let title = self.tr_fmt(
+            "win.ready",
+            &[
+                ("path", &root_path.display().to_string()),
+                ("suffix", if cancelled { self.tr("win.incomplete") } else { "" }),
+            ],
         );
         window.set_window_title(&title);
         self.last_scan = Some((elapsed, cancelled));
@@ -198,11 +202,13 @@ impl FastDir {
             t.invalidate(cx);
             t.set_selection(selection, cx);
         });
-        let msg = format!(
-            "Scanned {} files ({}) in {}",
-            format::count(files as u64),
-            self.bytes(size),
-            format::duration(elapsed)
+        let msg = self.tr_fmt(
+            "scan.done_files",
+            &[
+                ("files", &self.count(files as u64)),
+                ("size", &self.bytes(size)),
+                ("dur", &format::duration(elapsed)),
+            ],
         );
         window.push_notification(
             Notification::new()
@@ -213,9 +219,9 @@ impl FastDir {
                     NotificationType::Success
                 })
                 .title(if cancelled {
-                    "Scan stopped"
+                    self.tr("scan.stopped")
                 } else {
-                    "Scan complete"
+                    self.tr("scan.complete")
                 }),
             cx,
         );
@@ -259,7 +265,7 @@ impl FastDir {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Scan folder".into()),
+            prompt: Some(self.tr("tb.scan_folder").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
@@ -294,7 +300,7 @@ impl FastDir {
         self.drives = drives::list();
         self.last_errors = 0;
         self.treemap.update(cx, |t, cx| t.set_tree(None, cx));
-        window.set_window_title("FastDir");
+        window.set_window_title(self.tr("app.name"));
         cx.notify();
     }
 
@@ -317,20 +323,20 @@ impl FastDir {
                             div()
                                 .text_2xl()
                                 .font_weight(FontWeight::BOLD)
-                                .child("What's using my disk?"),
+                                .child(self.tr("home.title")),
                         )
                         .child(
                             div()
                                 .text_sm()
                                 .text_color(theme.muted_foreground)
-                                .child("Pick any folder to scan."),
+                                .child(self.tr("home.pick_folder")),
                         ),
                 )
                 .child(
                     Button::new("scan-folder")
                         .outline()
                         .icon(IconName::FolderSearch)
-                        .label("Scan a folder…")
+                        .label(self.tr("home.scan_folder"))
                         .on_click(cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx))),
                 );
         }
@@ -377,12 +383,12 @@ impl FastDir {
                                     div()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .whitespace_nowrap()
-                                        .child(d.title()),
+                                        .child(d.title_in(self.drive_kind_name(d.kind))),
                                 )
                                 .child(div().text_xs().text_color(theme.muted_foreground).child(
                                     format!(
                                         "{} · {}",
-                                        d.kind.label(),
+                                        self.drive_kind_name(d.kind),
                                         if d.fs.is_empty() { "—" } else { &d.fs }
                                     ),
                                 )),
@@ -398,11 +404,10 @@ impl FastDir {
                         .justify_between()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child(format!("{} used", self.bytes(d.used())))
-                        .child(format!(
-                            "{} free of {}",
-                            self.bytes(d.free),
-                            self.bytes(d.total)
+                        .child(self.tr_fmt("home.used", &[("size", &self.bytes(d.used()))]))
+                        .child(self.tr_fmt(
+                            "tb.drive_free",
+                            &[("free", &self.bytes(d.free)), ("total", &self.bytes(d.total))],
                         )),
                 )
         });
@@ -421,13 +426,13 @@ impl FastDir {
                         div()
                             .text_2xl()
                             .font_weight(FontWeight::BOLD)
-                            .child("What's using my disk?"),
+                            .child(self.tr("home.title")),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(theme.muted_foreground)
-                            .child("Pick a drive to scan, or choose any folder."),
+                            .child(self.tr("home.pick_drive")),
                     ),
             )
             .child(
@@ -447,7 +452,7 @@ impl FastDir {
                         Button::new("scan-folder")
                             .outline()
                             .icon(IconName::FolderSearch)
-                            .label("Scan a folder…")
+                            .label(self.tr("home.scan_folder"))
                             .on_click(
                                 cx.listener(|this, _, w, cx| this.open_folder(&OpenFolder, w, cx)),
                             ),
@@ -457,10 +462,8 @@ impl FastDir {
                             Button::new("restart-admin-home")
                                 .outline()
                                 .icon(IconName::Shield)
-                                .label("Restart as administrator")
-                                .tooltip(
-                                    "Relaunch elevated so protected folders can be scanned",
-                                )
+                                .label(self.tr("home.restart_admin"))
+                                .tooltip(self.tr("home.restart_tip"))
                                 .on_click(cx.listener(|this, _, w, cx| {
                                     this.restart_elevated(None, w, cx)
                                 })),
@@ -474,7 +477,7 @@ impl FastDir {
                         .text_center()
                         .text_color(theme.muted_foreground)
                         .child(
-                            "Scanning without elevation skips protected folders — totals will be incomplete.",
+                            self.tr("home.no_elev_note"),
                         ),
                 )
             })
@@ -535,7 +538,10 @@ impl FastDir {
                         div()
                             .text_xl()
                             .font_weight(FontWeight::BOLD)
-                            .child(format!("Scanning {}", root.display())),
+                            .child(self.tr_fmt(
+                                "scan.heading",
+                                &[("path", &root.display().to_string())],
+                            )),
                     ),
             )
             .child(
@@ -548,11 +554,11 @@ impl FastDir {
             .child(
                 h_flex()
                     .gap_3()
-                    .child(stat("Files", format::count(files)))
-                    .child(stat("Folders", format::count(dirs)))
-                    .child(stat("Size", self.bytes(bytes)))
-                    .child(stat("Speed", format!("{}/s", format::count(rate as u64))))
-                    .child(stat("Elapsed", format::duration(elapsed))),
+                    .child(stat(self.tr("scan.files"), self.count(files)))
+                    .child(stat(self.tr("scan.folders"), self.count(dirs)))
+                    .child(stat(self.tr("scan.size"), self.bytes(bytes)))
+                    .child(stat(self.tr("scan.speed"), format!("{}/s", self.count(rate as u64))))
+                    .child(stat(self.tr("scan.elapsed"), format::duration(elapsed))),
             )
             .child(
                 div()
@@ -572,20 +578,17 @@ impl FastDir {
                         .items_center()
                         .justify_center()
                         .gap_3()
-                        .child(div().text_xs().text_color(theme.warning).child(format!(
-                            "{} folders could not be read (access denied)",
-                            format::count(errors)
-                        )))
+                        .child(div().text_xs().text_color(theme.warning).child(
+                            self.tr_fmt("scan.unreadable", &[("n", &self.count(errors))]),
+                        ))
                         .when(!elevate::is_elevated(), |d| {
                             d.child(
                                 Button::new("restart-admin-scanning")
                                     .small()
                                     .outline()
                                     .icon(IconName::Shield)
-                                    .label("Restart as administrator")
-                                    .tooltip(
-                                        "Relaunch elevated and rescan this path so protected folders are included",
-                                    )
+                                    .label(self.tr("scan.restart_admin"))
+                                    .tooltip(self.tr("scan.restart_rescan_tip"))
                                     .on_click(cx.listener(move |this, _, w, cx| {
                                         this.restart_elevated(Some(root.clone()), w, cx)
                                     })),
@@ -597,7 +600,11 @@ impl FastDir {
                 Button::new("stop-scan")
                     .outline()
                     .icon(IconName::CircleStop)
-                    .label(if cancelling { "Stopping…" } else { "Stop" })
+                    .label(if cancelling {
+                        self.tr("action.stopping")
+                    } else {
+                        self.tr("action.stop")
+                    })
                     .disabled(cancelling)
                     .on_click(cx.listener(|this, _, w, cx| this.stop_scan(&StopScan, w, cx))),
             )

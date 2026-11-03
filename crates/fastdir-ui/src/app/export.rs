@@ -69,7 +69,15 @@ impl FastDir {
             format: ExportFileFormat::Csv,
             include_files: true,
         };
-        let depth = cx.new(|cx| InputState::new(window, cx).placeholder("Empty = unlimited"));
+        let depth = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(
+                self.tr("exp.depth_ph"),
+            )
+        });
+        let lang = self.settings.locale.language.clone();
+        let title = self.tr("exp.title");
+        let cancel = self.tr("action.cancel");
+        let ok = self.tr("exp.ok");
         let entity = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _window, cx| {
             let theme = cx.theme();
@@ -92,7 +100,7 @@ impl FastDir {
                     let tree = view.tree.as_ref()?.read();
                     Some(tree.fs_path(&path)?.display().to_string().into())
                 })
-                .unwrap_or_else(|| "Selected folder".into());
+                .unwrap_or_else(|| fastdir_locale::t(&lang, "exp.selected").into());
             let field = |label: &'static str| {
                 div()
                     .text_xs()
@@ -107,19 +115,22 @@ impl FastDir {
             let depth_export = depth.clone();
             let entity_export = entity.clone();
             dialog
-                .title("Export results")
+                .title(title)
                 .w(px(520.))
                 .child(
                     v_flex()
                         .gap_3()
-                        .child(field("What to export"))
+                        .child(field(fastdir_locale::t(&lang, "exp.scope")))
                         .child(
                             RadioGroup::horizontal("export-scope")
                                 .selected_index(Some(match scope {
                                     ExportScope::Whole => 0,
                                     ExportScope::Selected => 1,
                                 }))
-                                .child(Radio::new("export-scope-whole").label("Whole scan"))
+                                .child(
+                                    Radio::new("export-scope-whole")
+                                        .label(fastdir_locale::t(&lang, "exp.whole")),
+                                )
                                 .child(
                                     Radio::new("export-scope-selected")
                                         .label(selected_label)
@@ -137,16 +148,20 @@ impl FastDir {
                                         .ok();
                                 }),
                         )
-                        .child(field("File format"))
+                        .child(field(fastdir_locale::t(&lang, "exp.format")))
                         .child(
                             RadioGroup::horizontal("export-format")
                                 .selected_index(Some(match form.format {
                                     ExportFileFormat::Csv => 0,
                                     ExportFileFormat::Json => 1,
                                 }))
-                                .child(Radio::new("export-format-csv").label("CSV (spreadsheet)"))
                                 .child(
-                                    Radio::new("export-format-json").label("JSON (re-importable)"),
+                                    Radio::new("export-format-csv")
+                                        .label(fastdir_locale::t(&lang, "exp.csv")),
+                                )
+                                .child(
+                                    Radio::new("export-format-json")
+                                        .label(fastdir_locale::t(&lang, "exp.json")),
                                 )
                                 .on_change(move |ix: &usize, _window, cx| {
                                     format_entity
@@ -169,12 +184,17 @@ impl FastDir {
                                 .child(
                                     v_flex()
                                         .gap_1()
-                                        .child(div().text_xs().child("Include files"))
+                                        .child(
+                                            div().text_xs().child(fastdir_locale::t(
+                                                &lang,
+                                                "exp.include_files",
+                                            )),
+                                        )
                                         .child(
                                             div()
                                                 .text_xs()
                                                 .text_color(theme.muted_foreground)
-                                                .child("Off exports folders only."),
+                                                .child(fastdir_locale::t(&lang, "exp.files_hint")),
                                         ),
                                 )
                                 .child(
@@ -189,7 +209,7 @@ impl FastDir {
                                         }),
                                 ),
                         )
-                        .child(field("Max depth (levels below the exported folder)"))
+                        .child(field(fastdir_locale::t(&lang, "exp.max_depth")))
                         .child(Input::new(&depth).small()),
                 )
                 .footer(
@@ -200,14 +220,14 @@ impl FastDir {
                         .child(
                             Button::new("export-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(cancel)
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("export-ok")
                                 .primary()
                                 .icon(IconName::Download)
-                                .label("Choose folder & Export")
+                                .label(ok)
                                 .on_click(move |_, window, cx| {
                                     if do_export(
                                         entity_export.clone(),
@@ -243,6 +263,7 @@ fn do_export(
     let Some(view) = entity.upgrade() else {
         return true;
     };
+    let lang: String = view.read(cx).settings.locale.language.clone();
     let (form, depth_text) = (
         view.read(cx).export_form,
         depth_input.read(cx).value().to_string(),
@@ -253,8 +274,8 @@ fn do_export(
             Ok(n) => Some(n),
             Err(_) => {
                 window.push_notification(
-                    Notification::warning("Max depth must be a whole number, or empty.")
-                        .title("Export not started"),
+                    Notification::warning(fastdir_locale::t(&lang, "exp.err_depth"))
+                        .title(fastdir_locale::t(&lang, "exp.err_title")),
                     cx,
                 );
                 return false;
@@ -272,8 +293,8 @@ fn do_export(
                 Some(p) if view.export_selection_valid() => p,
                 _ => {
                     window.push_notification(
-                        Notification::warning("Select a folder first, or export the whole scan.")
-                            .title("Export not started"),
+                        Notification::warning(fastdir_locale::t(&lang, "exp.err_select"))
+                            .title(fastdir_locale::t(&lang, "exp.err_title")),
                         cx,
                     );
                     return false;
@@ -306,7 +327,7 @@ fn do_export(
         files: false,
         directories: true,
         multiple: false,
-        prompt: Some("Export destination".into()),
+        prompt: Some(fastdir_locale::t(&lang, "exp.destination").into()),
     });
     view.update(cx, |_, cx| {
         cx.spawn_in(window, async move |this, cx| {
@@ -324,20 +345,25 @@ fn do_export(
                     .map_err(|e| e.to_string())
             });
             let result = job.await;
-            this.update_in(cx, |_, window, cx| match result {
+            this.update_in(cx, |this, window, cx| match result {
                 Ok((rows, dest)) => {
+                    let key = if rows == 1 { "exp.done_one" } else { "exp.done_many" };
                     window.push_notification(
-                        Notification::success(format!(
-                            "Exported {} {} to {}",
-                            format::count(rows as u64),
-                            if rows == 1 { "row" } else { "rows" },
-                            dest.display()
+                        Notification::success(this.tr_fmt(
+                            key,
+                            &[
+                                ("n", &this.count(rows as u64)),
+                                ("dest", &dest.display().to_string()),
+                            ],
                         )),
                         cx,
                     );
                 }
                 Err(e) => {
-                    window.push_notification(Notification::error(e).title("Export failed"), cx);
+                    window.push_notification(
+                        Notification::error(e).title(this.tr("exp.failed")),
+                        cx,
+                    );
                 }
             })
             .ok();

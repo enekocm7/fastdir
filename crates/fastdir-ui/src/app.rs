@@ -371,6 +371,7 @@ impl FastDir {
         let treemap = cx.new(|_| TreemapView::new());
         treemap.update(cx, |t, cx| {
             t.set_render(&render_opts, decimal_sizes, cx);
+            t.set_language(fastdir_locale::resolve(&settings.locale.language), cx);
         });
         let main_split = cx.new(|_| ResizableState::default());
         let top_split = cx.new(|_| ResizableState::default());
@@ -401,10 +402,14 @@ impl FastDir {
                 }
             },
         );
-        let search = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(format!("Search name or *.glob ({}+F)", platform::mod_key()))
-        });
+        let search_placeholder: SharedString = fastdir_locale::fmt(
+            &settings.locale.language,
+            "search.placeholder",
+            &[("mod", platform::mod_key())],
+        )
+        .into();
+        let search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(search_placeholder.clone()));
         let search_sub = cx.subscribe_in(
             &search,
             window,
@@ -620,14 +625,100 @@ impl FastDir {
         self.settings.list.size_unit == SizeUnit::Decimal
     }
 
+    /// Resolved UI language code (`en`, `es`, …).
+    pub(super) fn lang(&self) -> &'static str {
+        fastdir_locale::resolve(&self.settings.locale.language)
+    }
+
+    /// Localized string. Every key exists in English, so with the fallback
+    /// this never fails; unknown keys surface as-is for debugging.
+    pub(super) fn tr(&self, key: &'static str) -> &'static str {
+        fastdir_locale::t(&self.settings.locale.language, key)
+    }
+
+    /// Localized template with `{name}` placeholders filled in.
+    pub(super) fn tr_fmt(&self, key: &'static str, args: &[(&str, &str)]) -> String {
+        fastdir_locale::fmt(&self.settings.locale.language, key, args)
+    }
+
+    /// Localized tooltip for a modifier-key shortcut: fills `{mod}` with
+    /// Cmd on macOS, Ctrl everywhere else.
+    pub(super) fn mod_tip(&self, key: &'static str) -> String {
+        self.tr_fmt(key, &[("mod", platform::mod_key())])
+    }
+
+    /// OS-appropriate trash name for the current language.
+    pub(super) fn trash_name(&self) -> &'static str {
+        fastdir_locale::trash_name(&self.settings.locale.language)
+    }
+
+    /// OS-appropriate file-manager label for the current language.
+    pub(super) fn reveal_label(&self) -> &'static str {
+        fastdir_locale::reveal_label(&self.settings.locale.language)
+    }
+
+    /// Switch the interface language, persist it and repaint everything
+    /// (including the treemap hover labels, which cache their text).
+    pub(super) fn set_language(
+        &mut self,
+        code: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.locale.language = code.to_string();
+        self.settings.save();
+        let placeholder = self.mod_tip("search.placeholder");
+        self.search.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx);
+        });
+        let lang = self.lang();
+        self.treemap.update(cx, |t, cx| t.set_language(lang, cx));
+        cx.notify();
+    }
+
+    /// Integer with locale digit grouping.
+    pub(super) fn count(&self, n: u64) -> String {
+        fastdir_locale::format_count(n, &self.settings.locale.language)
+    }
+
+    /// Localized drive-kind name (`Local Disk`, `Disco local`, …).
+    pub(super) fn drive_kind_name(&self, kind: drives::DriveKind) -> &'static str {
+        fastdir_locale::drive_kind(kind.id(), &self.settings.locale.language)
+    }
+
+    /// Display name for a tree node: drive pseudo-items (`<Free space>`,
+    /// `<Unknown>`) are translated, everything else is shown as-is.
+    pub(super) fn display_name<'a>(&self, name: &'a str) -> &'a str {
+        fastdir_locale::special_display(name, &self.settings.locale.language).unwrap_or(name)
+    }
+
+    /// Display form of a file-system path: a trailing pseudo-item name is
+    /// translated (`C:\<Free space>`), everything else is shown as-is.
+    pub(super) fn display_fs_path(&self, full: &std::path::Path) -> String {
+        let text = full.display().to_string();
+        let tail = full.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if let Some(local) = fastdir_locale::special_display(tail, &self.settings.locale.language) {
+            let mut out = text;
+            out.truncate(out.len() - tail.len());
+            out.push_str(local);
+            out
+        } else {
+            text
+        }
+    }
+
     /// Size formatted with the configured unit system.
     pub(super) fn bytes(&self, n: u64) -> String {
         format::bytes_with(n, self.decimal_sizes())
     }
 
-    /// Timestamp formatted with the configured date style.
+    /// Timestamp formatted with the configured date style and locale.
     pub(super) fn date(&self, unix: i64) -> String {
-        format::date_with(unix, self.settings.list.date_format == DateFormat::Relative)
+        format::date_with_in(
+            unix,
+            self.settings.list.date_format == DateFormat::Relative,
+            &self.settings.locale.language,
+        )
     }
 
     /// Subtree share: of the parent folder, or of the whole scan.
@@ -641,7 +732,7 @@ impl FastDir {
                 .map(|p| p.size)
                 .unwrap_or(node.size)
         };
-        format::percent(node.size, whole)
+        format::percent_in(node.size, whole, &self.settings.locale.language)
     }
 
     pub(super) fn render_ready(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -750,10 +841,9 @@ impl FastDir {
                         .text_ellipsis()
                         .text_xs()
                         .text_color(theme.warning)
-                        .child(format!(
-                            "{} folders could not be read (access denied) — totals are incomplete",
-                            format::count(errors)
-                        )),
+                        .child(
+                            self.tr_fmt("banner.limited", &[("errors", &self.count(errors))]),
+                        ),
                 )
                 .when(!elevated, |d| {
                     d.child(
@@ -761,10 +851,8 @@ impl FastDir {
                             .small()
                             .outline()
                             .icon(IconName::Shield)
-                            .label("Restart as administrator")
-                            .tooltip(
-                                "Relaunch FastDir elevated so protected folders can be scanned",
-                            )
+                            .label(self.tr("banner.restart_admin"))
+                            .tooltip(self.tr("banner.restart_tip"))
                             .on_click(cx.listener(move |this, _, w, cx| {
                                 this.restart_elevated(root.clone(), w, cx)
                             })),
@@ -786,17 +874,16 @@ impl FastDir {
         match elevate::restart_as_admin(path.as_deref()) {
             Ok(()) => cx.quit(),
             Err(e) if e == "Elevation was cancelled" => {
+                let this = &*self;
                 window.push_notification(
-                    Notification::info(
-                        "Staying without elevation — protected folders will be skipped.",
-                    )
-                    .title("Elevation cancelled"),
+                    Notification::info(this.tr("banner.elev_cancelled_body"))
+                        .title(this.tr("banner.elev_cancelled_title")),
                     cx,
                 );
             }
             Err(e) => {
                 window.push_notification(
-                    Notification::error(e).title("Could not restart as administrator"),
+                    Notification::error(e).title(self.tr("banner.elev_failed_title")),
                     cx,
                 );
             }

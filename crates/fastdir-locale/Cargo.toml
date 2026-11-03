@@ -1,0 +1,12 @@
+[package]
+name = "fastdir-locale"
+version.workspace = true
+edition.workspace = true
+description = "UI string tables and locale-aware formatting for FastDir"
+repository.workspace = true
+
+[dependencies]
+chrono.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

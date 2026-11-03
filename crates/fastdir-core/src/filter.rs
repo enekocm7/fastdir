@@ -37,19 +37,32 @@ impl Filter {
         modified_after: &str,
         modified_before: &str,
     ) -> Result<Self, String> {
+        Self::parse_in(query, min_size, extension, modified_after, modified_before, "en")
+    }
+
+    /// [`Filter::parse`] with localized error messages.
+    pub fn parse_in(
+        query: &str,
+        min_size: &str,
+        extension: &str,
+        modified_after: &str,
+        modified_before: &str,
+        lang: &str,
+    ) -> Result<Self, String> {
         let min_size = if min_size.trim().is_empty() {
             0
         } else {
-            parse_size(min_size)
-                .ok_or_else(|| format!("Could not read the minimum size \"{min_size}\"."))?
+            parse_size(min_size).ok_or_else(|| {
+                fastdir_locale::fmt(lang, "filter.err_size", &[("input", min_size.trim())])
+            })?
         };
         let extension = normalise_extension(extension);
-        let modified_after = parse_day(modified_after, false)?;
-        let modified_before = parse_day(modified_before, true)?;
+        let modified_after = parse_day_in(modified_after, false, lang)?;
+        let modified_before = parse_day_in(modified_before, true, lang)?;
         if let (Some(after), Some(before)) = (modified_after, modified_before)
             && after > before
         {
-            return Err("The \"modified after\" date is later than \"before\".".into());
+            return Err(fastdir_locale::t(lang, "filter.err_range").into());
         }
         Ok(Self::new(
             query,
@@ -206,13 +219,13 @@ fn normalise_extension(input: &str) -> Option<String> {
 
 /// Parse `YYYY-MM-DD` in local time. `end` selects the last second of the day,
 /// so "before 2024-01-01" includes that whole day.
-fn parse_day(input: &str, end: bool) -> Result<Option<i64>, String> {
+fn parse_day_in(input: &str, end: bool, lang: &str) -> Result<Option<i64>, String> {
     let input = input.trim();
     if input.is_empty() {
         return Ok(None);
     }
     let date = NaiveDate::parse_from_str(input, "%Y-%m-%d")
-        .map_err(|_| format!("Could not read the date \"{input}\" (use YYYY-MM-DD)."))?;
+        .map_err(|_| fastdir_locale::fmt(lang, "filter.err_date_fmt", &[("input", input)]))?;
     let time = if end {
         date.and_hms_opt(23, 59, 59)
     } else {
@@ -222,7 +235,7 @@ fn parse_day(input: &str, end: bool) -> Result<Option<i64>, String> {
     let local = Local
         .from_local_datetime(&time)
         .earliest()
-        .ok_or_else(|| format!("The date \"{input}\" is not valid in this time zone."))?;
+        .ok_or_else(|| fastdir_locale::fmt(lang, "filter.err_date_zone", &[("input", input)]))?;
     Ok(Some(local.timestamp()))
 }
 

@@ -11,6 +11,7 @@ fastdir-core.workspace = true
 fastdir-treemap.workspace = true
 fastdir-updater.workspace = true
 fastdir-settings.workspace = true
+fastdir-locale.workspace = true
 image.workspace = true
 smallvec.workspace = true
 parking_lot.workspace = true

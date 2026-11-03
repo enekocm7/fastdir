@@ -42,13 +42,15 @@ impl FastDir {
 
     /// Parse the form and rebuild the tree with the result.
     fn rebuild_filter(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let lang = self.settings.locale.language.clone();
         let form = &self.filter_form;
-        let filter = Filter::parse(
+        let filter = Filter::parse_in(
             &form.query,
             &form.min_size,
             &form.extension,
             &form.modified_after,
             &form.modified_before,
+            &lang,
         )?;
         self.filter = filter;
         self.tab = ListTab::Tree;
@@ -67,17 +69,20 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let filter = match Filter::parse(
+        let lang = self.settings.locale.language.clone();
+        let rejected = self.tr("filter.rejected");
+        let filter = match Filter::parse_in(
             &form.query,
             &form.min_size,
             &form.extension,
             &form.modified_after,
             &form.modified_before,
+            &lang,
         ) {
             Ok(filter) => filter,
             Err(error) => {
                 window.push_notification(
-                    Notification::warning(error).title("Filter not applied"),
+                    Notification::warning(error).title(rejected),
                     cx,
                 );
                 return false;
@@ -130,27 +135,38 @@ impl FastDir {
             return;
         }
         let form = self.filter_form.clone();
+        let ex_size = self.tr("filter.ex_size");
+        let ex_ext = self.tr("filter.ex_ext");
+        let date_ph = self.tr("filter.date_ph");
         let min_size = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("e.g. 100 MB")
+                .placeholder(ex_size)
                 .default_value(form.min_size)
         });
         let extension = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("e.g. iso")
+                .placeholder(ex_ext)
                 .default_value(form.extension)
         });
         let after = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("YYYY-MM-DD")
+                .placeholder(date_ph)
                 .default_value(form.modified_after)
         });
         let before = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("YYYY-MM-DD")
+                .placeholder(date_ph)
                 .default_value(form.modified_before)
         });
-
+        let title = self.tr("filter.title");
+        let f_min = self.tr("filter.min_size");
+        let f_ext = self.tr("filter.ext");
+        let f_after = self.tr("filter.after");
+        let f_before = self.tr("filter.before");
+        let f_hint = self.tr("filter.hint");
+        let f_clear = self.tr("action.clear");
+        let f_cancel = self.tr("action.cancel");
+        let f_apply = self.tr("action.apply");
         let entity = cx.entity().downgrade();
         let (min_apply, ext_apply) = (min_size.clone(), extension.clone());
         let (after_apply, before_apply) = (after.clone(), before.clone());
@@ -189,24 +205,24 @@ impl FastDir {
                     .child(Input::new(input).small())
             };
             dialog
-                .title("Filters")
+                .title(title)
                 .w(px(480.))
                 .child(
                     v_flex()
                         .gap_3()
-                        .child(field("Minimum size (bytes, KB, MB, GB…)", &min_size))
-                        .child(field("Extension (e.g. iso or .iso)", &extension))
+                        .child(field(f_min, &min_size))
+                        .child(field(f_ext, &extension))
                         .child(
                             h_flex()
                                 .gap_3()
-                                .child(div().flex_1().child(field("Modified after", &after)))
-                                .child(div().flex_1().child(field("Modified before", &before))),
+                                .child(div().flex_1().child(field(f_after, &after)))
+                                .child(div().flex_1().child(field(f_before, &before))),
                         )
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(theme.muted_foreground)
-                                .child("Dates are local, YYYY-MM-DD, and include the whole day."),
+                                .child(f_hint),
                         ),
                 )
                 .footer(
@@ -220,7 +236,7 @@ impl FastDir {
                             let entity = entity.clone();
                             Button::new("filters-clear")
                                 .outline()
-                                .label("Clear")
+                                .label(f_clear)
                                 .on_click(move |_, window, cx| {
                                     for input in [&min, &ext, &after, &before] {
                                         input.update(cx, |input, cx| {
@@ -236,13 +252,13 @@ impl FastDir {
                         .child(
                             Button::new("filters-cancel")
                                 .outline()
-                                .label("Cancel")
+                                .label(f_cancel)
                                 .on_click(|_, window, cx| window.close_dialog(cx)),
                         )
                         .child(
                             Button::new("filters-apply")
                                 .primary()
-                                .label("Apply")
+                                .label(f_apply)
                                 .on_click(move |_, window, cx| {
                                     if ok(window, cx) {
                                         window.close_dialog(cx);
@@ -258,9 +274,9 @@ impl FastDir {
         let ready = matches!(self.phase, Phase::Ready);
         let active = self.filter_form.active_count();
         let label = if active > 0 {
-            format!("Filters ({active})")
+            self.tr_fmt("filter.active", &[("n", &active.to_string())])
         } else {
-            "Filters".to_string()
+            self.tr("filter.plain").to_string()
         };
         h_flex()
             .gap_1()
@@ -284,10 +300,7 @@ impl FastDir {
                     .small()
                     .icon(IconName::Funnel)
                     .label(label)
-                    .tooltip(format!(
-                        "Minimum size, extension, modified date ({}+Shift+F)",
-                        platform::mod_key()
-                    ))
+                    .tooltip(self.mod_tip("filter.tooltip"))
                     .disabled(!ready)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_filters(&OpenFilters, window, cx)

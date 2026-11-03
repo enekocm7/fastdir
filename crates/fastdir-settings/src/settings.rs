@@ -4,7 +4,7 @@
 //! Everything the app remembers between launches lives here, grouped into
 //! sections so the file stays readable as it grows: what to scan, how the
 //! treemap and the file list look, which file operations confirm, what
-//! happens on startup, and the updater state. Settings written by older
+//! happens on startup, the updater state, and the interface language.
 //! versions (flat `config.toml` keys or `settings.json`) are migrated on
 //! first load, so every field keeps `#[serde(default)]`.
 
@@ -391,11 +391,39 @@ impl Default for UpdateSettings {
     }
 }
 
+/// Interface language (`[locale] language`). `system` follows the Windows
+/// display language; any other value is a language code such as `en` or
+/// `es` (region variants like `es-MX` fall back to their base language,
+/// unknown values to English). New configs default to `system` so the
+/// first launch matches Windows; existing files keep loading because the
+/// field (and the whole section) deserializes with a default.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocaleSettings {
+    /// Language code (`en`, `es`, …) or `system` to follow Windows.
+    /// Missing values re-detect the OS language so old files keep working.
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+/// The default for a fresh config: the OS display language resolved to a
+/// supported code, with an English fallback.
+fn default_language() -> String {
+    fastdir_locale::system_language().to_string()
+}
+
+impl Default for LocaleSettings {
+    fn default() -> Self {
+        Self {
+            language: default_language(),
+        }
+    }
+}
+
 /// Light, dark, or follow Windows; plus the interface scale.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct AppearanceSettings {
-    pub theme: ThemePreference,
+pub struct AppearanceSettings {    pub theme: ThemePreference,
     /// Interface scale factor (1.0 = 100%), separate from Windows DPI.
     /// Applied to the window's rem size, so text and rem-based layout grow.
     pub ui_scale: f32,
@@ -444,6 +472,8 @@ pub struct Settings {
     pub appearance: AppearanceSettings,
     /// Explorer context menu and single-instance behaviour.
     pub integration: IntegrationSettings,
+    /// Interface language.
+    pub locale: LocaleSettings,
     /// Last window geometry, restored on the next launch.
     pub window: Option<WindowState>,
     /// Last divider positions.
@@ -463,6 +493,7 @@ impl Default for Settings {
             updates: UpdateSettings::default(),
             appearance: AppearanceSettings::default(),
             integration: IntegrationSettings::default(),
+            locale: LocaleSettings::default(),
             window: None,
             panels: PanelSizes::default(),
             sort: SortSettings::default(),
@@ -578,6 +609,7 @@ impl From<LegacySettings> for Settings {
                 ..AppearanceSettings::default()
             },
             integration: IntegrationSettings::default(),
+            locale: LocaleSettings::default(),
             window: old.window,
             panels: old.panels,
             // Written before the sort lived in `[list]`; keep both in step.
@@ -589,7 +621,7 @@ impl From<LegacySettings> for Settings {
 /// Top-level section names of the current format. A file containing any of
 /// them is parsed as [`Settings`]; anything else falls back to the legacy
 /// flat keys so old files keep loading.
-const SECTION_KEYS: [&str; 8] = [
+const SECTION_KEYS: [&str; 9] = [
     "scan",
     "treemap",
     "list",
@@ -598,6 +630,7 @@ const SECTION_KEYS: [&str; 8] = [
     "updates",
     "appearance",
     "integration",
+    "locale",
 ];
 
 fn parse_current(text: &str) -> Option<Settings> {
@@ -684,6 +717,10 @@ mod tests {
         assert!(s.ops.confirm_recycle);
         assert_eq!(s.ops.default_delete, DeleteAction::Recycle);
         assert_eq!(s.updates.channel, UpdateChannel::Stable);
+        assert!(
+            fastdir_locale::is_supported(&s.locale.language) || s.locale.language == "system",
+            "fresh default follows the OS language or falls back to English"
+        );
     }
 
     #[test]
@@ -771,6 +808,9 @@ mod tests {
                 context_menu: false,
                 single_instance: true,
             },
+            locale: LocaleSettings {
+                language: "es".into(),
+            },
             window: Some(WindowState {
                 x: 10.5,
                 y: 20.5,
@@ -790,8 +830,19 @@ mod tests {
         let text = toml::to_string_pretty(&s).unwrap();
         assert!(text.contains("[scan]"), "sections keep the file readable");
         assert!(text.contains("[treemap]"));
+        assert!(text.contains("[locale]"), "the language section is written out");
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn locale_section_parses_and_old_files_keep_loading() {
+        let s: Settings = toml::from_str("[locale]\nlanguage = \"es\"\n").unwrap();
+        assert_eq!(s.locale.language, "es");
+        // Files predating the section fall back to the OS language.
+        let old: Settings = toml::from_str("[scan]\ncross_volumes = false\n").unwrap();
+        assert!(!old.scan.cross_volumes);
+        assert!(!old.locale.language.is_empty());
     }
 
     #[test]
