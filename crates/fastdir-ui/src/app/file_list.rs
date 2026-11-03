@@ -180,9 +180,76 @@ impl FastDir {
                 .and_then(|sel| self.rows.iter().position(|r| r.path == sel))
                 .or_else(|| (!self.rows.is_empty()).then_some(0));
         }
-        self.ext_rows = (0..tree.exts.len() as u16)
-            .filter(|&i| tree.exts[i as usize].files > 0)
-            .collect();
+        self.rebuild_ext_rows(&tree);
+    }
+
+    /// Rebuild the extension panel rows for the current grouping mode.
+    fn rebuild_ext_rows(&mut self, tree: &Tree) {
+        self.ext_rows.clear();
+        match self.settings.list.ext_grouping {
+            ExtGrouping::Extension => {
+                self.ext_rows = (0..tree.exts.len() as u16)
+                    .filter(|&i| tree.exts[i as usize].files > 0)
+                    .map(|ext| ExtRow::Extension { ext })
+                    .collect();
+            }
+            ExtGrouping::Category => {
+                let totals = tree.category_totals();
+                let mut categories: Vec<(FileCategory, u64)> = FileCategory::ALL
+                    .into_iter()
+                    .filter(|cat| totals[cat.index()].files > 0)
+                    .map(|cat| (cat, totals[cat.index()].bytes))
+                    .collect();
+                categories.sort_unstable_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+                for (category, _) in categories {
+                    self.ext_rows.push(ExtRow::Category(category));
+                    if self.expanded_categories.contains(&category) {
+                        self.ext_rows.extend(
+                            tree.exts
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, e)| e.files > 0 && e.category == category)
+                                .map(|(ext, _)| ExtRow::Extension { ext: ext as u16 }),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Switch the extension panel between the flat extension list and the
+    /// category breakdown.
+    pub(super) fn set_ext_grouping(&mut self, grouping: ExtGrouping, cx: &mut Context<Self>) {
+        if self.settings.list.ext_grouping == grouping {
+            return;
+        }
+        self.settings.list.ext_grouping = grouping;
+        self.settings.save();
+        // A highlight from the other view would keep dimming the treemap
+        // with no visible row selected, so clear it.
+        self.set_selected_ext(None, cx);
+        if let Some(tree) = self.tree.clone() {
+            let tree = tree.read();
+            self.rebuild_ext_rows(&tree);
+        }
+        self.ext_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        cx.notify();
+    }
+
+    /// Expand or collapse one category in the category view.
+    pub(super) fn toggle_category_expanded(
+        &mut self,
+        category: FileCategory,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.expanded_categories.remove(&category) {
+            self.expanded_categories.insert(category);
+        }
+        if let Some(tree) = self.tree.clone() {
+            let tree = tree.read();
+            self.rebuild_ext_rows(&tree);
+        }
+        cx.notify();
     }
 
     pub(super) fn set_expanded(
@@ -508,11 +575,29 @@ impl FastDir {
 
     /// Highlight one extension in the treemap (`None` clears it).
     pub(super) fn set_selected_ext(&mut self, ext: Option<u16>, cx: &mut Context<Self>) {
-        if self.selected_ext == ext {
+        if self.selected_ext == ext && self.selected_category.is_none() {
             return;
         }
         self.selected_ext = ext;
+        self.selected_category = None;
         self.treemap.update(cx, |t, cx| t.set_highlight(ext, cx));
+        cx.notify();
+    }
+
+    /// Highlight every file in one category in the treemap (`None` clears it).
+    pub(super) fn set_selected_category(
+        &mut self,
+        category: Option<FileCategory>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_category == category && self.selected_ext.is_none() {
+            return;
+        }
+        self.selected_category = category;
+        self.selected_ext = None;
+        let index = category.map(|c| c.index() as u8);
+        self.treemap
+            .update(cx, |t, cx| t.set_highlight_category(index, cx));
         cx.notify();
     }
 
@@ -526,16 +611,32 @@ impl FastDir {
         self.set_selected_ext(ext, cx);
     }
 
-    /// A selected file row also highlights that file's extension.
+    /// Clicking a category row toggles its treemap highlight.
+    pub(super) fn toggle_category(&mut self, category: FileCategory, cx: &mut Context<Self>) {
+        let category = if self.selected_category == Some(category) {
+            None
+        } else {
+            Some(category)
+        };
+        self.set_selected_category(category, cx);
+    }
+
+    /// A selected file row also highlights that file's extension (or its
+    /// category, when the treemap is coloured by category).
     pub(super) fn highlight_ext_of_row(&mut self, ix: usize, cx: &mut Context<Self>) {
-        let ext = self.tree.as_ref().and_then(|tree| {
+        let info = self.tree.as_ref().and_then(|tree| {
             let tree = tree.read();
             let row = self.rows.get(ix)?;
             let node = tree.get(&row.path)?;
-            (!node.is_dir() && node.ext != NO_EXT).then_some(node.ext)
+            (!node.is_dir() && node.ext != NO_EXT)
+                .then_some((node.ext, tree.ext_category(node.ext)))
         });
-        if let Some(ext) = ext {
-            self.set_selected_ext(Some(ext), cx);
+        if let Some((ext, category)) = info {
+            if self.settings.treemap.color_mode == TreemapColorMode::Category {
+                self.set_selected_category(Some(category), cx);
+            } else {
+                self.set_selected_ext(Some(ext), cx);
+            }
         }
     }
 
@@ -1129,88 +1230,198 @@ impl FastDir {
         let tree = tree.read();
         let theme = cx.theme();
         let total = tree.root().size.max(1);
+        let totals = tree.category_totals();
         let muted = theme.muted_foreground;
         let even = theme.list_even;
         let active = theme.list_active;
         let active_border = theme.list_active_border;
         let hover = theme.list_hover;
-        let selected = self.selected_ext;
+        let selected_ext = self.selected_ext;
+        let selected_category = self.selected_category;
+        let grouped = self.settings.list.ext_grouping == ExtGrouping::Category;
+        let palette = palette_of(self.settings.treemap.palette);
+        let lang = self.settings.locale.language.clone();
+        let category_total: u64 = totals.iter().map(|t| t.bytes).sum();
         let mut out = Vec::with_capacity(range.len());
         for ix in range {
-            let Some(&ext) = self.ext_rows.get(ix) else {
+            let Some(&row) = self.ext_rows.get(ix) else {
                 continue;
             };
-            let Some(e) = tree.exts.get(ext as usize) else {
-                continue;
-            };
-            let (r, g, b) = treemap::ext_color_with(
-                palette_of(self.settings.treemap.palette),
-                ext,
-            );
-            let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
-            let is_sel = selected == Some(ext);
-            let bytes_s = self.bytes(e.bytes);
-            out.push(
-                h_flex()
-                    .id(("ext", ix))
-                    .h(sp(ROW_H))
-                    .w_full()
-                    .px_2()
-                    .gap_2()
-                    .text_xs()
-                    .cursor_pointer()
-                    .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
-                    .when(is_sel, |d| {
-                        d.bg(active).border_l_2().border_color(active_border)
-                    })
-                    .when(!is_sel, |d| {
-                        d.border_l_2()
-                            .border_color(transparent_black())
-                            .hover(|s| s.bg(hover))
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            this.focus.focus(window, cx);
-                            this.toggle_ext(ext, cx);
-                        }),
-                    )
-                    .child(div().size(sp(10.)).rounded_sm().flex_shrink_0().bg(color))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(sp(50.))
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .child(SharedString::from(e.name.to_string())),
-                    )
-                    .child(
-                        div()
-                            .w(sp(70.))
-                            .text_right()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(bytes_s),
-                    )
-                    .child(
-                        div()
-                            .w(sp(48.))
-                            .text_right()
-                            .text_color(muted)
-                            .child(format::percent_in(
-                                e.bytes,
-                                total,
-                                &self.settings.locale.language,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w(sp(64.))
-                            .text_right()
-                            .text_color(muted)
-                            .child(self.count(e.files)),
-                    )
-                    .into_any_element(),
-            );
+            match row {
+                ExtRow::Category(category) => {
+                    let cat_total = &totals[category.index()];
+                    let (r, g, b) = treemap::category_color(category.index());
+                    let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
+                    let is_sel = selected_category == Some(category);
+                    let expanded = self.expanded_categories.contains(&category);
+                    let frac = cat_total.bytes as f32 / category_total.max(1) as f32;
+                    out.push(
+                        h_flex()
+                            .id(("cat", ix))
+                            .relative()
+                            .h(sp(ROW_H))
+                            .w_full()
+                            .px_2()
+                            .gap_2()
+                            .text_xs()
+                            .cursor_pointer()
+                            .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
+                            .when(is_sel, |d| {
+                                d.bg(active).border_l_2().border_color(active_border)
+                            })
+                            .when(!is_sel, |d| {
+                                d.border_l_2()
+                                    .border_color(transparent_black())
+                                    .hover(|s| s.bg(hover))
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.focus.focus(window, cx);
+                                    this.toggle_category(category, cx);
+                                }),
+                            )
+                            .child(
+                                div()
+                                    .id(("cat-chev", ix))
+                                    .size(sp(16.))
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_sm()
+                                    .hover(|s| s.bg(hover))
+                                    .child(
+                                        Icon::new(if expanded {
+                                            IconName::ChevronDown
+                                        } else {
+                                            IconName::ChevronRight
+                                        })
+                                        .xsmall()
+                                        .text_color(muted),
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.focus.focus(window, cx);
+                                            this.toggle_category_expanded(category, cx);
+                                        }),
+                                    ),
+                            )
+                            .child(div().size(sp(10.)).rounded_sm().flex_shrink_0().bg(color))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(sp(50.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(SharedString::from(
+                                        fastdir_locale::category_name(category.id(), &lang)
+                                            .to_string(),
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(70.))
+                                    .text_right()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(self.bytes(cat_total.bytes)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(48.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(format::percent_in(cat_total.bytes, total, &lang)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(64.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(self.count(cat_total.files)),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .bottom_0()
+                                    .h(px(2.))
+                                    .w(relative(frac.clamp(0.0, 1.0)))
+                                    .bg(color),
+                            )
+                            .into_any_element(),
+                    );
+                }
+                ExtRow::Extension { ext } => {
+                    let Some(e) = tree.exts.get(ext as usize) else {
+                        continue;
+                    };
+                    let (r, g, b) = treemap::ext_color_with(palette, ext);
+                    let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
+                    let is_sel = selected_ext == Some(ext);
+                    out.push(
+                        h_flex()
+                            .id(("ext", ix))
+                            .h(sp(ROW_H))
+                            .w_full()
+                            .px_2()
+                            .gap_2()
+                            .text_xs()
+                            .cursor_pointer()
+                            .when(ix % 2 == 1 && !is_sel, |d| d.bg(even))
+                            .when(is_sel, |d| {
+                                d.bg(active).border_l_2().border_color(active_border)
+                            })
+                            .when(!is_sel, |d| {
+                                d.border_l_2()
+                                    .border_color(transparent_black())
+                                    .hover(|s| s.bg(hover))
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.focus.focus(window, cx);
+                                    this.toggle_ext(ext, cx);
+                                }),
+                            )
+                            .when(grouped, |d| d.child(div().w(sp(16.)).flex_shrink_0()))
+                            .child(div().size(sp(10.)).rounded_sm().flex_shrink_0().bg(color))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(sp(50.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(SharedString::from(e.name.to_string())),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(70.))
+                                    .text_right()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(self.bytes(e.bytes)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(48.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(format::percent_in(e.bytes, total, &lang)),
+                            )
+                            .child(
+                                div()
+                                    .w(sp(64.))
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child(self.count(e.files)),
+                            )
+                            .into_any_element(),
+                    );
+                }
+            }
         }
         out
     }
@@ -1218,13 +1429,79 @@ impl FastDir {
     pub(super) fn render_ext_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let count = self.ext_rows.len();
+        let grouped = self.settings.list.ext_grouping == ExtGrouping::Category;
+        let language = self.settings.locale.language.clone();
+        let totals = if grouped {
+            self.tree.as_ref().map(|tree| tree.read().category_totals())
+        } else {
+            None
+        };
+        let category_total: u64 = totals
+            .as_ref()
+            .map(|t| t.iter().map(|c| c.bytes).sum())
+            .unwrap_or(0);
         v_flex()
             .size_full()
             .border_l_1()
             .border_color(theme.border)
             .child(
                 h_flex()
-                    .h(sp(28.))
+                    .h(sp(24.))
+                    .flex_shrink_0()
+                    .px_2()
+                    .gap_1()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .bg(theme.list_head)
+                    .text_xs()
+                    .child(
+                        h_flex()
+                            .id("ext-grouping")
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .id("ext-by-extension")
+                                    .px_1()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .when(!grouped, |d| d.bg(theme.list_active))
+                                    .hover(|s| s.bg(theme.list_hover))
+                                    .child(SharedString::from(
+                                        fastdir_locale::t(&language, "list.by_extension")
+                                            .to_string(),
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.set_ext_grouping(ExtGrouping::Extension, cx);
+                                        }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("ext-by-category")
+                                    .px_1()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .when(grouped, |d| d.bg(theme.list_active))
+                                    .hover(|s| s.bg(theme.list_hover))
+                                    .child(SharedString::from(
+                                        fastdir_locale::t(&language, "list.by_category")
+                                            .to_string(),
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.set_ext_grouping(ExtGrouping::Category, cx);
+                                        }),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .h(sp(24.))
                     .flex_shrink_0()
                     .px_2()
                     .gap_2()
@@ -1235,11 +1512,46 @@ impl FastDir {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.muted_foreground)
                     .child(div().w(sp(10.)))
-                    .child(div().flex_1().min_w(sp(50.)).child(self.tr("list.ext_col")))
-                    .child(div().w(sp(70.)).text_right().child(self.tr("list.bytes_col")))
+                    .child(div().flex_1().min_w(sp(50.)).child(if grouped {
+                        self.tr("list.category_col")
+                    } else {
+                        self.tr("list.ext_col")
+                    }))
+                    .child(
+                        div()
+                            .w(sp(70.))
+                            .text_right()
+                            .child(self.tr("list.bytes_col")),
+                    )
                     .child(div().w(sp(48.)).text_right().child(self.tr("list.col_pct")))
-                    .child(div().w(sp(64.)).text_right().child(self.tr("list.files_col"))),
+                    .child(
+                        div()
+                            .w(sp(64.))
+                            .text_right()
+                            .child(self.tr("list.files_col")),
+                    ),
             )
+            .when_some(totals.filter(|_| category_total > 0), |this, totals| {
+                this.child(
+                    h_flex()
+                        .h(sp(14.))
+                        .w_full()
+                        .flex_shrink_0()
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .bg(theme.list_head)
+                        .children(totals.iter().enumerate().filter(|(_, t)| t.bytes > 0).map(
+                            |(index, t)| {
+                                let (r, g, b) = treemap::category_color(index);
+                                let color = rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32);
+                                div()
+                                    .h_full()
+                                    .w(relative(t.bytes as f32 / category_total.max(1) as f32))
+                                    .bg(color)
+                            },
+                        )),
+                )
+            })
             .child(
                 div()
                     .id("ext-body")

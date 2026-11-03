@@ -382,6 +382,25 @@ pub fn special_display(canonical: &str, lang: &str) -> Option<&'static str> {
     }
 }
 
+/// Localized name for a file-type category id (`video`, `images`, `audio`,
+/// `archives`, `documents`, `code`, `executables`, `disk_images`, `system`,
+/// `other`; see `FileCategory::id` in `fastdir_core`).
+pub fn category_name(id: &str, lang: &str) -> &'static str {
+    let key = match id {
+        "video" => "category.video",
+        "images" => "category.images",
+        "audio" => "category.audio",
+        "archives" => "category.archives",
+        "documents" => "category.documents",
+        "code" => "category.code",
+        "executables" => "category.executables",
+        "disk_images" => "category.disk_images",
+        "system" => "category.system",
+        _ => "category.other",
+    };
+    lookup_static(lang, key)
+}
+
 /// Localized name for a drive-kind id (`fixed`, `removable`, `network`,
 /// `optical`, `ram`, `unknown`; see `DriveKind::id` in `fastdir_core`).
 pub fn drive_kind(id: &str, lang: &str) -> &'static str {    let key = match id {
@@ -456,6 +475,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn category_names_are_localized() {
+        assert_eq!(category_name("video", "en"), "Video");
+        assert_eq!(category_name("video", "es"), "Vídeo");
+        assert_eq!(category_name("disk_images", "de"), "Datenträgerabbilder");
+        assert_eq!(category_name("other", "ja"), "その他");
+        // Unknown ids fall back to "Other".
+        assert_eq!(category_name("nope", "en"), "Other");
     }
 
     #[test]

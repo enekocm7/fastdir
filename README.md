@@ -52,7 +52,12 @@ culprit? Rename, move, recycle or delete it right there.
   - **Top files** – a flat, sortable list of the N largest files in the whole
     scan (bounded heap, default 1,000), the quickest way to find cleanup
     targets.
-  - **Extension list** with the colour each type has in the treemap.
+  - **Extension list** with the colour each type has in the treemap. A
+    *By category / By extension* switch groups extensions into file-type
+    categories (video, images, audio, archives, documents, code, executables,
+    disk images, system and other), expandable to their extensions, with a
+    stacked share bar. Clicking a category highlights its files in the
+    treemap, which can also be coloured by category.
   - **Cushion treemap** (squarified, SequoiaView-style shading), rendered on
     the CPU in parallel and drawn as one image. Hover to see a path, click
     to find the item in the tree, double-click to open it. Zoom into any
@@ -105,7 +110,15 @@ newer version exists, a notification and a toolbar button offer **Update now**
 this version**. Use the toolbar's `…` menu to check manually or to turn the
 automatic check off. All settings live in `%APPDATA%\FastDir\config.toml`,
 grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
-`[appearance]`, `[integration]` and `[locale]` sections (older config files migrate automatically).
+`[appearance]`, `[integration]`, `[locale]` and `[categories]` sections (older
+config files migrate automatically). Unknown extensions fall into *Other*;
+move or add extensions to a category in `[categories]`:
+
+```toml
+[categories]
+video = ["mp4", "m4v", "custom-video"]
+documents = ["pdf", "txt", "my-notes"]
+```
 
 ## Usage
 

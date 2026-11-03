@@ -91,6 +91,26 @@ pub const FREE_SPACE_COLOR: (u8, u8, u8) = (128, 128, 128);
 pub const UNKNOWN_COLOR: (u8, u8, u8) = (255, 255, 0);
 const OTHER: (u8, u8, u8) = (200, 200, 200);
 
+/// One colour per file-type category, in `FileCategory::ALL` order.
+const CATEGORY_PALETTE: [(u8, u8, u8); 10] = [
+    (0, 114, 178),   // video
+    (0, 158, 115),   // images
+    (204, 121, 167), // audio
+    (230, 159, 0),   // archives
+    (213, 94, 0),    // documents
+    (86, 180, 233),  // code
+    (117, 112, 179), // executables
+    (240, 228, 66),  // disk images
+    (150, 150, 150), // system
+    (200, 200, 200), // other
+];
+
+/// The display colour for a file-type category index
+/// ([`fastdir_core::categories::FileCategory::index`]).
+pub fn category_color(category: usize) -> (u8, u8, u8) {
+    CATEGORY_PALETTE.get(category).copied().unwrap_or(OTHER)
+}
+
 /// Normalise so channel overflow spills into the others (keeps hue, avoids clipping).
 fn normalize(r: &mut f64, g: &mut f64, b: &mut f64) {
     if *r > 255.0 {
@@ -319,13 +339,14 @@ pub fn age_bucket_totals(
     std::array::from_fn(|i| (AgeBucket::ALL[i], totals[i]))
 }
 
-fn shade_node(node: &Node, opts: &RenderOptions) -> [f64; 3] {
+fn shade_node(tree: &Tree, node: &Node, opts: &RenderOptions) -> [f64; 3] {
     let rgb = match node.kind() {
         NodeKind::FreeSpace => FREE_SPACE_COLOR,
         NodeKind::Unknown => UNKNOWN_COLOR,
         _ => match opts.color_mode {
             ColorMode::Extension => ext_color_with(opts.palette, node.ext),
             ColorMode::Age => age_color(node.modified(), opts.now, opts.palette),
+            ColorMode::Category => category_color(tree.ext_category(node.ext).index()),
         },
     };
     bright_color(rgb)
@@ -460,6 +481,8 @@ pub enum ColorMode {
     Extension,
     /// Colour by age: new files are warm, old files are cold.
     Age,
+    /// Colour by file-type category (video, images, archives, ...).
+    Category,
 }
 
 /// Everything about how a treemap looks. Passed as one struct so new display
@@ -467,8 +490,11 @@ pub enum ColorMode {
 #[derive(Clone, Copy, Debug)]
 pub struct RenderOptions {
     /// Extension rank in full colour, everything else dimmed. Ignored when
-    /// [`ColorMode::Age`] is active (there is no extension to highlight).
+    /// [`ColorMode::Age`] or [`ColorMode::Category`] is active.
     pub highlight: Option<u16>,
+    /// Category index in full colour, everything else dimmed. Takes
+    /// precedence over `highlight` when both are set.
+    pub highlight_category: Option<u8>,
     /// Lay out the `<Free space>` pseudo-item.
     pub show_free: bool,
     /// Lay out the `<Unknown>` pseudo-item.
@@ -493,6 +519,7 @@ impl Default for RenderOptions {
     fn default() -> Self {
         Self {
             highlight: None,
+            highlight_category: None,
             show_free: false,
             show_unknown: false,
             use_disk: false,
@@ -808,10 +835,17 @@ fn draw(
         node.is_dir() && size > 0 && !children.is_empty() && rc.w() >= min && rc.h() >= min;
     if !subdivide {
         let ext = tree.dominant_ext(node);
-        let mut color = shade_node(node, opts);
-        // Extension highlighting only makes sense when colouring by
-        // extension; in age mode every leaf keeps its own colour.
-        if opts.color_mode == ColorMode::Extension && opts.highlight.is_some_and(|hl| hl != ext) {
+        let mut color = shade_node(tree, node, opts);
+        // A category highlight works in every colour mode. Otherwise
+        // extension highlighting only applies when colouring by extension;
+        // in age and category modes every leaf keeps its own colour.
+        if let Some(want) = opts.highlight_category {
+            if want as usize != tree.ext_category(ext).index() {
+                color = dim_color(color);
+            }
+        } else if opts.color_mode == ColorMode::Extension
+            && opts.highlight.is_some_and(|hl| hl != ext)
+        {
             color = dim_color(color);
         }
         // Cell borders: shrink the leaf so a hairline of background shows.
@@ -1158,6 +1192,33 @@ mod tests {
         assert_eq!(ext_color(0), (0, 0, 255));
         assert_eq!(ext_color(1), (255, 0, 0));
         assert_eq!(ext_color(u16::MAX - 1), (200, 200, 200));
+    }
+
+    #[test]
+    fn category_colours_are_distinct_and_indexed() {
+        use fastdir_core::categories::FileCategory;
+        let mut seen = Vec::new();
+        for category in FileCategory::ALL {
+            let colour = category_color(category.index());
+            assert!(!seen.contains(&colour), "duplicate {colour:?}");
+            seen.push(colour);
+        }
+        assert_eq!(category_color(usize::MAX), OTHER);
+    }
+
+    #[test]
+    fn category_mode_and_highlight_render_opaque_buffers() {
+        let tree = files_tree(&[("video.mp4", 6, 6), ("notes.txt", 4, 4)]);
+        let opts = RenderOptions {
+            color_mode: ColorMode::Category,
+            highlight_category: Some(
+                fastdir_core::categories::builtin_category("txt").index() as u8,
+            ),
+            ..RenderOptions::default()
+        };
+        let buf = render(&tree, tree.root(), 16, 16, [24, 24, 27], &opts);
+        assert_eq!(buf.len(), 16 * 16 * 4);
+        assert!(buf.chunks_exact(4).all(|px| px[3] == 255));
     }
 
     #[test]

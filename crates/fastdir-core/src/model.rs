@@ -16,6 +16,7 @@
 //! The scanner writes each directory's block straight into the arena when the
 //! directory is done, so there is no second copy of the tree at any point.
 
+use crate::categories::{CategoryMap, FileCategory};
 use rayon::prelude::*;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -549,6 +550,15 @@ pub struct ExtStat {
     pub name: Box<str>,
     pub bytes: u64,
     pub files: u64,
+    /// Coarse group this extension belongs to (see [`CategoryMap`]).
+    pub category: FileCategory,
+}
+
+/// Bytes and file count in one file-type category.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CategoryTotal {
+    pub bytes: u64,
+    pub files: u64,
 }
 
 /// One file in a flat "largest files" list.
@@ -578,6 +588,8 @@ pub struct Tree {
     /// Extensions sorted by total bytes, largest first. A file's `ext` indexes this.
     pub exts: Vec<ExtStat>,
     ext_index: HashMap<Box<str>, u16>,
+    /// Built-in extension categories plus the user's `[categories]` overrides.
+    categories: CategoryMap,
     /// Bumped on every mutation so caches (treemap image) know to refresh.
     pub generation: u64,
     /// Name bytes no longer used by any node.
@@ -603,6 +615,7 @@ impl Tree {
             root_path,
             exts: Vec::new(),
             ext_index: HashMap::new(),
+            categories: CategoryMap::new(),
             generation: 1,
             dead_name_bytes: 0,
         };
@@ -653,6 +666,7 @@ impl Tree {
         let mut exts: Vec<ExtStat> = stats
             .into_iter()
             .map(|(name, (bytes, files))| ExtStat {
+                category: self.categories.category(&name),
                 name: name.into_boxed_str(),
                 bytes,
                 files,
@@ -705,6 +719,44 @@ impl Tree {
     #[inline]
     pub fn ext_name(&self, node: &Node) -> Option<&str> {
         self.exts.get(node.ext as usize).map(|e| &*e.name)
+    }
+
+    /// The built-in category table plus the user's overrides.
+    #[inline]
+    pub fn categories(&self) -> &CategoryMap {
+        &self.categories
+    }
+
+    /// Replace the category table (e.g. with `[categories]` overrides) and
+    /// re-stamp every extension. Bumps the generation so the treemap redraws.
+    pub fn set_category_map(&mut self, categories: CategoryMap) {
+        self.categories = categories;
+        for ext in &mut self.exts {
+            ext.category = self.categories.category(&ext.name);
+        }
+        self.generation += 1;
+    }
+
+    /// The category of a file's extension rank. Unknown ranks (including
+    /// [`NO_EXT`]) are [`FileCategory::Other`].
+    #[inline]
+    pub fn ext_category(&self, ext: u16) -> FileCategory {
+        self.exts
+            .get(ext as usize)
+            .map(|e| e.category)
+            .unwrap_or(FileCategory::Other)
+    }
+
+    /// Bytes and file count per category, summed from the extension stats.
+    /// The totals therefore match the extension view exactly.
+    pub fn category_totals(&self) -> [CategoryTotal; FileCategory::COUNT] {
+        let mut totals = [CategoryTotal::default(); FileCategory::COUNT];
+        for ext in &self.exts {
+            let total = &mut totals[ext.category.index()];
+            total.bytes += ext.bytes;
+            total.files += ext.files;
+        }
+        totals
     }
 
     /// The `limit` largest files in the whole tree, largest first.
@@ -873,6 +925,7 @@ impl Tree {
         let id = self.exts.len() as u16;
         let name: Box<str> = e.into_boxed_str();
         self.exts.push(ExtStat {
+            category: self.categories.category(&name),
             name: name.clone(),
             bytes: 0,
             files: 0,
@@ -1868,6 +1921,46 @@ mod tests {
             .find(|e| &*e.name == ext)
             .map(|e| (e.bytes, e.files))
             .unwrap_or((0, 0))
+    }
+
+    #[test]
+    fn category_totals_match_the_extension_view() {
+        let tree = rich_tree();
+        let totals = tree.category_totals();
+        let video = totals[FileCategory::Video.index()];
+        let documents = totals[FileCategory::Documents.index()];
+        assert_eq!((video.bytes, video.files), (1500, 2));
+        assert_eq!((documents.bytes, documents.files), (350, 3));
+        // `Other` is empty here; every byte is in exactly one category.
+        let sum: u64 = totals.iter().map(|t| t.bytes).sum();
+        let files: u64 = totals.iter().map(|t| t.files).sum();
+        assert_eq!(sum, tree.exts.iter().map(|e| e.bytes).sum::<u64>());
+        assert_eq!(files, tree.exts.iter().map(|e| e.files).sum::<u64>());
+        assert_eq!(tree.ext_category(0), tree.exts[0].category);
+        assert_eq!(tree.ext_category(NO_EXT), FileCategory::Other);
+    }
+
+    #[test]
+    fn category_overrides_restamp_extensions() {
+        let mut tree = rich_tree();
+        let map = CategoryMap::with_overrides([
+            ("video".to_string(), vec!["txt".to_string()]),
+            ("archives".to_string(), vec!["mp4".to_string()]),
+        ]);
+        tree.set_category_map(map);
+        let totals = tree.category_totals();
+        assert_eq!(totals[FileCategory::Video.index()].bytes, 300);
+        assert_eq!(totals[FileCategory::Archives.index()].bytes, 1500);
+        assert_eq!(totals[FileCategory::Documents.index()].bytes, 50);
+        assert_eq!(
+            tree.ext_category(tree.exts.iter().position(|e| &*e.name == ".txt").unwrap() as u16),
+            FileCategory::Video
+        );
+        // New extensions created after the override keep using it.
+        tree.insert(&[], Subtree::file("new.MP4", 10, 0)).unwrap();
+        let mp4 = tree.exts.iter().find(|e| &*e.name == ".mp4").unwrap();
+        assert_eq!(mp4.category, FileCategory::Archives);
+        assert_eq!(mp4.bytes, 1510);
     }
 
     #[test]

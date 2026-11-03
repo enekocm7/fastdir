@@ -2,6 +2,7 @@
 //! and treemap, laid out like WinDirStat.
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
+use fastdir_core::categories::{CategoryMap, FileCategory};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
 use fastdir_core::filter::Filter;
@@ -13,8 +14,9 @@ use fastdir_core::integration;
 use fastdir_core::model::{FileEntry, NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
 use fastdir_settings::{
-    DateFormat, DeleteAction, PercentBase, Settings, SizeUnit, SortColumn as SortKey, StartupMode,
-    ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency, WindowState,
+    DateFormat, DeleteAction, ExtGrouping, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
+    StartupMode, ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency,
+    WindowState,
 };
 use fastdir_treemap::{self as treemap, ColorMode, Palette, RenderOptions};
 use fastdir_updater::{self as updater, Release};
@@ -212,6 +214,7 @@ fn color_mode_of(m: TreemapColorMode) -> ColorMode {
     match m {
         TreemapColorMode::Extension => ColorMode::Extension,
         TreemapColorMode::Age => ColorMode::Age,
+        TreemapColorMode::Category => ColorMode::Category,
     }
 }
 
@@ -219,6 +222,7 @@ fn treemap_render_options(settings: &Settings) -> RenderOptions {
     let t = &settings.treemap;
     RenderOptions {
         highlight: None,
+        highlight_category: None,
         show_free: t.show_free_space,
         show_unknown: t.show_unknown,
         use_disk: t.disk_size,
@@ -245,6 +249,14 @@ fn update_channel_of(channel: UpdateChannel) -> fastdir_updater::Channel {
 enum ListTab {
     Tree,
     TopFiles,
+}
+
+/// One row of the extension panel: a category header or an extension below
+/// it (the flat extension view uses only the latter).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ExtRow {
+    Category(FileCategory),
+    Extension { ext: u16 },
 }
 /// What a click does to the selection.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -362,8 +374,10 @@ pub struct FastDir {
     top_selected: Option<usize>,
     top_sort: (SortKey, bool),
     top_scroll: UniformListScrollHandle,
-    /// Extension ids with files left, in rank order.
-    ext_rows: Vec<u16>,
+    /// Rows of the extension panel, in display order.
+    ext_rows: Vec<ExtRow>,
+    /// Categories expanded in the "By category" view.
+    expanded_categories: BTreeSet<FileCategory>,
     /// The cursor row. With a multi-selection it is the item clicked last.
     selected: Option<usize>,
     /// Multi-selection (Ctrl/Cmd/Shift+click). Empty means "just the cursor row".
@@ -374,6 +388,8 @@ pub struct FastDir {
     anchor: Option<NodePath>,
     /// Extension rank highlighted in the treemap, picked from the ext list.
     selected_ext: Option<u16>,
+    /// Category highlighted in the treemap, picked from the category list.
+    selected_category: Option<FileCategory>,
     sort: (SortKey, bool),
     list_scroll: UniformListScrollHandle,
     ext_scroll: UniformListScrollHandle,
@@ -536,10 +552,12 @@ impl FastDir {
             top_sort: (SortKey::Size, true),
             top_scroll: UniformListScrollHandle::new(),
             ext_rows: Vec::new(),
+            expanded_categories: BTreeSet::new(),
             selected: None,
             marked: BTreeSet::new(),
             anchor: None,
             selected_ext: None,
+            selected_category: None,
             sort,
             list_scroll: UniformListScrollHandle::new(),
             ext_scroll: UniformListScrollHandle::new(),
@@ -670,11 +688,14 @@ impl FastDir {
         cx.notify();
     }
 
-    /// Toggle between extension colours and the age scale.
+    /// Toggle between extension/category colours and the age scale.
     pub(super) fn toggle_treemap_age_colors(&mut self, cx: &mut Context<Self>) {
-        self.settings.treemap.color_mode = match self.settings.treemap.color_mode {
-            TreemapColorMode::Extension => TreemapColorMode::Age,
-            TreemapColorMode::Age => TreemapColorMode::Extension,
+        self.settings.treemap.color_mode = if self.settings.treemap.color_mode
+            == TreemapColorMode::Age
+        {
+            TreemapColorMode::Extension
+        } else {
+            TreemapColorMode::Age
         };
         self.settings.save();
         self.refresh_treemap_options(cx);
@@ -692,6 +713,16 @@ impl FastDir {
             cross_volumes: s.cross_volumes,
             threads: s.thread_count.map(|n| (n as usize).clamp(1, 64)),
         }
+    }
+
+    /// Built-in file-type categories plus the user's `[categories]` overrides.
+    pub(super) fn category_map(&self) -> CategoryMap {
+        CategoryMap::with_overrides(
+            self.settings
+                .categories
+                .iter()
+                .map(|(name, extensions)| (name.clone(), extensions.clone())),
+        )
     }
 
     /// Push all `[treemap]` settings (and the size-unit flag used for hover

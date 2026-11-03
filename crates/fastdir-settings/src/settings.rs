@@ -9,6 +9,7 @@
 //! first load, so every field keeps `#[serde(default)]`.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Which theme the user picked.
@@ -89,6 +90,19 @@ pub enum TreemapColorMode {
     Extension,
     /// Colour by age: new files are warm, old files are cold.
     Age,
+    /// Colour by file-type category (video, images, archives, ...).
+    Category,
+}
+
+/// How the extension panel groups its rows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExtGrouping {
+    /// One row per extension.
+    #[default]
+    Extension,
+    /// Expandable category rows, each listing its extensions.
+    Category,
 }
 
 /// What the Delete key does (Shift+Delete always does the other).
@@ -294,6 +308,8 @@ pub struct ListSettings {
     pub show_disk: bool,
     /// Hide folders that contain no data (no files and zero size, recursively).
     pub hide_empty_folders: bool,
+    /// Whether the extension panel lists extensions or file-type categories.
+    pub ext_grouping: ExtGrouping,
 }
 
 /// Default number of rows in the "Top files" view.
@@ -316,6 +332,7 @@ impl Default for ListSettings {
             show_modified: true,
             show_disk: true,
             hide_empty_folders: false,
+            ext_grouping: ExtGrouping::Extension,
         }
     }
 }
@@ -486,6 +503,10 @@ pub struct Settings {
     pub integration: IntegrationSettings,
     /// Interface language.
     pub locale: LocaleSettings,
+    /// User overrides for file-type categories (`[categories]`): category id
+    /// (`video`, `images`, ...) to extension names. Overrides both move
+    /// built-in extensions and add new ones.
+    pub categories: BTreeMap<String, Vec<String>>,
     /// Last window geometry, restored on the next launch.
     pub window: Option<WindowState>,
     /// Last divider positions.
@@ -506,6 +527,7 @@ impl Default for Settings {
             appearance: AppearanceSettings::default(),
             integration: IntegrationSettings::default(),
             locale: LocaleSettings::default(),
+            categories: BTreeMap::new(),
             window: None,
             panels: PanelSizes::default(),
             sort: SortSettings::default(),
@@ -622,6 +644,7 @@ impl From<LegacySettings> for Settings {
             },
             integration: IntegrationSettings::default(),
             locale: LocaleSettings::default(),
+            categories: BTreeMap::new(),
             window: old.window,
             panels: old.panels,
             // Written before the sort lived in `[list]`; keep both in step.
@@ -633,7 +656,7 @@ impl From<LegacySettings> for Settings {
 /// Top-level section names of the current format. A file containing any of
 /// them is parsed as [`Settings`]; anything else falls back to the legacy
 /// flat keys so old files keep loading.
-const SECTION_KEYS: [&str; 9] = [
+const SECTION_KEYS: [&str; 10] = [
     "scan",
     "treemap",
     "list",
@@ -643,6 +666,7 @@ const SECTION_KEYS: [&str; 9] = [
     "appearance",
     "integration",
     "locale",
+    "categories",
 ];
 
 fn parse_current(text: &str) -> Option<Settings> {
@@ -805,6 +829,7 @@ mod tests {
                 show_modified: false,
                 show_disk: true,
                 hide_empty_folders: true,
+                ext_grouping: ExtGrouping::Category,
             },
             ops: OpSettings {
                 confirm_recycle: false,
@@ -837,6 +862,13 @@ mod tests {
             locale: LocaleSettings {
                 language: "es".into(),
             },
+            categories: BTreeMap::from([
+                (
+                    "video".to_string(),
+                    vec!["mp4".to_string(), "mkv".to_string()],
+                ),
+                ("other".to_string(), vec!["custom".to_string()]),
+            ]),
             window: Some(WindowState {
                 x: 10.5,
                 y: 20.5,
@@ -857,8 +889,30 @@ mod tests {
         assert!(text.contains("[scan]"), "sections keep the file readable");
         assert!(text.contains("[treemap]"));
         assert!(text.contains("[locale]"), "the language section is written out");
+        assert!(text.contains("[categories]"), "category overrides are written out");
+        assert!(text.contains("mp4"), "category extensions are written out");
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn category_overrides_parse_on_their_own() {
+        let s: Settings = toml::from_str(
+            "[categories]\nvideo = [\"mp4\", \"custom\"]\narchives = [\"zip\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            s.categories.get("video").map(Vec::as_slice),
+            Some(["mp4".to_string(), "custom".to_string()].as_slice())
+        );
+        assert_eq!(
+            s.categories.get("archives").map(Vec::as_slice),
+            Some(["zip".to_string()].as_slice())
+        );
+        // Unknown category names are kept for forward compatibility; the
+        // core `CategoryMap` ignores them.
+        let unknown: Settings = toml::from_str("[categories]\nnope = [\"x\"]\n").unwrap();
+        assert!(unknown.categories.contains_key("nope"));
     }
 
     #[test]
