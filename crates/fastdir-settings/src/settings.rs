@@ -376,6 +376,9 @@ pub struct ScanSettings {
     /// Record the owning account of every entry. Off by default because on
     /// Windows it needs one extra security query per file.
     pub collect_owners: bool,
+    /// Skip the Windows folder (`%SystemRoot%`) when scanning the system
+    /// drive, which makes the scan much faster. Off by default.
+    pub skip_windows_dir: bool,
 }
 
 impl Default for ScanSettings {
@@ -388,6 +391,7 @@ impl Default for ScanSettings {
             thread_count: None,
             show_partial_results: true,
             collect_owners: false,
+            skip_windows_dir: false,
         }
     }
 }
@@ -997,6 +1001,7 @@ mod tests {
                 thread_count: Some(4),
                 show_partial_results: false,
                 collect_owners: true,
+                skip_windows_dir: true,
             },
             treemap: TreemapSettings {
                 show_free_space: true,

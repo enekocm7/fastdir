@@ -161,6 +161,7 @@ impl Render for SettingsView {
         let check_owner = self.owner.clone();
         let clear_owner = self.owner.clone();
         let skip_hidden_owner = self.owner.clone();
+        let skip_windows_owner = self.owner.clone();
         let junctions_owner = self.owner.clone();
         let cross_owner = self.owner.clone();
         let threads_owner = self.owner.clone();
@@ -427,6 +428,39 @@ impl Render for SettingsView {
                                                 move |_, checked: &bool, _window, cx| {
                                                     skip_hidden_owner.update(cx, |this, cx| {
                                                         this.settings.scan.skip_hidden_system =
+                                                            *checked;
+                                                        this.settings.save();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .child(tr("set.scan.skip_windows")),
+                                            )
+                                            .child(caption(
+                                                tr("set.scan.skip_windows_cap").to_string(),
+                                            )),
+                                    )
+                                    .child(
+                                        Switch::new("settings-skip-windows")
+                                            .checked(scan.skip_windows_dir)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    skip_windows_owner.update(cx, |this, cx| {
+                                                        this.settings.scan.skip_windows_dir =
                                                             *checked;
                                                         this.settings.save();
                                                         cx.notify();

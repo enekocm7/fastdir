@@ -349,6 +349,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "要跳过的逗号分隔名称（支持 `*` 和 `?` 通配符）。",
         "set.scan.skip_hidden" => "跳过隐藏和系统文件",
         "set.scan.skip_hidden_cap" => "同时跳过 Unix 上的点文件。",
+        "set.scan.skip_windows" => "跳过 Windows 文件夹",
+        "set.scan.skip_windows_cap" => "排除 %SystemRoot%（通常为 C:\\Windows），使系统盘扫描快得多。其大小计入 <未知>。",
         "set.scan.junctions" => "跟踪联接和符号链接",
         "set.scan.junctions_cap" => "可能重复计算文件；每个目标仅进入一次。",
         "set.scan.cross" => "跨越到其他卷",

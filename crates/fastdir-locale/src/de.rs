@@ -347,6 +347,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Kommagetrennte Namen zum Überspringen (`*`- und `?`-Platzhalter).",
         "set.scan.skip_hidden" => "Versteckte und Systemdateien überspringen",
         "set.scan.skip_hidden_cap" => "Überspringt auch Punktdateien auf Unix.",
+        "set.scan.skip_windows" => "Windows-Ordner überspringen",
+        "set.scan.skip_windows_cap" => "Lässt %SystemRoot% (meist C:\\Windows) aus, damit das Systemlaufwerk viel schneller gescannt wird. Seine Größe zählt zu <Unbekannt>.",
         "set.scan.junctions" => "Junctions und Symlinks folgen",
         "set.scan.junctions_cap" => "Kann Dateien doppelt zählen; jedes Ziel wird einmal betreten.",
         "set.scan.cross" => "Andere Volumes einbeziehen",

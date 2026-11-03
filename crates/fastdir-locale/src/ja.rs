@@ -349,6 +349,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "除外する名前をカンマ区切りで指定（`*` と `?` のワイルドカード）。",
         "set.scan.skip_hidden" => "隠しファイルとシステムファイルを除外",
         "set.scan.skip_hidden_cap" => "Unix のドットファイルも除外します。",
+        "set.scan.skip_windows" => "Windows フォルダーをスキップ",
+        "set.scan.skip_windows_cap" => "%SystemRoot%（通常は C:\\Windows）を除外し、システム ドライブのスキャンを大幅に高速化します。そのサイズは <不明> に含まれます。",
         "set.scan.junctions" => "ジャンクションとシンボリックリンクをたどる",
         "set.scan.junctions_cap" => "ファイルが二重に数えられる場合があります。各ターゲットは一度だけ走査します。",
         "set.scan.cross" => "他のボリュームに移動する",

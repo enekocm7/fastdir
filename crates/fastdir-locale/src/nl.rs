@@ -347,6 +347,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Komma-gescheiden namen om over te slaan (`*` en `?` jokers).",
         "set.scan.skip_hidden" => "Verborgen bestanden en systeembestanden overslaan",
         "set.scan.skip_hidden_cap" => "Slaat ook dot-files over op Unix.",
+        "set.scan.skip_windows" => "Windows-map overslaan",
+        "set.scan.skip_windows_cap" => "Laat %SystemRoot% (meestal C:\\Windows) weg, zodat het systeemstation veel sneller wordt gescand. De grootte telt mee onder <Onbekend>.",
         "set.scan.junctions" => "Junctions en symlinks volgen",
         "set.scan.junctions_cap" => "Kan bestanden dubbel tellen; elk doel wordt één keer bezocht.",
         "set.scan.cross" => "Andere volumes betreden",

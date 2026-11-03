@@ -367,6 +367,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "أسماء مفصولة بفواصل تُتخطى (أحرف البدل `*` و `?`).",
         "set.scan.skip_hidden" => "تخطي الملفات المخفية وملفات النظام",
         "set.scan.skip_hidden_cap" => "يتخطى أيضًا ملفات النقاط على Unix.",
+        "set.scan.skip_windows" => "تخطي مجلد Windows",
+        "set.scan.skip_windows_cap" => "يستبعد %SystemRoot% (عادةً C:\\Windows) ليتم فحص محرك النظام بسرعة أكبر بكثير. يُحتسب حجمه ضمن <غير معروف>.",
         "set.scan.junctions" => "اتباع الوصلات والروابط الرمزية",
         "set.scan.junctions_cap" => "قد تُحتسب الملفات مرتين؛ يُدخل كل هدف مرة واحدة.",
         "set.scan.cross" => "العبور إلى وحدات تخزين أخرى",

@@ -349,6 +349,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.excluded_cap" => "Nombres separados por comas que se omiten (comodines `*` y `?`).",
         "set.scan.skip_hidden" => "Omitir archivos ocultos y del sistema",
         "set.scan.skip_hidden_cap" => "También omite los archivos punto en Unix.",
+        "set.scan.skip_windows" => "Omitir la carpeta de Windows",
+        "set.scan.skip_windows_cap" => "Excluye %SystemRoot% (normalmente C:\\Windows) para que la unidad del sistema se analice mucho más rápido. Su tamaño se cuenta en <Desconocido>.",
         "set.scan.junctions" => "Seguir uniones y enlaces simbólicos",
         "set.scan.junctions_cap" => "Puede contar archivos dos veces; cada destino se recorre una vez.",
         "set.scan.cross" => "Entrar en otros volúmenes",
