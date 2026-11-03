@@ -669,6 +669,12 @@ impl Settings {
             if let Ok(old) = serde_json::from_str::<LegacySettings>(&text) {
                 let settings = Settings::from(old);
                 settings.save();
+                // Only drop the legacy file once the migrated config exists.
+                if config_path().is_some_and(|p| p.exists()) {
+                    if let Some(p) = legacy_path() {
+                        let _ = std::fs::remove_file(p);
+                    }
+                }
                 return settings;
             }
         }
