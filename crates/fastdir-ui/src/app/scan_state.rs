@@ -16,6 +16,7 @@ impl FastDir {
         if let Phase::Scanning { progress, .. } = &self.phase {
             progress.cancel.store(true, Ordering::Relaxed);
         }
+        self.clear_comparison(cx);
         self.drives = drives::list();
         let expected = self
             .drives
@@ -303,6 +304,7 @@ impl FastDir {
         if let Phase::Scanning { progress, .. } = &self.phase {
             progress.cancel.store(true, Ordering::Relaxed);
         }
+        self.clear_comparison(cx);
         self.phase = Phase::Home;
         self.home_drives = true;
         self.saved = None;

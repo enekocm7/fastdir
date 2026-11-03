@@ -81,6 +81,7 @@ impl Render for SettingsView {
             TreemapColorMode::Extension => 0,
             TreemapColorMode::Age => 1,
             TreemapColorMode::Category => 2,
+            TreemapColorMode::Change => 3,
         };
         let size_unit_ix = match list.size_unit {
             SizeUnit::Binary => 0,
@@ -783,14 +784,25 @@ impl Render for SettingsView {
                                                 Radio::new("colormode-category")
                                                     .label(tr("set.tree.colorby_category")),
                                             )
+                                            .child(
+                                                Radio::new("colormode-change")
+                                                    .label(tr("set.tree.colorby_change")),
+                                            )
                                             .on_change(cx.listener(
                                                 move |_, ix: &usize, _window, cx| {
                                                     let mode = match ix {
                                                         1 => TreemapColorMode::Age,
                                                         2 => TreemapColorMode::Category,
+                                                        3 => TreemapColorMode::Change,
                                                         _ => TreemapColorMode::Extension,
                                                     };
                                                     color_mode_owner.update(cx, |this, cx| {
+                                                        // Change colours need a baseline.
+                                                        if mode == TreemapColorMode::Change
+                                                            && this.compare.is_none()
+                                                        {
+                                                            return;
+                                                        }
                                                         this.settings.treemap.color_mode = mode;
                                                         this.settings.save();
                                                         this.refresh_treemap_options(cx);

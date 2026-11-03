@@ -18,6 +18,9 @@ impl FastDir {
                 .top_selected
                 .and_then(|i| self.top_files.get(i))
                 .map(|f| f.path.clone()),
+            // Removed items are gone from the current tree, so there is
+            // nothing to reveal in it or act on.
+            ListTab::Removed => None,
         }
     }
 
@@ -214,6 +217,9 @@ impl FastDir {
     }
 
     pub(super) fn tree_changed(&mut self, select: Option<NodePath>, cx: &mut Context<Self>) {
+        // A file operation shifted node ids, so a comparison built before it
+        // no longer points at the right rows.
+        self.clear_comparison(cx);
         if let Some(p) = &select {
             // Make sure the new selection is visible.
             if let Some(tree) = &self.tree {
@@ -300,18 +306,18 @@ impl FastDir {
 
     /// Move the cursor in whichever list is showing.
     fn step(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if self.tab == ListTab::TopFiles {
-            self.select_top_row(ix, cx);
-        } else {
-            self.select_row(ix, cx);
+        match self.tab {
+            ListTab::TopFiles => self.select_top_row(ix, cx),
+            ListTab::Removed => self.select_removed_row(ix, cx),
+            ListTab::Tree => self.select_row(ix, cx),
         }
     }
 
     fn step_extend(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if self.tab == ListTab::TopFiles {
-            self.select_top_row(ix, cx);
-        } else {
-            self.extend_row(ix, cx);
+        match self.tab {
+            ListTab::TopFiles => self.select_top_row(ix, cx),
+            ListTab::Removed => self.select_removed_row(ix, cx),
+            ListTab::Tree => self.extend_row(ix, cx),
         }
     }
 
@@ -319,6 +325,7 @@ impl FastDir {
         match self.tab {
             ListTab::Tree => self.selected,
             ListTab::TopFiles => self.top_selected,
+            ListTab::Removed => self.removed_selected,
         }
     }
 
@@ -363,6 +370,9 @@ impl FastDir {
             self.reveal_top_file(ix, window, cx);
             return;
         }
+        if self.tab != ListTab::Tree {
+            return;
+        }
         let Some(ix) = self.selected else { return };
         let expanded = self.is_expanded(ix);
         if expanded {
@@ -384,7 +394,7 @@ impl FastDir {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tab == ListTab::TopFiles {
+        if self.tab != ListTab::Tree {
             return;
         }
         let Some(ix) = self.selected else { return };
@@ -405,12 +415,15 @@ impl FastDir {
             self.reveal_top_file(ix, window, cx);
             return;
         }
+        if self.tab != ListTab::Tree {
+            return;
+        }
         if let Some(ix) = self.selected {
             self.set_expanded(ix, None, cx);
         }
     }
     pub(super) fn go_parent(&mut self, _: &GoParent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.tab == ListTab::TopFiles {
+        if self.tab != ListTab::Tree {
             return;
         }
         let Some(ix) = self.selected else { return };
