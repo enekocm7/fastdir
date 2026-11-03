@@ -150,27 +150,38 @@ impl FastDir {
         let description: SharedString = if permanent {
             self.tr_fmt("dlg.confirm_perm", &[("what", &what)]).into()
         } else {
-            self.tr_fmt("dlg.confirm_recycle", &[("what", &what)]).into()
+            self.tr_fmt(
+                "dlg.confirm_recycle",
+                &[("what", &what), ("trash", self.trash_name())],
+            )
+            .into()
         };
-        let title = if permanent {
-            self.tr("dlg.title_perm")
+        let title: SharedString = if permanent {
+            self.tr("dlg.title_perm").into()
         } else {
-            self.tr("dlg.title_recycle")
+            self.tr_fmt("dlg.title_recycle", &[("trash", self.trash_name())])
+                .into()
         };
-        let ok_delete = self.tr("dlg.ok_delete");
-        let ok_recycle = self.tr("dlg.title_recycle");
+        let ok_delete: SharedString = self.tr("dlg.ok_delete").into();
+        let ok_recycle: SharedString = self
+            .tr_fmt("dlg.title_recycle", &[("trash", self.trash_name())])
+            .into();
         let cancel = self.tr("action.cancel");
         let entity = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let entity = entity.clone();
             let targets = targets.clone();
             alert
-                .title(title)
+                .title(title.clone())
                 .description(description.clone())
                 .confirm()
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text(if permanent { ok_delete } else { ok_recycle })
+                        .ok_text(if permanent {
+                            ok_delete.clone()
+                        } else {
+                            ok_recycle.clone()
+                        })
                         .ok_variant(ButtonVariant::Danger)
                         .cancel_text(cancel),
                 )
@@ -195,6 +206,7 @@ impl FastDir {
     ) {
         let total = targets.len();
         let lang = self.settings.locale.language.clone();
+        let trash = fastdir_locale::trash_name(&lang);
         let label = match targets.as_slice() {
             [one] if permanent => fastdir_locale::fmt(
                 &lang,
@@ -204,12 +216,16 @@ impl FastDir {
             [one] => fastdir_locale::fmt(
                 &lang,
                 "dlg.op_recycling",
-                &[("name", &one.fs.display().to_string())],
+                &[("name", &one.fs.display().to_string()), ("trash", trash)],
             ),
             _ if permanent => {
                 fastdir_locale::fmt(&lang, "dlg.op_deleting_n", &[("total", &total.to_string())])
             }
-            _ => fastdir_locale::fmt(&lang, "dlg.op_recycling_n", &[("total", &total.to_string())]),
+            _ => fastdir_locale::fmt(
+                &lang,
+                "dlg.op_recycling_n",
+                &[("total", &total.to_string()), ("trash", trash)],
+            ),
         };
         let progress = self.begin_op(
             label,
@@ -269,10 +285,9 @@ impl FastDir {
                 } else {
                     cx.notify();
                 }
-                let verb = if permanent {
-                    this.tr("dlg.done_deleted")
+                let verb: String = if permanent {                    this.tr("dlg.done_deleted").to_string()
                 } else {
-                    this.tr("dlg.done_recycled")
+                    this.tr_fmt("dlg.done_recycled", &[("trash", this.trash_name())])
                 };
                 if cancelled {
                     let msg = if done.is_empty() {
@@ -281,7 +296,7 @@ impl FastDir {
                         this.tr_fmt(
                             "dlg.cancel_some",
                             &[
-                                ("verb", verb),
+                                ("verb", verb.as_str()),
                                 ("done", &done.len().to_string()),
                                 ("total", &total.to_string()),
                             ],
@@ -295,11 +310,11 @@ impl FastDir {
                     let msg = match done.as_slice() {
                         [one] => this.tr_fmt(
                             "dlg.done_one",
-                            &[("verb", verb), ("name", &one.display().to_string())],
+                            &[("verb", verb.as_str()), ("name", &one.display().to_string())],
                         ),
                         _ => this.tr_fmt(
                             "dlg.done_multi",
-                            &[("verb", verb), ("n", &done.len().to_string())],
+                            &[("verb", verb.as_str()), ("n", &done.len().to_string())],
                         ),
                     };
                     window.push_notification(Notification::success(msg), cx);

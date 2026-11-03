@@ -43,6 +43,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# Unix APIs (drive enumeration via statvfs/getmntinfo, device IDs for the
+# mount-point check). Only used on `cfg(unix)` targets.
+libc = "0.2"
 # Workspace crates
 fastdir-core = { path = "crates/fastdir-core" }
 fastdir-treemap = { path = "crates/fastdir-treemap" }

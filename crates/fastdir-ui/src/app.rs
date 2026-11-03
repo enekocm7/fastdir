@@ -11,9 +11,8 @@ use fastdir_core::integration;
 use fastdir_core::model::{FileEntry, NO_EXT, Node, NodePath, Subtree, Tree};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
 use fastdir_settings::{
-    DateFormat, DeleteAction, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
-    StartupMode, ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel,
-    UpdateFrequency, WindowState,
+    DateFormat, DeleteAction, PercentBase, Settings, SizeUnit, SortColumn as SortKey, StartupMode,
+    ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency, WindowState,
 };
 use fastdir_treemap::{self as treemap, ColorMode, Palette, RenderOptions};
 use fastdir_updater::{self as updater, Release};
@@ -80,13 +79,16 @@ actions!(
         FocusSearch,
         OpenFilters,
         OpenSettings,
+        ExportResults,
     ]
 );
 
 mod context_menu;
 mod dialogs;
+mod export;
 mod file_list;
 mod filter;
+mod platform;
 mod scan_state;
 mod selection;
 mod settings_ui;
@@ -94,6 +96,7 @@ mod status;
 mod toolbar;
 mod update_ui;
 
+use self::export::ExportForm;
 use self::filter::FilterForm;
 
 const CONTEXT: &str = "FastDir";
@@ -131,7 +134,24 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("f7", ToggleUnknown, Some(CONTEXT)),
         KeyBinding::new("ctrl-f", FocusSearch, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-e", ExportResults, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
+    ]);
+    // macOS users expect Cmd: bind it alongside Ctrl so both work. A full
+    // shortcut overhaul (remappable keys) is out of scope.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("cmd-enter", OpenItem, Some(CONTEXT)),
+        KeyBinding::new("cmd-e", RevealItem, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-c", CopyPath, Some(CONTEXT)),
+        KeyBinding::new("cmd-m", MoveItem, Some(CONTEXT)),
+        KeyBinding::new("cmd-f5", Rescan, Some(CONTEXT)),
+        KeyBinding::new("cmd-r", Rescan, Some(CONTEXT)),
+        KeyBinding::new("cmd-o", OpenFolder, Some(CONTEXT)),
+        KeyBinding::new("cmd-t", ToggleTheme, Some(CONTEXT)),
+        KeyBinding::new("cmd-f", FocusSearch, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-f", OpenFilters, Some(CONTEXT)),
+        KeyBinding::new("cmd-,", OpenSettings, Some(CONTEXT)),
     ]);
 }
 
@@ -202,7 +222,7 @@ enum ListTab {
 enum ClickMode {
     /// Select just this item.
     Plain,
-    /// Ctrl+click: add to or remove from the selection.
+    /// Ctrl+click (Cmd+click on macOS): add to or remove from the selection.
     Toggle,
     /// Shift+click: select everything from the anchor to here.
     Range,
@@ -286,6 +306,7 @@ pub struct FastDir {
     search: Entity<InputState>,
     filter: Filter,
     filter_form: FilterForm,
+    export_form: ExportForm,
     /// The N largest files in the whole scan, sorted by `top_sort`.
     top_files: Vec<FileEntry>,
     /// The last top-files computation is stale and should run again when the
@@ -298,7 +319,7 @@ pub struct FastDir {
     ext_rows: Vec<u16>,
     /// The cursor row. With a multi-selection it is the item clicked last.
     selected: Option<usize>,
-    /// Multi-selection (Ctrl/Shift+click). Empty means "just the cursor row".
+    /// Multi-selection (Ctrl/Cmd/Shift+click). Empty means "just the cursor row".
     /// Never contains the scan root. Cleared whenever the tree changes, since
     /// node paths shift then.
     marked: BTreeSet<NodePath>,
@@ -381,8 +402,12 @@ impl FastDir {
                 }
             },
         );
-        let search_placeholder: SharedString =
-            fastdir_locale::t(&settings.locale.language, "search.placeholder").into();
+        let search_placeholder: SharedString = fastdir_locale::fmt(
+            &settings.locale.language,
+            "search.placeholder",
+            &[("mod", platform::mod_key())],
+        )
+        .into();
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(search_placeholder.clone()));
         let search_sub = cx.subscribe_in(
@@ -443,6 +468,7 @@ impl FastDir {
             search,
             filter: Filter::default(),
             filter_form: FilterForm::default(),
+            export_form: ExportForm::default(),
             top_files: Vec::new(),
             top_stale: true,
             top_selected: None,
@@ -495,10 +521,8 @@ impl FastDir {
                     if !path.is_dir() {
                         continue;
                     }
-                    this.update_in(cx, |this, window, cx| {
-                        this.start_scan(path, window, cx)
-                    })
-                    .ok();
+                    this.update_in(cx, |this, window, cx| this.start_scan(path, window, cx))
+                        .ok();
                 }
             }));
         }
@@ -617,6 +641,22 @@ impl FastDir {
         fastdir_locale::fmt(&self.settings.locale.language, key, args)
     }
 
+    /// Localized tooltip for a modifier-key shortcut: fills `{mod}` with
+    /// Cmd on macOS, Ctrl everywhere else.
+    pub(super) fn mod_tip(&self, key: &'static str) -> String {
+        self.tr_fmt(key, &[("mod", platform::mod_key())])
+    }
+
+    /// OS-appropriate trash name for the current language.
+    pub(super) fn trash_name(&self) -> &'static str {
+        fastdir_locale::trash_name(&self.settings.locale.language)
+    }
+
+    /// OS-appropriate file-manager label for the current language.
+    pub(super) fn reveal_label(&self) -> &'static str {
+        fastdir_locale::reveal_label(&self.settings.locale.language)
+    }
+
     /// Switch the interface language, persist it and repaint everything
     /// (including the treemap hover labels, which cache their text).
     pub(super) fn set_language(
@@ -627,7 +667,7 @@ impl FastDir {
     ) {
         self.settings.locale.language = code.to_string();
         self.settings.save();
-        let placeholder = self.tr("search.placeholder");
+        let placeholder = self.mod_tip("search.placeholder");
         self.search.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx);
         });
@@ -705,12 +745,9 @@ impl FastDir {
             .on_resize({
                 let entity = entity.clone();
                 move |state, _, cx| {
-                    let sizes =
-                        state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
+                    let sizes = state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
                     entity
-                        .update(cx, |this, _| {
-                            this.remember_split(Split::Top, sizes)
-                        })
+                        .update(cx, |this, _| this.remember_split(Split::Top, sizes))
                         .ok();
                 }
             })
@@ -730,31 +767,33 @@ impl FastDir {
             div().size_full().child(lists).into_any_element()
         } else {
             v_resizable("main-split")
-            .with_state(&self.main_split)
-            .on_resize({
-                let entity = entity.clone();
-                move |state, _, cx| {
-                    let sizes = state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
-                    entity
-                        .update(cx, |this, _| this.remember_split(Split::Main, sizes))
-                        .ok();
-                }
-            })
-            .child(
-                resizable_panel()
-                    .size(main_height)
-                    .size_range(px(120.)..Pixels::MAX)
-                    .child(lists),
-            )
-            .child(resizable_panel().size_range(px(80.)..Pixels::MAX).child({
-                let entity = cx.entity();
-                div()
-                    .id("treemap-panel")
-                    .size_full()
-                    .child(self.treemap.clone())
-                    .context_menu(move |menu, _, cx| entity.read(cx).build_context_menu(menu, cx))
-            }))
-            .into_any_element()
+                .with_state(&self.main_split)
+                .on_resize({
+                    let entity = entity.clone();
+                    move |state, _, cx| {
+                        let sizes = state.read(cx).sizes().iter().map(|s| s.as_f32()).collect();
+                        entity
+                            .update(cx, |this, _| this.remember_split(Split::Main, sizes))
+                            .ok();
+                    }
+                })
+                .child(
+                    resizable_panel()
+                        .size(main_height)
+                        .size_range(px(120.)..Pixels::MAX)
+                        .child(lists),
+                )
+                .child(resizable_panel().size_range(px(80.)..Pixels::MAX).child({
+                    let entity = cx.entity();
+                    div()
+                        .id("treemap-panel")
+                        .size_full()
+                        .child(self.treemap.clone())
+                        .context_menu(move |menu, _, cx| {
+                            entity.read(cx).build_context_menu(menu, cx)
+                        })
+                }))
+                .into_any_element()
         };
 
         match banner {
@@ -1039,6 +1078,7 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::toggle_unknown))
             .on_action(cx.listener(Self::focus_search))
             .on_action(cx.listener(Self::open_filters))
+            .on_action(cx.listener(Self::open_export))
             .on_action(cx.listener(Self::open_settings))
             .child(self.render_title_bar(cx))
             .child(self.render_toolbar(cx))

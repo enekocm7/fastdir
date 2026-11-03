@@ -384,8 +384,7 @@ pub fn special_display(canonical: &str, lang: &str) -> Option<&'static str> {
 
 /// Localized name for a drive-kind id (`fixed`, `removable`, `network`,
 /// `optical`, `ram`, `unknown`; see `DriveKind::id` in `fastdir_core`).
-pub fn drive_kind(id: &str, lang: &str) -> &'static str {
-    let key = match id {
+pub fn drive_kind(id: &str, lang: &str) -> &'static str {    let key = match id {
         "fixed" => "drive.fixed",
         "removable" => "drive.removable",
         "network" => "drive.network",
@@ -406,6 +405,36 @@ fn lookup_static(lang: &str, key: &'static str) -> &'static str {
         }
     }
     en::get(key).unwrap_or(key)
+}
+
+/// OS-appropriate trash name: the localized "Recycle Bin" on Windows, the
+/// localized "Trash" everywhere else.
+pub fn trash_name(lang: &str) -> &'static str {
+    #[cfg(windows)]
+    {
+        t(lang, "os.recycle_bin")
+    }
+    #[cfg(not(windows))]
+    {
+        t(lang, "os.trash")
+    }
+}
+
+/// OS-appropriate file-manager label: "Show in Finder" on macOS, "Show in
+/// Files" on Linux, "Show in Explorer" on Windows (each fully translated).
+pub fn reveal_label(lang: &str) -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        t(lang, "menu.show_finder")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        t(lang, "menu.show_files")
+    }
+    #[cfg(not(unix))]
+    {
+        t(lang, "menu.show_explorer")
+    }
 }
 
 #[cfg(test)]

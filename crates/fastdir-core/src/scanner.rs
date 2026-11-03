@@ -78,8 +78,8 @@ impl LinkTracker {
 /// What to scan and with how many threads. Built by the UI from the
 /// persisted settings; the scanner itself never reads global state.
 ///
-/// Field defaults preserve the historical behaviour (scan everything on one
-/// automatic pool, never follow junctions).
+/// Field defaults preserve the historical behaviour (scan on one automatic
+/// pool, never follow junctions, stay on the starting volume).
 #[derive(Clone, Debug, Default)]
 pub struct ScanOptions {
     /// Folder/file names to skip. Each pattern is matched case-insensitively
@@ -92,9 +92,10 @@ pub struct ScanOptions {
     /// them can double-count files and loop forever, so every entered folder
     /// is remembered by its canonical path and only visited once.
     pub follow_junctions: bool,
-    /// Descend into mount points on other volumes. Only relevant when
-    /// following junctions on Windows or for Unix mounts; on by default so a
-    /// scan covers the whole folder as it always has.
+    /// Descend into mount points on other volumes. Off by default, so a scan
+    /// stays on the volume it started on; a mount point on another volume is
+    /// listed but not entered. Only relevant when following junctions on
+    /// Windows or for Unix mounts.
     pub cross_volumes: bool,
     /// Scan threads, or `None` for automatic (`cores * 2`, clamped 4..=64).
     /// A fixed number keeps a slow HDD or network share responsive.
@@ -104,9 +105,7 @@ pub struct ScanOptions {
 impl ScanOptions {
     /// `true` when the entry `name` matches one of the exclusion patterns.
     pub fn is_excluded(&self, name: &str) -> bool {
-        self.excluded_globs
-            .iter()
-            .any(|p| matches_glob(p, name))
+        self.excluded_globs.iter().any(|p| matches_glob(p, name))
     }
 }
 
@@ -171,7 +170,11 @@ struct ScanContext<'a> {
 }
 
 impl<'a> ScanContext<'a> {
-    fn for_scan(root: &Path, options: &'a ScanOptions, visited: &'a Mutex<HashSet<PathBuf>>) -> Self {
+    fn for_scan(
+        root: &Path,
+        options: &'a ScanOptions,
+        visited: &'a Mutex<HashSet<PathBuf>>,
+    ) -> Self {
         let canonical = std::fs::canonicalize(root).ok();
         if let Some(ref c) = canonical {
             visited.lock().insert(c.clone());
@@ -959,7 +962,11 @@ mod tests {
         std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
         std::fs::write(dir.join("sub/empty.dat"), b"").unwrap();
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         assert!(!result.cancelled);
         assert_eq!(result.tree.root().files, 3);
         assert_eq!(result.tree.root().dirs, 1);
@@ -979,7 +986,11 @@ mod tests {
         std::fs::write(dir.join("a.txt"), b"hello").unwrap();
         std::fs::write(dir.join("empty.dat"), b"").unwrap();
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         let a = result.tree.find(&dir.join("a.txt")).unwrap();
         let a = result.tree.get(&a).unwrap();
         assert_eq!(a.size, 5);
@@ -1019,7 +1030,11 @@ mod tests {
             return;
         }
 
-        let result = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         let tree = &result.tree;
         assert_eq!(tree.root().files, 2);
         assert_eq!(tree.root().size, 4096);
@@ -1058,7 +1073,12 @@ mod tests {
         std::fs::write(dir.join("two/b.bin"), vec![0u8; 11]).unwrap();
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
-        let result = scan_live(dir.clone(), Arc::new(Progress::default()), live.clone(), &ScanOptions::default());
+        let result = scan_live(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            live.clone(),
+            &ScanOptions::default(),
+        );
         assert!(!result.cancelled);
         let tree = live.read();
         assert_eq!(tree.root().files, 3);
@@ -1090,7 +1110,12 @@ mod tests {
         }
 
         let live = Arc::new(RwLock::new(Tree::empty(dir.clone())));
-        scan_live(dir.clone(), Arc::new(Progress::default()), live.clone(), &ScanOptions::default());
+        scan_live(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            live.clone(),
+            &ScanOptions::default(),
+        );
         let tree = live.read();
         assert_eq!(tree.root().files, 2);
         assert_eq!(tree.root().size, 4096);
@@ -1171,15 +1196,18 @@ mod tests {
             // A dot-prefix is not hidden on Windows; set the attribute.
             use std::os::windows::ffi::OsStrExt;
             use windows_sys::Win32::Storage::FileSystem::SetFileAttributesW;
-            let mut wide: Vec<u16> =
-                dir.join(".hidden").as_os_str().encode_wide().collect();
+            let mut wide: Vec<u16> = dir.join(".hidden").as_os_str().encode_wide().collect();
             wide.push(0);
             unsafe {
                 SetFileAttributesW(wide.as_ptr(), 0x2);
             }
         }
 
-        let plain = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let plain = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         assert_eq!(plain.tree.root().files, 2);
 
         let options = ScanOptions {
@@ -1204,7 +1232,11 @@ mod tests {
         std::os::unix::fs::symlink(&dir, dir.join("real/back")).unwrap();
 
         // Default: links are listed but never followed.
-        let plain = scan(dir.clone(), Arc::new(Progress::default()), &ScanOptions::default());
+        let plain = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
         assert_eq!(plain.tree.root().size, 32);
 
         let options = ScanOptions {
@@ -1233,6 +1265,179 @@ mod tests {
         assert_eq!(result.tree.root().files, 1);
         assert_eq!(result.tree.root().size, 9);
         assert_eq!(default_thread_count().clamp(1, 64), default_thread_count());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Reference walk with only std::fs: regular files add their length,
+    /// directories recurse, symlinks / junctions are counted as a single
+    /// empty directory (like the scanner) and never followed.
+    fn walk_reference(root: &Path) -> (u64, u32, u32) {
+        fn walk(dir: &Path, size: &mut u64, files: &mut u32, dirs: &mut u32) {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(it) => it,
+                Err(_) => return,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(ft) = entry.file_type() else { continue };
+                if ft.is_symlink() {
+                    // Scanner lists links as empty dirs and never descends.
+                    *dirs += 1;
+                    continue;
+                }
+                if ft.is_dir() {
+                    *dirs += 1;
+                    walk(&path, size, files, dirs);
+                } else if ft.is_file() {
+                    *files += 1;
+                    *size += std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                }
+            }
+        }
+        let (mut size, mut files, mut dirs) = (0u64, 0u32, 0u32);
+        walk(root, &mut size, &mut files, &mut dirs);
+        (size, files, dirs)
+    }
+
+    #[test]
+    fn scan_totals_match_std_walk() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("a.txt"), b"hello").unwrap();
+        std::fs::write(dir.join("b.bin"), vec![7u8; 100]).unwrap();
+        std::fs::write(dir.join("empty.txt"), b"").unwrap();
+        std::fs::create_dir_all(dir.join("sub/nested")).unwrap();
+        std::fs::write(dir.join("sub/c.txt"), vec![1u8; 10]).unwrap();
+        std::fs::write(dir.join("sub/nested/d.log"), vec![2u8; 7]).unwrap();
+        std::fs::create_dir(dir.join("emptydir")).unwrap();
+
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
+        let (size, files, dirs) = walk_reference(&dir);
+        assert_eq!(size, 5 + 100 + 0 + 10 + 7);
+        assert_eq!(files, 5);
+        // sub, sub/nested, emptydir.
+        assert_eq!(dirs, 3);
+
+        let root = result.tree.root();
+        assert_eq!(root.size, size);
+        assert_eq!(root.files, files);
+        assert_eq!(root.dirs, dirs);
+        // Every reference file is in the tree with its byte length.
+        for rel in [
+            "a.txt",
+            "b.bin",
+            "empty.txt",
+            "sub/c.txt",
+            "sub/nested/d.log",
+        ] {
+            let p = result
+                .tree
+                .find(&dir.join(rel))
+                .unwrap_or_else(|| panic!("missing {rel}"));
+            let node = result.tree.get(&p).unwrap();
+            let expected = std::fs::metadata(dir.join(rel)).unwrap().len();
+            assert_eq!(node.size, expected, "{rel}");
+        }
+        // Empty locations exist and are empty.
+        assert_eq!(result.tree.find(&dir.join("emptydir")).unwrap().len(), 1);
+        let empty = result.tree.find(&dir.join("empty.txt")).unwrap();
+        assert_eq!(result.tree.get(&empty).unwrap().size, 0);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(unix)]
+    fn symlink_file(original: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_dir(original, link)
+    }
+
+    #[cfg(windows)]
+    fn symlink_file(original: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_file(original, link)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn symlink_dir(_original: &Path, _link: &Path) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no symlinks",
+        ))
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn symlink_file(_original: &Path, _link: &Path) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no symlinks",
+        ))
+    }
+
+    #[test]
+    fn symlinks_and_junctions_are_listed_but_not_followed() {
+        let dir = temp_dir();
+        std::fs::create_dir(dir.join("real")).unwrap();
+        std::fs::write(dir.join("real/real.bin"), vec![3u8; 32]).unwrap();
+        std::fs::write(dir.join("file_target.txt"), b"1234567890123").unwrap();
+
+        // Privilege-restricted filesystems (Windows without developer mode)
+        // cannot create symlinks: skip rather than fail.
+        if symlink_dir(&dir.join("real"), &dir.join("link_to_real")).is_err() {
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+        if symlink_file(&dir.join("file_target.txt"), &dir.join("link_to_file.txt")).is_err() {
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+
+        let result = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
+        let tree = &result.tree;
+        // Only real bytes are counted; links contribute nothing (a file symlink
+        // is listed but never adds bytes, so the total never double-counts).
+        assert_eq!(tree.root().size, 32 + 13);
+        let (size, files, dirs) = walk_reference(&dir);
+        assert_eq!(tree.root().size, size);
+        // Windows lists a file symlink as a (zero-byte) file while Unix lists
+        // it as an empty dir entry; both count one item, so compare totals.
+        assert_eq!(
+            tree.root().files + tree.root().dirs,
+            files + dirs,
+            "files={} dirs={} vs ref files={} dirs={}",
+            tree.root().files,
+            tree.root().dirs,
+            files,
+            dirs
+        );
+        // Real content is found exactly once (no double count through the link).
+        assert!(tree.find(&dir.join("real/real.bin")).is_some());
+        assert!(tree.find(&dir.join("link_to_real/real.bin")).is_none());
+        // Links are listed as empty entries with no children.
+        for link in ["link_to_real", "link_to_file.txt"] {
+            let p = tree
+                .find(&dir.join(link))
+                .unwrap_or_else(|| panic!("missing {link}"));
+            let node = tree.get(&p).unwrap();
+            assert_eq!(node.size, 0, "{link}");
+            assert!(tree.children(node).is_empty(), "{link}");
+        }
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

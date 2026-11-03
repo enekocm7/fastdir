@@ -273,7 +273,6 @@ impl FastDir {
         let theme = cx.theme();
         let ready = matches!(self.phase, Phase::Ready);
         let active = self.filter_form.active_count();
-        let tip = self.tr("filter.tooltip");
         let label = if active > 0 {
             self.tr_fmt("filter.active", &[("n", &active.to_string())])
         } else {
@@ -301,7 +300,7 @@ impl FastDir {
                     .small()
                     .icon(IconName::Funnel)
                     .label(label)
-                    .tooltip(tip)
+                    .tooltip(self.mod_tip("filter.tooltip"))
                     .disabled(!ready)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_filters(&OpenFilters, window, cx)

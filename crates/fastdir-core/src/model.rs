@@ -1705,4 +1705,287 @@ mod tests {
         assert_eq!(tree.free_bytes(), Some(60));
         assert_eq!(tree.root().size, 200);
     }
+
+    /// Richer fixture: root / { docs(a.txt 100, b.log 50), media(c.mp4 1000,
+    /// d.mp4 500), e.txt 200 }. Totals: size 1850, files 5, dirs 2.
+    fn rich_tree() -> Tree {
+        let mut arena = Arena::default();
+        let mut docs = DirBuilder::new(10);
+        docs.add_file("a.txt", 100, 100, 10);
+        docs.add_file("b.log", 50, 50, 11);
+        let docs = docs.commit(&mut arena);
+        let mut media = DirBuilder::new(12);
+        media.add_file("c.mp4", 1000, 1000, 12);
+        media.add_file("d.mp4", 500, 500, 13);
+        let media = media.commit(&mut arena);
+        let mut root = DirBuilder::new(20);
+        root.add_dir("docs", docs);
+        root.add_dir("media", media);
+        root.add_file("e.txt", 200, 200, 14);
+        let root = root.commit(&mut arena);
+        Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
+    }
+
+    fn ext_totals(tree: &Tree) -> std::collections::HashMap<String, (u64, u64)> {
+        let mut map = std::collections::HashMap::new();
+        let mut stack = vec![tree.root()];
+        while let Some(node) = stack.pop() {
+            for child in tree.children(node) {
+                if child.kind() == NodeKind::File {
+                    if let Some(ext) = extension_of(tree.name(child)) {
+                        let e = map.entry(ext).or_insert((0u64, 0u64));
+                        e.0 += child.size;
+                        e.1 += 1;
+                    }
+                } else if child.is_dir() {
+                    stack.push(child);
+                }
+            }
+        }
+        map
+    }
+
+    /// Every aggregate, sort order and extension stat matches a fresh walk.
+    fn assert_invariants(tree: &Tree) {
+        // Aggregates and sort order, depth first.
+        let mut stack = vec![tree.root()];
+        while let Some(node) = stack.pop() {
+            let children = tree.children(node);
+            if node.is_dir() {
+                let mut size = 0u64;
+                let mut disk = 0u64;
+                let mut files = 0u32;
+                let mut dirs = 0u32;
+                let mut max_modified = 0i64;
+                for (i, c) in children.iter().enumerate() {
+                    size += c.size;
+                    disk += c.disk_size;
+                    files = files.saturating_add(c.files);
+                    dirs = dirs.saturating_add(c.dirs + c.is_dir() as u32);
+                    max_modified = max_modified.max(c.modified());
+                    if i > 0 {
+                        let (a, b) = (&children[i - 1], c);
+                        assert!(
+                            a.size > b.size || (a.size == b.size && tree.name(a) <= tree.name(b)),
+                            "children not sorted: {} ({}) before {} ({})",
+                            tree.name(a),
+                            a.size,
+                            tree.name(b),
+                            b.size,
+                        );
+                    }
+                    if c.is_dir() {
+                        stack.push(c);
+                    }
+                }
+                // Pseudo-items and hard links follow the same aggregate rule.
+                assert_eq!(node.size, size, "size of {}", tree.name(node));
+                assert_eq!(node.disk_size, disk, "disk of {}", tree.name(node));
+                assert_eq!(node.files, files, "files of {}", tree.name(node));
+                assert_eq!(node.dirs, dirs, "dirs of {}", tree.name(node));
+                assert!(
+                    node.modified() >= max_modified,
+                    "modified of {} older than a child",
+                    tree.name(node)
+                );
+            }
+        }
+        // Extension stats match a fresh walk (order is not stable across
+        // incremental mutations, and emptied buckets stay as zero entries, so
+        // compare per-extension and allow stale zeros).
+        let expected = ext_totals(tree);
+        for stat in &tree.exts {
+            let (bytes, files) = expected
+                .get(&stat.name.to_string())
+                .copied()
+                .unwrap_or((0, 0));
+            assert_eq!(stat.bytes, bytes, "bytes for {}", stat.name);
+            assert_eq!(stat.files, files, "files for {}", stat.name);
+        }
+        for (ext, (bytes, files)) in &expected {
+            let found = tree.exts.iter().find(|e| &*e.name == ext.as_str());
+            assert!(found.is_some(), "missing ext bucket for {ext}");
+            let found = found.unwrap();
+            assert_eq!(
+                (found.bytes, found.files),
+                (*bytes, *files),
+                "totals for {ext}"
+            );
+        }
+        // Every file's rank points at its own extension (or NO_EXT).
+        let mut stack = vec![tree.root()];
+        while let Some(node) = stack.pop() {
+            for child in tree.children(node) {
+                if child.kind() == NodeKind::File {
+                    match extension_of(tree.name(child)) {
+                        Some(ext) => {
+                            let id = child.ext as usize;
+                            assert!(
+                                id < tree.exts.len(),
+                                "ext id {id} out of range for {}",
+                                tree.name(child)
+                            );
+                            assert_eq!(&*tree.exts[id].name, ext.as_str());
+                        }
+                        None => assert_eq!(child.ext, NO_EXT),
+                    }
+                } else if child.is_dir() {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+
+    fn ext_bytes(tree: &Tree, ext: &str) -> (u64, u64) {
+        tree.exts
+            .iter()
+            .find(|e| &*e.name == ext)
+            .map(|e| (e.bytes, e.files))
+            .unwrap_or((0, 0))
+    }
+
+    #[test]
+    fn remove_keeps_totals_sorted_and_ext_stats() {
+        let mut tree = rich_tree();
+        assert_invariants(&tree);
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (1850, 5, 2)
+        );
+
+        // Remove one file from a sub-directory.
+        let a = tree.find(Path::new("/root/docs/a.txt")).unwrap();
+        tree.remove(&a).unwrap();
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (1750, 4, 2)
+        );
+        assert_eq!(ext_bytes(&tree, ".txt"), (200, 1));
+        assert_eq!(ext_bytes(&tree, ".log"), (50, 1));
+        assert_invariants(&tree);
+
+        // Remove a whole directory (media: 1500 bytes, 2 files, + itself).
+        let media = tree.find(Path::new("/root/media")).unwrap();
+        tree.remove(&media).unwrap();
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (250, 2, 1)
+        );
+        assert_eq!(ext_bytes(&tree, ".mp4"), (0, 0));
+        assert_eq!(tree.find(Path::new("/root/media")), None);
+        // Largest-first: e.txt (200) before docs (50).
+        assert_eq!(names(&tree, tree.root()), ["e.txt", "docs"]);
+        assert_invariants(&tree);
+    }
+
+    #[test]
+    fn insert_keeps_totals_sorted_and_ext_stats() {
+        let mut tree = rich_tree();
+        // A file larger than everything becomes the first child.
+        let path = tree
+            .insert(&[], Subtree::file("huge.log", 2000, 0))
+            .unwrap();
+        assert_eq!(path, vec![0]);
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (3850, 6, 2)
+        );
+        assert_eq!(ext_bytes(&tree, ".log"), (2050, 2));
+        assert_invariants(&tree);
+
+        // A nested directory keeps its structure and re-sorts its parent.
+        let mut arena = Arena::default();
+        let mut deep = DirBuilder::new(0);
+        deep.add_file("x.txt", 300, 300, 0);
+        deep.add_file("y.txt", 400, 400, 0);
+        let deep = deep.commit(&mut arena);
+        let mut moved = DirBuilder::new(0);
+        moved.add_dir("deep", deep);
+        let moved = moved.commit(&mut arena);
+        let path = tree
+            .insert(&[], Subtree::new(arena, "extra", moved))
+            .unwrap();
+        assert_eq!(tree.name(tree.get(&path).unwrap()), "extra");
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (4550, 8, 4)
+        );
+        assert_eq!(ext_bytes(&tree, ".txt"), (1000, 4));
+        assert_invariants(&tree);
+        // Replacing an existing name swaps the bytes instead of adding.
+        let before_files = tree.root().files;
+        tree.insert(&[], Subtree::file("E.TXT", 10, 0)).unwrap();
+        assert_eq!(tree.root().files, before_files - 1 + 1);
+        assert_eq!(tree.root().size, 4550 - 200 + 10);
+        assert_eq!(ext_bytes(&tree, ".txt"), (1000 - 200 + 10, 4));
+        assert_invariants(&tree);
+    }
+
+    #[test]
+    fn rename_keeps_totals_sorted_and_ext_stats() {
+        let mut tree = rich_tree();
+        // File rename that changes the extension moves bytes between buckets.
+        let e = tree.find(Path::new("/root/e.txt")).unwrap();
+        let new_path = tree.rename(&e, "e.md").unwrap();
+        assert_eq!(tree.name(tree.get(&new_path).unwrap()), "e.md");
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (1850, 5, 2)
+        );
+        assert_eq!(ext_bytes(&tree, ".txt"), (100, 1));
+        assert_eq!(ext_bytes(&tree, ".md"), (200, 1));
+        assert_invariants(&tree);
+
+        // Renaming a directory keeps its contents and totals.
+        let docs = tree.find(Path::new("/root/docs")).unwrap();
+        let new_docs = tree.rename(&docs, "documents").unwrap();
+        assert!(tree.find(Path::new("/root/documents/b.log")).is_some());
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (1850, 5, 2)
+        );
+        assert_invariants(&tree);
+        let _ = new_docs;
+
+        // A rename that only changes case keeps the extension bucket.
+        let b = tree.find(Path::new("/root/documents/b.log")).unwrap();
+        tree.rename(&b, "B.LOG").unwrap();
+        assert_eq!(ext_bytes(&tree, ".log"), (50, 1));
+        assert_invariants(&tree);
+    }
+
+    #[test]
+    fn deterministic_mutation_sequence_keeps_invariants() {
+        let mut tree = rich_tree();
+        assert_invariants(&tree);
+        // Fixed sequence (no RNG): sizes stay small so the tree never empties.
+        let inserted = tree.insert(&[], Subtree::file("tmp1.dat", 77, 0)).unwrap();
+        assert_invariants(&tree);
+        let _ = tree.rename(&inserted, "tmp1.log").unwrap();
+        assert_eq!(ext_bytes(&tree, ".log"), (50 + 77, 2));
+        assert_invariants(&tree);
+        let docs = tree.find(Path::new("/root/docs")).unwrap();
+        let _ = tree.rename(&docs, "docs2").unwrap();
+        assert_invariants(&tree);
+        let b = tree.find(Path::new("/root/docs2/b.log")).unwrap();
+        tree.remove(&b).unwrap();
+        assert_eq!(ext_bytes(&tree, ".log"), (77, 1));
+        assert_invariants(&tree);
+        tree.insert(&docs, Subtree::file("fresh.txt", 1000, 0))
+            .unwrap();
+        assert_invariants(&tree);
+        // docs2 (1100) is now the second child after media (1500).
+        assert_eq!(
+            names(&tree, tree.root())[..2],
+            ["media".to_string(), "docs2".to_string()]
+        );
+        let media = tree.find(Path::new("/root/media")).unwrap();
+        tree.remove(&media).unwrap();
+        assert_invariants(&tree);
+        assert_eq!(
+            (tree.root().size, tree.root().files, tree.root().dirs),
+            (1377, 4, 1)
+        );
+        assert_eq!(ext_bytes(&tree, ".mp4"), (0, 0));
+    }
 }

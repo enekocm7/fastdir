@@ -19,7 +19,7 @@ impl FastDir {
                 multi || special,
             )
             .menu_with_icon_and_disabled(
-                self.tr("menu.show_explorer"),
+                self.reveal_label(),
                 IconName::FolderOpen,
                 Box::new(RevealItem),
                 multi || special,
@@ -59,7 +59,14 @@ impl FastDir {
             )
             .separator()
             .menu_with_icon_and_disabled(
-                self.tr("menu.recycle"),
+                self.tr("menu.export"),
+                IconName::Download,
+                Box::new(ExportResults),
+                self.tree.is_none(),
+            )
+            .separator()
+            .menu_with_icon_and_disabled(
+                self.tr_fmt("menu.recycle", &[("trash", self.trash_name())]),
                 IconName::Recycle,
                 Box::new(TrashItem),
                 no_ops,

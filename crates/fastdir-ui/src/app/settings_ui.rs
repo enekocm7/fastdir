@@ -4,9 +4,8 @@
 use super::*;
 use fastdir_core::integration;
 use fastdir_settings::{
-    DateFormat, DeleteAction, PercentBase, SizeUnit, SortSettings, StartupMode,
-    ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency,
-    config_path,
+    DateFormat, DeleteAction, PercentBase, SizeUnit, SortSettings, StartupMode, ThemePreference,
+    TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency, config_path,
 };
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -1156,7 +1155,14 @@ impl Render for SettingsView {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .child(tr("set.ops.confirm_recycle")),
+                                            .child(fastdir_locale::fmt(
+                                                &lang_setting,
+                                                "set.ops.confirm_recycle",
+                                                &[(
+                                                    "trash",
+                                                    fastdir_locale::trash_name(&lang_setting),
+                                                )],
+                                            )),
                                     )
                                     .child(
                                         Switch::new("settings-confirm-recycle")
@@ -1681,13 +1687,10 @@ impl FastDir {
             "{:.0}",
             self.settings.appearance.ui_scale.clamp(0.5, 2.0) * 100.0
         );
-        let excluded_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(excluded_text));
+        let excluded_input = cx.new(|cx| InputState::new(window, cx).default_value(excluded_text));
         let thread_input = cx.new(|cx| InputState::new(window, cx).default_value(thread_text));
-        let cushion_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(cushion_text));
-        let min_cell_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(min_cell_text));
+        let cushion_input = cx.new(|cx| InputState::new(window, cx).default_value(cushion_text));
+        let min_cell_input = cx.new(|cx| InputState::new(window, cx).default_value(min_cell_text));
         let scale_input = cx.new(|cx| InputState::new(window, cx).default_value(scale_text));
         let owner = cx.entity();
         let dlg_title = self.tr("set.title");

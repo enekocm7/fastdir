@@ -153,4 +153,38 @@ mod tests {
         assert_eq!(duration(std::time::Duration::from_millis(1500)), "1.5s");
         assert_eq!(duration(std::time::Duration::from_secs(61)), "1m 01s");
     }
+
+    #[test]
+    fn format_edge_cases_are_deterministic() {
+        // Binary vs decimal thresholds.
+        assert_eq!(bytes(1024 * 1024), "1.00 MB");
+        assert_eq!(bytes_with(1_000_000, true), "1.00 MB");
+        assert_eq!(bytes_with(1_000_000, false), "977 KB");
+        // Very large values stay in PB without panicking.
+        assert!(bytes(u64::MAX).ends_with("PB"));
+        assert!(bytes_with(u64::MAX, true).ends_with("PB"));
+        // Thousands grouping at every magnitude.
+        assert_eq!(count(1_000_000), "1,000,000");
+        assert_eq!(count(1_000_000_000), "1,000,000,000");
+        // Percentages: full, empty and rounding.
+        assert_eq!(percent(1, 1), "100.0%");
+        assert_eq!(percent(0, 5), "0.0%");
+        assert_eq!(percent(1, 3), "33.3%");
+        // Durations: sub-minute stays in seconds, minute boundary pads.
+        assert_eq!(duration(std::time::Duration::from_secs(0)), "0.0s");
+        assert_eq!(duration(std::time::Duration::from_secs(59)), "59.0s");
+        assert_eq!(duration(std::time::Duration::from_secs(60)), "1m 00s");
+        assert_eq!(duration(std::time::Duration::from_secs(3600)), "60m 00s");
+        // Relative dates cover every unit, singular and plural.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        assert_eq!(date_with(now - 60, true), "1 minute ago");
+        assert_eq!(date_with(now - 120, true), "2 minutes ago");
+        assert_eq!(date_with(now - 2 * 3_600, true), "2 hours ago");
+        assert_eq!(date_with(now - 8 * 86_400, true), "1 week ago");
+        assert_eq!(date_with(now - 60 * 86_400, true), "2 months ago");
+        assert_eq!(date_with(now - 2 * 365 * 86_400, true), "2 years ago");
+    }
 }
