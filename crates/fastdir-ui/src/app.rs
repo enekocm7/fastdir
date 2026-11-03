@@ -561,6 +561,17 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Show or hide empty folders in the directory list.
+    pub(super) fn toggle_hide_empty(&mut self, cx: &mut Context<Self>) {
+        self.settings.list.hide_empty_folders = !self.settings.list.hide_empty_folders;
+        self.settings.save();
+        self.rebuild_rows();
+        if let Some(ix) = self.selected {
+            self.list_scroll.scroll_to_item(ix, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
     /// Toggle the list-only layout (hides the treemap panel).
     pub(super) fn toggle_treemap_visible(&mut self, cx: &mut Context<Self>) {
         self.settings.treemap.show = !self.settings.treemap.show;

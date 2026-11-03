@@ -289,6 +289,8 @@ pub struct ListSettings {
     pub show_folders: bool,
     pub show_modified: bool,
     pub show_disk: bool,
+    /// Hide folders that contain no data (no files and zero size, recursively).
+    pub hide_empty_folders: bool,
 }
 
 /// Default number of rows in the "Top files" view.
@@ -309,6 +311,7 @@ impl Default for ListSettings {
             show_folders: true,
             show_modified: true,
             show_disk: true,
+            hide_empty_folders: false,
         }
     }
 }
@@ -719,6 +722,7 @@ mod tests {
         assert!(s.startup.last_path.is_none());
         assert_eq!(s.list.size_unit, SizeUnit::Binary);
         assert_eq!(s.list.date_format, DateFormat::Absolute);
+        assert!(!s.list.hide_empty_folders, "empty folders shown by default");
         assert!(s.ops.confirm_recycle);
         assert_eq!(s.ops.default_delete, DeleteAction::Recycle);
         assert!(
@@ -789,6 +793,7 @@ mod tests {
                 show_folders: true,
                 show_modified: false,
                 show_disk: true,
+                hide_empty_folders: true,
             },
             ops: OpSettings {
                 confirm_recycle: false,

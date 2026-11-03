@@ -58,6 +58,13 @@ impl FastDir {
             return;
         };
         let tree = tree.read();
+        let hide_empty = self.settings.list.hide_empty_folders;
+        /// A folder is "empty" when nothing below it is a file (so a folder
+        /// holding only empty folders counts too). Unreadable folders are
+        /// kept: their contents are unknown. The root is never hidden.
+        fn hidden(node: &Node, depth: u16, hide_empty: bool) -> bool {
+            hide_empty && depth > 0 && node.is_dir() && !node.error() && node.files == 0
+        }
         /// Add a node and its expanded descendants.
         fn walk(
             tree: &Tree,
@@ -66,7 +73,11 @@ impl FastDir {
             depth: u16,
             rows: &mut Vec<Row>,
             sort: (SortKey, bool),
+            hide_empty: bool,
         ) {
+            if hidden(node, depth, hide_empty) {
+                return;
+            }
             rows.push(Row {
                 path: path.clone(),
                 depth,
@@ -76,7 +87,15 @@ impl FastDir {
                 let children = tree.children(node);
                 for i in FastDir::child_order(tree, node, sort) {
                     path.push(i);
-                    walk(tree, &children[i as usize], path, depth + 1, rows, sort);
+                    walk(
+                        tree,
+                        &children[i as usize],
+                        path,
+                        depth + 1,
+                        rows,
+                        sort,
+                        hide_empty,
+                    );
                     path.pop();
                 }
             }
@@ -91,7 +110,11 @@ impl FastDir {
             rows: &mut Vec<Row>,
             sort: (SortKey, bool),
             filter: &Filter,
+            hide_empty: bool,
         ) -> bool {
+            if hidden(node, depth, hide_empty) {
+                return false;
+            }
             let start = rows.len();
             let mut any = false;
             if node.is_dir() {
@@ -106,6 +129,7 @@ impl FastDir {
                         rows,
                         sort,
                         filter,
+                        hide_empty,
                     );
                     path.pop();
                 }
@@ -135,6 +159,7 @@ impl FastDir {
                 &mut self.rows,
                 self.sort,
                 &self.filter,
+                hide_empty,
             );
             // Start on the first actual match, not on an ancestor shown for
             // context.
@@ -142,7 +167,15 @@ impl FastDir {
                 .and_then(|sel| self.rows.iter().position(|r| r.path == sel && r.matched));
             self.selected = previous.or_else(|| self.rows.iter().position(|r| r.matched));
         } else {
-            walk(&tree, tree.root(), &mut path, 0, &mut self.rows, self.sort);
+            walk(
+                &tree,
+                tree.root(),
+                &mut path,
+                0,
+                &mut self.rows,
+                self.sort,
+                hide_empty,
+            );
             self.selected = selected_path
                 .and_then(|sel| self.rows.iter().position(|r| r.path == sel))
                 .or_else(|| (!self.rows.is_empty()).then_some(0));
