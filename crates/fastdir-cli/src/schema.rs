@@ -10,6 +10,7 @@
 //! intermediate copy, so exporting a multi-million-entry drive scan does not
 //! double its memory.
 
+use fastdir_core::duplicates::{DuplicateOptions, DuplicateReport};
 use fastdir_core::model::{FileEntry, Node, NodeKind, Tree};
 use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
@@ -20,6 +21,7 @@ use std::path::{Path, PathBuf};
 pub const SCHEMA_VERSION: u32 = 1;
 pub const SCAN_SCHEMA: &str = "fastdir.scan";
 pub const TOP_SCHEMA: &str = "fastdir.top";
+pub const DUPLICATES_SCHEMA: &str = "fastdir.duplicates";
 
 /// `modified` as ISO-8601 UTC, or `None` when unknown.
 pub fn iso_time(unix: i64) -> Option<String> {
@@ -236,6 +238,59 @@ pub fn top_doc(meta: &ScanMeta, tree: &Tree, files: &[FileEntry], limit: usize) 
         "limit": limit,
         "files": files.iter().map(|f| file_entry(tree, f)).collect::<Vec<_>>(),
     })
+}
+
+/// `fastdir duplicates` output.
+pub fn duplicates_doc(
+    meta: &ScanMeta,
+    report: &DuplicateReport,
+    options: &DuplicateOptions,
+) -> Value {
+    json!({
+        "schema": DUPLICATES_SCHEMA,
+        "version": SCHEMA_VERSION,
+        "fastdir_version": env!("CARGO_PKG_VERSION"),
+        "root": meta.root.to_string_lossy(),
+        "scanned_at": meta.scanned_at,
+        "elapsed_ms": meta.elapsed_ms,
+        "errors": meta.errors,
+        "min_size": options.min_size,
+        "extensions": options.extensions,
+        "limit": options.limit,
+        "candidates": report.candidates,
+        "total_groups": report.total_groups,
+        "total_wasted": report.total_wasted,
+        "hashed_bytes": report.bytes_hashed,
+        "hash_errors": report.hash_errors,
+        "groups": report.groups.iter().map(|group| json!({
+            "size": group.size,
+            "hash": group.hash,
+            "wasted": group.wasted(),
+            "files": group.files.iter().map(|file| json!({
+                "path": file.path.to_string_lossy(),
+                "modified": iso_time(file.modified),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// `fastdir duplicates --format csv` output: one row per file.
+pub fn duplicates_csv(report: &DuplicateReport) -> String {
+    let mut out = String::from("group,wasted,path,size,hash,modified_iso\n");
+    for (index, group) in report.groups.iter().enumerate() {
+        for file in &group.files {
+            out.push_str(&format!(
+                "{},{},{},{},{},{}\n",
+                index + 1,
+                group.wasted(),
+                csv_field(&file.path.to_string_lossy()),
+                group.size,
+                group.hash,
+                iso_time(file.modified).unwrap_or_default()
+            ));
+        }
+    }
+    out
 }
 
 /// Quote one CSV field (RFC 4180).
@@ -483,6 +538,78 @@ pub(crate) mod tests {
         assert_eq!(
             csv,
             format!("path,size,disk_size,modified_iso\n\"r{sep}a,b.txt\",10,10,\n")
+        );
+    }
+
+    #[test]
+    fn duplicates_document_shape() {
+        let report = DuplicateReport {
+            groups: vec![fastdir_core::duplicates::DuplicateGroup {
+                size: 100,
+                hash: "ab".repeat(32),
+                files: vec![
+                    fastdir_core::duplicates::DuplicateFile {
+                        path: PathBuf::from("root/a.bin"),
+                        modified: 1_700_000_000,
+                    },
+                    fastdir_core::duplicates::DuplicateFile {
+                        path: PathBuf::from("root/b.bin"),
+                        modified: 0,
+                    },
+                ],
+            }],
+            total_groups: 1,
+            total_wasted: 100,
+            candidates: 2,
+            bytes_hashed: 200,
+            hash_errors: 0,
+            elapsed: std::time::Duration::from_millis(5),
+            cancelled: false,
+        };
+        let options = DuplicateOptions {
+            min_size: 50,
+            extensions: vec![".bin".into()],
+            limit: Some(10),
+            threads: None,
+        };
+        let doc = duplicates_doc(&meta(), &report, &options);
+        assert_eq!(
+            keys(&doc),
+            [
+                "candidates",
+                "elapsed_ms",
+                "errors",
+                "extensions",
+                "fastdir_version",
+                "groups",
+                "hash_errors",
+                "hashed_bytes",
+                "limit",
+                "min_size",
+                "root",
+                "scanned_at",
+                "schema",
+                "total_groups",
+                "total_wasted",
+                "version"
+            ]
+        );
+        assert_eq!(doc["schema"], "fastdir.duplicates");
+        assert_eq!(doc["version"], 1);
+        assert_eq!(doc["total_wasted"], 100);
+        let group = &doc["groups"][0];
+        assert_eq!(group["size"], 100);
+        assert_eq!(group["wasted"], 100);
+        assert_eq!(group["files"][0]["path"], "root/a.bin");
+        assert_eq!(group["files"][0]["modified"], "2023-11-14T22:13:20Z");
+        assert_eq!(group["files"][1]["modified"], Value::Null);
+
+        let csv = duplicates_csv(&report);
+        assert_eq!(
+            csv,
+            "group,wasted,path,size,hash,modified_iso\n\
+             1,100,root/a.bin,100,abababababababababababababababababababababababababababababababab,2023-11-14T22:13:20Z\n\
+             1,100,root/b.bin,100,abababababababababababababababababababababababababababababababab,\n"
         );
     }
 

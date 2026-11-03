@@ -26,6 +26,8 @@ parking_lot = "0.12"
 smallvec = "1.13"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 trash = "5"
+# Content hashing for duplicate detection
+blake3 = "1.8"
 # Treemap image
 image = { version = "0.25", default-features = false }
 # Updater
