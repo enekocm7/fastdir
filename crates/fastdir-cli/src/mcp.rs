@@ -48,8 +48,8 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
 /// Run the server until stdin closes.
-pub fn serve(allow_destructive: bool) -> io::Result<()> {
-    let mut server = Server::new(allow_destructive);
+pub fn serve(allow_destructive: bool, defaults: ScanOptions) -> io::Result<()> {
+    let mut server = Server::new(allow_destructive).with_scan_defaults(defaults);
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -101,6 +101,8 @@ fn tool_err<T>(msg: impl Into<String>) -> Result<T, ToolError> {
 pub struct Server {
     scans: Vec<Scanned>,
     allow_destructive: bool,
+    /// Scan settings from `--config`; every scan starts from these.
+    scan_defaults: ScanOptions,
 }
 
 impl Server {
@@ -108,7 +110,14 @@ impl Server {
         Self {
             scans: Vec::new(),
             allow_destructive,
+            scan_defaults: ScanOptions::default(),
         }
+    }
+
+    /// Base options for every scan (per-call arguments are layered on top).
+    pub fn with_scan_defaults(mut self, defaults: ScanOptions) -> Self {
+        self.scan_defaults = defaults;
+        self
     }
 
     /// Handle one JSON-RPC message; `None` for notifications.
@@ -371,7 +380,7 @@ impl Server {
                 target.display()
             ));
         }
-        let i = self.scan(&target, &ScanOptions::default())?;
+        let i = self.scan(&target, &self.scan_defaults.clone())?;
         Ok((i, Vec::new(), true))
     }
 
@@ -407,7 +416,7 @@ impl Server {
                 .ok_or_else(|| ToolError("exclude must be a list of strings".into()))?,
             Some(_) => return tool_err("exclude must be a list of strings"),
         };
-        let options = ScanOptions {
+        let explicit = ScanOptions {
             excluded_globs: exclude,
             skip_hidden_system: arg_bool(args, "skip_hidden", false)?,
             follow_junctions: arg_bool(args, "follow_junctions", false)?,
@@ -415,6 +424,7 @@ impl Server {
             threads,
             collect_owners: false,
         };
+        let options = crate::config::layer(&self.scan_defaults, &explicit);
         let i = self.scan(&path, &options)?;
         let s = &self.scans[i];
         let mut out = children_reply(&s.tree, &[], limit, true);
@@ -576,7 +586,7 @@ impl Server {
                 self.scans.push(s);
                 self.scans.len() - 1
             }
-            None => self.scan(&path, &ScanOptions::default())?,
+            None => self.scan(&path, &self.scan_defaults.clone())?,
         };
         let s = &self.scans[i];
         Ok(Side::Cached {
@@ -600,7 +610,7 @@ impl Server {
         if !meta.is_dir() {
             return tool_err(format!("{}: not a file or folder", path.display()));
         }
-        let scanned = scan_folder(&path, &ScanOptions::default())?;
+        let scanned = scan_folder(&path, &self.scan_defaults)?;
         let side = diff_doc::DiffSide::new(
             scanned.meta.root.to_string_lossy().into_owned(),
             Some(scanned.meta.scanned_at.clone()),

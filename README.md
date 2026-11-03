@@ -276,6 +276,7 @@ fastdir-cli duplicates <path> [options]
                                     groups of identical files and the space they waste
 fastdir-cli diff <old> <new>        what changed between two scans
 fastdir-cli mcp                     MCP server on stdin/stdout (see below)
+fastdir-cli config [<file>]         the scan options a config file gives (see --config)
 fastdir-cli help [<command>]        help for a command
 fastdir-cli --version
 ```
@@ -322,11 +323,23 @@ row has its own sizes.
 | `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff | Skip hidden and system entries |
 | `--owners` | scan, top, diff | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top, duplicates, diff | Nothing on stderr except errors |
+| `--config[=<file>]` | scan, top, duplicates, diff, mcp | Use the `[scan]` section of `config.toml` (the default file, or `<file>`) |
 
 Scan options apply to `diff` only when `<new>` is a folder; comparing two
 saved scans does not scan anything.
 
-The command line uses these flags only; it does not read `config.toml`.
+**Using the app's scan settings.** By default the command line uses these
+flags only and never reads `config.toml`, which keeps scripts reproducible.
+Add `--config` to opt in: the `[scan]` section of
+`%APPDATA%\FastDir\config.toml` (or `--config=<file>`; a bare `--config
+<file>` also works when the file ends in `.toml`) becomes the base for the
+scan. It covers excluded names, hidden/system skipping, junction following,
+cross-volume and thread count. Explicit flags win over it: `--threads`
+replaces the configured count, `--exclude` adds to the configured exclusions,
+and switches such as `--follow-junctions` turn things on. A missing or
+invalid file is an error (exit code 2), never a silent fallback.
+`fastdir-cli config [<file>]` prints the options the file gives, as JSON, for
+debugging. Without `--config`, nothing changes.
 
 **Output streams.** The result goes to stdout. stderr gets a live progress
 line (only when it is a terminal) and a one-line summary, unless `--quiet`.
@@ -505,6 +518,11 @@ Or in any client's JSON configuration:
 ```json
 { "mcpServers": { "fastdir": { "command": "fastdir-cli", "args": ["mcp"] } } }
 ```
+
+Add `--config` (or `--config=<file>`) to `mcp` to apply the `[scan]` section of
+`config.toml` to every scan the server runs, so the agent sees the same scan
+as the app. Per-call `scan_path` arguments add to or override it. Without
+`--config` the file is ignored.
 
 ### Keyboard shortcuts
 

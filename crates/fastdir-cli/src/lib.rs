@@ -9,20 +9,21 @@
 //!   console (see [`attach_parent_console`]).
 
 pub mod args;
+pub mod config;
 pub mod diff;
 pub mod mcp;
 pub mod schema;
 mod signal;
 
 use args::{
-    Command, DiffCommand, DuplicatesCommand, Format, HelpTopic, OutputArgs, ScanArgs, ScanCommand,
-    TopCommand,
+    Command, ConfigCommand, ConfigSource, DiffCommand, DuplicatesCommand, Format, HelpTopic,
+    McpCommand, OutputArgs, ScanArgs, ScanCommand, TopCommand,
 };
 use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
 use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
 use fastdir_core::format;
 use fastdir_core::model::Tree;
-use fastdir_core::scanner::{self, Progress};
+use fastdir_core::scanner::{self, Progress, ScanOptions};
 use schema::{ScanDoc, ScanMeta, TreeShape};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -94,6 +95,7 @@ fn run_inline(args: &[OsString]) -> i32 {
                 HelpTopic::Duplicates => args::DUPLICATES_HELP,
                 HelpTopic::Diff => args::DIFF_HELP,
                 HelpTopic::Mcp => args::MCP_HELP,
+                HelpTopic::Config => args::CONFIG_HELP,
             });
             Ok(())
         }
@@ -101,11 +103,14 @@ fn run_inline(args: &[OsString]) -> i32 {
             print_stdout(&format!("fastdir {}\n", env!("CARGO_PKG_VERSION")));
             Ok(())
         }
-        Command::Scan(c) => run_scan_command(&c),
-        Command::Top(c) => run_top_command(&c),
-        Command::Duplicates(c) => run_duplicates_command(&c),
-        Command::Diff(c) => run_diff_command(&c),
-        Command::Mcp(c) => mcp::serve(c.allow_destructive).map_err(io_error),
+        Command::Scan(mut c) => with_config(&mut c.scan).and_then(|()| run_scan_command(&c)),
+        Command::Top(mut c) => with_config(&mut c.scan).and_then(|()| run_top_command(&c)),
+        Command::Duplicates(mut c) => {
+            with_config(&mut c.scan).and_then(|()| run_duplicates_command(&c))
+        }
+        Command::Diff(mut c) => with_config(&mut c.scan).and_then(|()| run_diff_command(&c)),
+        Command::Mcp(c) => run_mcp_command(&c),
+        Command::Config(c) => run_config_command(&c),
     };
     match result {
         Ok(()) => exit::OK,
@@ -116,6 +121,38 @@ fn run_inline(args: &[OsString]) -> i32 {
             e.code
         }
     }
+}
+
+/// Applies `--config` to `args`; a bad config file is a usage error (exit 2).
+fn with_config(args: &mut ScanArgs) -> Result<(), CliError> {
+    config::apply(args).map_err(|e| CliError::new(exit::USAGE, e))
+}
+
+fn run_mcp_command(c: &McpCommand) -> Result<(), CliError> {
+    let defaults = match &c.config {
+        Some(source) => {
+            config::options_from(&config::load(source).map_err(|e| CliError::new(exit::USAGE, e))?)
+        }
+        None => ScanOptions::default(),
+    };
+    mcp::serve(c.allow_destructive, defaults).map_err(io_error)
+}
+
+fn run_config_command(c: &ConfigCommand) -> Result<(), CliError> {
+    let settings = config::load(&c.source).map_err(|e| CliError::new(exit::USAGE, e))?;
+    let source = match &c.source {
+        ConfigSource::Default => fastdir_settings::config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+        ConfigSource::File(p) => p.display().to_string(),
+    };
+    let doc = config::describe(&config::options_from(&settings), &source);
+    let text = serde_json::to_string_pretty(&doc).unwrap_or_default();
+    print_stdout(&format!(
+        "{text}
+"
+    ));
+    Ok(())
 }
 
 fn print_stdout(text: &str) {
