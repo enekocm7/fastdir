@@ -687,7 +687,7 @@ Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then:
 
 ```powershell
 cargo build --release
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.1 installer\fastdir.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.2 installer\fastdir.iss
 ```
 
 The installer is written to `dist\`.
