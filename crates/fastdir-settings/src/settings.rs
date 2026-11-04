@@ -511,8 +511,8 @@ pub struct OpSettings {
     /// What the Delete key does (Shift+Delete does the other).
     pub default_delete: DeleteAction,
     /// Keep the current cursor and scroll position when a delete finishes
-    /// instead of moving to the deleted item's folder. Off by default, which
-    /// keeps the previous "show me what was deleted" behavior.
+    /// instead of moving to the deleted item's folder. On by default, since
+    /// staying put after a delete is what most people expect.
     pub keep_selection_after_delete: bool,
     /// Where the last move went, remembered for convenience.
     pub last_move_dest: Option<String>,
@@ -525,7 +525,7 @@ impl Default for OpSettings {
             confirm_permanent: true,
             confirm_move: true,
             default_delete: DeleteAction::Recycle,
-            keep_selection_after_delete: false,
+            keep_selection_after_delete: true,
             last_move_dest: None,
         }
     }
@@ -960,8 +960,8 @@ mod tests {
         assert!(s.ops.confirm_recycle);
         assert_eq!(s.ops.default_delete, DeleteAction::Recycle);
         assert!(
-            !s.ops.keep_selection_after_delete,
-            "keeping the view after a delete is opt-in"
+            s.ops.keep_selection_after_delete,
+            "the list stays on the current item after a delete by default"
         );
         assert_eq!(s.updates.channel, UpdateChannel::Stable);
         assert!(
