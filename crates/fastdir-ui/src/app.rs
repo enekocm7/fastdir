@@ -117,6 +117,7 @@ mod dialogs;
 mod export;
 mod file_list;
 mod filter;
+mod history_ui;
 mod open_scan;
 mod platform;
 mod scan_state;

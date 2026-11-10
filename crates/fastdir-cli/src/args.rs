@@ -17,6 +17,8 @@ const CLI_WORDS: &[&str] = &[
     "top",
     "duplicates",
     "diff",
+    "snapshot",
+    "history",
     "mcp",
     "config",
     "help",
@@ -141,6 +143,32 @@ pub struct DuplicatesCommand {
     pub limit: Option<usize>,
 }
 
+/// `fastdir snapshot <path>`: scan and save a timestamped snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotCommand {
+    pub scan: ScanArgs,
+    /// Snapshot folder (`--dir`); `None` = the configured or default one.
+    pub dir: Option<PathBuf>,
+    /// `--keep <n>`: snapshots to keep for this root (`0` = no limit).
+    pub keep: Option<u32>,
+    /// `--max-age <age>` in days (`0` = no limit).
+    pub max_age_days: Option<u32>,
+    /// Deepest level written (`None` = everything).
+    pub max_depth: Option<usize>,
+    pub include_files: bool,
+    pub pretty: bool,
+}
+
+/// `fastdir history <path>`: the size of `<path>` in every saved snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryCommand {
+    pub path: PathBuf,
+    pub dir: Option<PathBuf>,
+    /// `--config`: read the snapshot folder from `[snapshots]`.
+    pub config: Option<ConfigSource>,
+    pub out: OutputArgs,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpCommand {
     /// Expose `recycle_path` / `delete_path`. Off by default.
@@ -164,6 +192,8 @@ pub enum HelpTopic {
     Top,
     Duplicates,
     Diff,
+    Snapshot,
+    History,
     Mcp,
     Config,
 }
@@ -176,6 +206,8 @@ pub enum Command {
     Top(TopCommand),
     Duplicates(DuplicatesCommand),
     Diff(DiffCommand),
+    Snapshot(SnapshotCommand),
+    History(HistoryCommand),
     Mcp(McpCommand),
     Config(ConfigCommand),
 }
@@ -303,6 +335,8 @@ pub fn parse(args: &[OsString]) -> Result<Command, UsageError> {
             Some("top") => Ok(Command::Help(HelpTopic::Top)),
             Some("duplicates") => Ok(Command::Help(HelpTopic::Duplicates)),
             Some("diff") => Ok(Command::Help(HelpTopic::Diff)),
+            Some("snapshot") => Ok(Command::Help(HelpTopic::Snapshot)),
+            Some("history") => Ok(Command::Help(HelpTopic::History)),
             Some("mcp") => Ok(Command::Help(HelpTopic::Mcp)),
             Some("config") => Ok(Command::Help(HelpTopic::Config)),
             Some(other) => err(format!("unknown command \"{other}\"")),
@@ -311,6 +345,8 @@ pub fn parse(args: &[OsString]) -> Result<Command, UsageError> {
         "top" => parse_scan_like(cur, HelpTopic::Top),
         "duplicates" => parse_duplicates(cur),
         "diff" => parse_diff(cur),
+        "snapshot" => parse_snapshot(cur),
+        "history" => parse_history(cur),
         "mcp" => parse_mcp(cur),
         "config" => parse_config(cur),
         other if other.starts_with('-') => err(format!("unknown option \"{other}\"")),
@@ -704,6 +740,172 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     }))
 }
 
+/// `--max-age`: an age such as `90d`, `6m` or `1y` as whole days (rounded
+/// up), or `0` for no limit.
+fn parse_max_age(raw: &str) -> Result<u32, UsageError> {
+    if raw.trim() == "0" {
+        return Ok(0);
+    }
+    fastdir_core::filter::parse_age(raw)
+        .filter(|secs| *secs > 0)
+        .map(|secs| u32::try_from((secs + 86_399) / 86_400).unwrap_or(u32::MAX))
+        .ok_or_else(|| {
+            UsageError(format!(
+                "--max-age expects an age such as 90d, 6m or 1y (or 0 for no limit), got \"{raw}\""
+            ))
+        })
+}
+
+fn parse_snapshot(mut cur: Cursor) -> Result<Command, UsageError> {
+    let mut path: Option<String> = None;
+    let mut threads = None;
+    let mut exclude = Vec::new();
+    let mut follow_junctions = false;
+    let mut cross_volumes = false;
+    let mut skip_hidden_system = false;
+    let mut skip_windows_dir = false;
+    let mut collect_owners = false;
+    let mut quiet = false;
+    let mut config = None;
+    let mut pretty = false;
+    let mut dir = None;
+    let mut keep = None;
+    let mut max_age_days = None;
+    let mut max_depth = None;
+    let mut include_files = true;
+    let mut positional_only = false;
+
+    while let Some(arg) = cur.args.next() {
+        if positional_only || !arg.starts_with('-') || arg == "-" {
+            if path.is_some() {
+                return err(format!("unexpected extra argument \"{arg}\""));
+            }
+            path = Some(arg);
+            continue;
+        }
+        let (name, inline) = split_eq(&arg);
+        let takes_value = matches!(
+            name,
+            "--threads"
+                | "--config"
+                | "--exclude"
+                | "--dir"
+                | "--keep"
+                | "--max-age"
+                | "--max-depth"
+        );
+        if inline.is_some() && !takes_value {
+            return err(format!("{name} does not take a value"));
+        }
+        match name {
+            "--" => positional_only = true,
+            "--help" | "-h" => return Ok(Command::Help(HelpTopic::Snapshot)),
+            "--threads" => {
+                let n = parse_number(name, &cur.value(name, inline)?, 1)?;
+                if n > 64 {
+                    return err("--threads expects a number between 1 and 64");
+                }
+                threads = Some(n);
+            }
+            "--exclude" => exclude.push(cur.value(name, inline)?),
+            "--follow-junctions" => follow_junctions = true,
+            "--cross-volumes" => cross_volumes = true,
+            "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
+            "--skip-windows" => skip_windows_dir = true,
+            "--owners" => collect_owners = true,
+            "--quiet" | "-q" => quiet = true,
+            "--config" => config = Some(cur.config_source(inline)),
+            "--pretty" => pretty = true,
+            "--dir" => dir = Some(normalize_path(&cur.value(name, inline)?)),
+            "--keep" => {
+                let n = parse_number(name, &cur.value(name, inline)?, 0)?;
+                keep = Some(u32::try_from(n).unwrap_or(u32::MAX));
+            }
+            "--max-age" => max_age_days = Some(parse_max_age(&cur.value(name, inline)?)?),
+            "--max-depth" => max_depth = Some(parse_number(name, &cur.value(name, inline)?, 0)?),
+            "--no-files" => include_files = false,
+            _ => return err(format!("unknown option \"{name}\"")),
+        }
+    }
+    let Some(path) = path else {
+        return err("missing <path> to scan");
+    };
+    Ok(Command::Snapshot(SnapshotCommand {
+        scan: ScanArgs {
+            path: normalize_path(&path),
+            threads,
+            exclude,
+            follow_junctions,
+            cross_volumes,
+            skip_hidden_system,
+            skip_windows_dir,
+            collect_owners,
+            quiet,
+            config,
+        },
+        dir,
+        keep,
+        max_age_days,
+        max_depth,
+        include_files,
+        pretty,
+    }))
+}
+
+fn parse_history(mut cur: Cursor) -> Result<Command, UsageError> {
+    let mut path: Option<String> = None;
+    let mut dir = None;
+    let mut config = None;
+    let mut format = Format::Json;
+    let mut output = None;
+    let mut pretty = false;
+    let mut positional_only = false;
+    while let Some(arg) = cur.args.next() {
+        if positional_only || !arg.starts_with('-') || arg == "-" {
+            if path.is_some() {
+                return err(format!("unexpected extra argument \"{arg}\""));
+            }
+            path = Some(arg);
+            continue;
+        }
+        let (name, inline) = split_eq(&arg);
+        let takes_value = matches!(name, "--dir" | "--config" | "--format" | "--output" | "-o");
+        if inline.is_some() && !takes_value {
+            return err(format!("{name} does not take a value"));
+        }
+        match name {
+            "--" => positional_only = true,
+            "--help" | "-h" => return Ok(Command::Help(HelpTopic::History)),
+            "--dir" => dir = Some(normalize_path(&cur.value(name, inline)?)),
+            "--config" => config = Some(cur.config_source(inline)),
+            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--output" | "-o" => {
+                let v = cur.value(name, inline)?;
+                output = if v == "-" {
+                    None
+                } else {
+                    Some(PathBuf::from(v))
+                };
+            }
+            "--pretty" => pretty = true,
+            _ => return err(format!("unknown option \"{name}\"")),
+        }
+    }
+    let Some(path) = path else {
+        return err("missing <path>");
+    };
+    Ok(Command::History(HistoryCommand {
+        path: normalize_path(&path),
+        dir,
+        config,
+        out: OutputArgs {
+            format,
+            output,
+            pretty,
+        },
+    }))
+}
+
 fn parse_mcp(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut allow_destructive = false;
     let mut config = None;
@@ -748,6 +950,10 @@ Usage:
   fastdir duplicates <path> [options]
                                   list groups of identical files and the space they waste
   fastdir diff <old> <new>        show what changed between two scans
+  fastdir snapshot <path> [options]
+                                  scan <path> and save a timestamped snapshot
+  fastdir history <path> [options]
+                                  the size of <path> in every saved snapshot
   fastdir mcp [options]           run an MCP server on stdin/stdout
   fastdir config [<file>]         print the scan options a config file gives
   fastdir help [<command>]        show help for a command
@@ -879,6 +1085,54 @@ Scanning (only when <new> is a folder):
                           <file>); flags override it, --exclude adds to it
 ";
 
+pub const SNAPSHOT_HELP: &str = "\
+Usage: fastdir snapshot <path> [options]
+
+Scans <path> and saves the result as a timestamped snapshot, for the GUI's
+\"Growth over time\" view, `fastdir history` and `fastdir diff`. Meant to be
+run from a scheduled task. Prints a small JSON summary (schema
+fastdir.snapshot) with the new file and any snapshots removed by retention.
+
+Snapshots are written to <dir>\\<root key>\\<UTC time>.json. The default
+<dir> is %APPDATA%\\FastDir\\snapshots, or the [snapshots] dir of
+config.toml with --config.
+
+Snapshot:
+  --dir <folder>          snapshot folder (default: see above)
+  --keep <n>              keep at most <n> snapshots of this root (0 = no limit)
+  --max-age <age>         remove snapshots older than an age such as 90d, 6m
+                          or 1y (0 = no limit)
+                          Without --keep, --max-age or --config nothing is
+                          removed; the newest snapshot is always kept.
+  --max-depth <n>         only store entries up to <n> levels below <path>;
+                          sizes still count everything
+  --no-files              only store folders (much smaller snapshots)
+  --pretty                indent the JSON summary
+
+Scanning:
+  --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
+  --skip-hidden, --skip-windows, --owners, -q/--quiet   as for `fastdir scan`
+  --config[=<file>]       use the [scan] and [snapshots] sections of
+                          config.toml (dir, keep_count, max_age_days);
+                          flags override them
+";
+
+pub const HISTORY_HELP: &str = "\
+Usage: fastdir history <path> [options]
+
+Prints the size of <path> in every saved snapshot that contains it (its own
+snapshots and those of any folder or drive above it), oldest first, with the
+change since the previous snapshot. Nothing is scanned.
+
+Options:
+  --dir <folder>          snapshot folder (default: %APPDATA%\\FastDir\\snapshots)
+  --config[=<file>]       take the folder from the [snapshots] section of
+                          config.toml
+  --format json|csv       output format (default: json)
+  -o, --output <file|->   write to a file instead of stdout
+  --pretty                indent the JSON
+";
+
 pub const CONFIG_HELP: &str = "\
 Usage: fastdir config [<file> | --config[=<file>]]
 
@@ -937,6 +1191,8 @@ mod tests {
         assert!(is_cli_invocation(&args(&["top"])));
         assert!(is_cli_invocation(&args(&["duplicates", "C:\\"])));
         assert!(is_cli_invocation(&args(&["diff"])));
+        assert!(is_cli_invocation(&args(&["snapshot", "C:\\"])));
+        assert!(is_cli_invocation(&args(&["history", "C:\\"])));
         assert!(is_cli_invocation(&args(&["mcp"])));
         assert!(is_cli_invocation(&args(&["--version"])));
         assert!(is_cli_invocation(&args(&["--help"])));
@@ -1212,6 +1468,69 @@ mod tests {
         assert_eq!(defaults.max_depth, None);
         assert_eq!(defaults.limit, None);
         assert_eq!(defaults.out.format, Format::Json);
+    }
+
+    #[test]
+    fn snapshot_and_history_options() {
+        let c = match parse_ok(&["snapshot", "D:"]) {
+            Command::Snapshot(c) => c,
+            other => panic!("expected snapshot, got {other:?}"),
+        };
+        assert_eq!(c.scan.path, normalize_path("D:"));
+        assert_eq!((c.dir.clone(), c.keep, c.max_age_days), (None, None, None));
+        assert!(c.include_files && c.max_depth.is_none() && !c.pretty);
+
+        let c = match parse_ok(&[
+            "snapshot",
+            "C:\\Users",
+            "--dir",
+            "E:\\snaps",
+            "--keep=12",
+            "--max-age",
+            "6m",
+            "--max-depth",
+            "3",
+            "--no-files",
+            "--skip-windows",
+            "--exclude",
+            "node_modules",
+            "--config",
+            "-q",
+            "--pretty",
+        ]) {
+            Command::Snapshot(c) => c,
+            other => panic!("expected snapshot, got {other:?}"),
+        };
+        assert_eq!(c.dir, Some(PathBuf::from("E:\\snaps")));
+        assert_eq!(c.keep, Some(12));
+        assert_eq!(c.max_age_days, Some(180));
+        assert_eq!(c.max_depth, Some(3));
+        assert!(!c.include_files && c.pretty && c.scan.quiet && c.scan.skip_windows_dir);
+        assert_eq!(c.scan.config, Some(ConfigSource::Default));
+        assert_eq!(c.scan.exclude, vec!["node_modules"]);
+        assert_eq!(parse_max_age("0"), Ok(0));
+        assert!(parse_max_age("36h").unwrap_err().0.contains("--max-age"));
+        assert!(parse_err(&["snapshot"]).contains("missing <path>"));
+        assert!(parse_err(&["snapshot", "a", "--keep", "x"]).contains("whole number"));
+        assert!(parse_err(&["snapshot", "a", "--format", "csv"]).contains("--format"));
+        assert_eq!(
+            parse_ok(&["help", "snapshot"]),
+            Command::Help(HelpTopic::Snapshot)
+        );
+
+        let h = match parse_ok(&["history", "C:\\Users", "--format", "csv", "--dir", "x"]) {
+            Command::History(h) => h,
+            other => panic!("expected history, got {other:?}"),
+        };
+        assert_eq!(h.path, PathBuf::from("C:\\Users"));
+        assert_eq!(h.out.format, Format::Csv);
+        assert_eq!(h.dir, Some(PathBuf::from("x")));
+        assert!(parse_err(&["history"]).contains("missing <path>"));
+        assert!(parse_err(&["history", "a", "--keep", "1"]).contains("--keep"));
+        assert_eq!(
+            parse_ok(&["history", "-h"]),
+            Command::Help(HelpTopic::History)
+        );
     }
 
     #[test]
