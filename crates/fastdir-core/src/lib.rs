@@ -16,6 +16,7 @@ pub mod filter;
 pub mod format;
 pub mod fsops;
 pub mod integration;
+pub mod mft;
 pub mod model;
 pub mod scanner;
 pub mod sysprefs;

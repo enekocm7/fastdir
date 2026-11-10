@@ -28,6 +28,7 @@ pub fn options_from(s: &ScanSettings) -> ScanOptions {
         threads: s.thread_count.map(usize::from),
         collect_owners: s.collect_owners,
         skip_windows_dir: s.skip_windows_dir,
+        use_mft: s.use_mft,
     }
 }
 
@@ -48,6 +49,7 @@ pub fn layer(base: &ScanOptions, over: &ScanOptions) -> ScanOptions {
         threads: over.threads.or(base.threads),
         collect_owners: base.collect_owners || over.collect_owners,
         skip_windows_dir: base.skip_windows_dir || over.skip_windows_dir,
+        use_mft: base.use_mft || over.use_mft,
     }
 }
 
@@ -64,6 +66,7 @@ pub fn apply(args: &mut ScanArgs) -> Result<(), String> {
     args.threads = merged.threads;
     args.collect_owners = merged.collect_owners;
     args.skip_windows_dir = merged.skip_windows_dir;
+    args.use_mft = merged.use_mft;
     Ok(())
 }
 
@@ -81,6 +84,7 @@ pub fn describe(opts: &ScanOptions, source: &str) -> serde_json::Value {
             "threads": opts.threads,
             "collect_owners": opts.collect_owners,
             "skip_windows_dir": opts.skip_windows_dir,
+            "use_mft": opts.use_mft,
         }
     })
 }
@@ -107,6 +111,7 @@ mod tests {
             skip_hidden_system: false,
             skip_windows_dir: false,
             collect_owners: false,
+            use_mft: false,
             quiet: true,
             config,
         }

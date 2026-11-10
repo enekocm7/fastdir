@@ -363,6 +363,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Slaat ook dot-files over op Unix.",
         "set.scan.skip_windows" => "Windows-map overslaan",
         "set.scan.skip_windows_cap" => "Laat %SystemRoot% (meestal C:\\Windows) weg, zodat het systeemstation veel sneller wordt gescand. De grootte telt mee onder <Onbekend>.",
+        "set.scan.mft" => "Snelle NTFS-scan (MFT)",
+        "set.scan.mft_cap" => "Leest de NTFS Master File Table rechtstreeks, wat op grote stations vele malen sneller is. Vereist beheerdersrechten; anders, of op andere bestandssystemen, wordt de normale scan gebruikt. Niet gebruikt bij het volgen van koppelingen of het verzamelen van eigenaars.",
         "set.scan.junctions" => "Junctions en symlinks volgen",
         "set.scan.junctions_cap" => "Kan bestanden dubbel tellen; elk doel wordt één keer bezocht.",
         "set.scan.cross" => "Andere volumes betreden",

@@ -162,6 +162,7 @@ impl Render for SettingsView {
         let clear_owner = self.owner.clone();
         let skip_hidden_owner = self.owner.clone();
         let skip_windows_owner = self.owner.clone();
+        let mft_owner = self.owner.clone();
         let junctions_owner = self.owner.clone();
         let cross_owner = self.owner.clone();
         let threads_owner = self.owner.clone();
@@ -461,6 +462,39 @@ impl Render for SettingsView {
                                                 move |_, checked: &bool, _window, cx| {
                                                     skip_windows_owner.update(cx, |this, cx| {
                                                         this.settings.scan.skip_windows_dir =
+                                                            *checked;
+                                                        this.settings.save();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .child(tr("set.scan.mft")),
+                                            )
+                                            .child(caption(
+                                                tr("set.scan.mft_cap").to_string(),
+                                            )),
+                                    )
+                                    .child(
+                                        Switch::new("settings-use-mft")
+                                            .checked(scan.use_mft)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    mft_owner.update(cx, |this, cx| {
+                                                        this.settings.scan.use_mft =
                                                             *checked;
                                                         this.settings.save();
                                                         cx.notify();

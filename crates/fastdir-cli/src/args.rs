@@ -63,6 +63,8 @@ pub struct ScanArgs {
     pub skip_hidden_system: bool,
     pub skip_windows_dir: bool,
     pub collect_owners: bool,
+    /// `--mft`: read the NTFS MFT when possible (falls back to a walk).
+    pub use_mft: bool,
     pub quiet: bool,
     /// `--config`: layer the `[scan]` section of a config file underneath
     /// these flags. `None` leaves config files alone.
@@ -79,6 +81,7 @@ impl ScanArgs {
             threads: self.threads,
             collect_owners: self.collect_owners,
             skip_windows_dir: self.skip_windows_dir,
+            use_mft: self.use_mft,
         }
     }
 }
@@ -326,6 +329,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
+    let mut use_mft = false;
     let mut collect_owners = false;
     let mut quiet = false;
     let mut config = None;
@@ -387,6 +391,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
+            "--mft" => use_mft = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
@@ -455,6 +460,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
         skip_hidden_system,
         skip_windows_dir,
         collect_owners,
+        use_mft,
         quiet,
         config,
     };
@@ -489,6 +495,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
+    let mut use_mft = false;
     let mut quiet = false;
     let mut config = None;
     let mut format = Format::Json;
@@ -539,6 +546,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
+            "--mft" => use_mft = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
             "--format" => format = parse_format(&cur.value(name, inline)?)?,
@@ -577,6 +585,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             skip_hidden_system,
             skip_windows_dir,
             collect_owners: false,
+            use_mft,
             quiet,
             config,
         },
@@ -599,6 +608,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
+    let mut use_mft = false;
     let mut collect_owners = false;
     let mut quiet = false;
     let mut config = None;
@@ -647,6 +657,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
+            "--mft" => use_mft = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
@@ -686,6 +697,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
         skip_hidden_system,
         skip_windows_dir,
         collect_owners,
+        use_mft,
         quiet,
         config,
     };
@@ -797,6 +809,9 @@ Scanning:
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
   --skip-windows          skip the Windows folder (%SystemRoot%) for a faster
                           system-drive scan
+  --mft                   read the NTFS Master File Table directly (much faster;
+                          needs administrator rights, falls back to a normal
+                          scan otherwise)
   --owners                record each file's owner (Owner column, per-user totals)
   -q, --quiet             no progress or summary on stderr
   --config[=<file>]       use the [scan] section of config.toml (default file, or
@@ -820,7 +835,7 @@ Filtering (chooses which files are ranked):
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --skip-windows, --owners, -q/--quiet, --config
+  --skip-hidden, --skip-windows, --mft, --owners, -q/--quiet, --config
                           as for `fastdir scan`
 ";
 
@@ -846,7 +861,8 @@ Duplicates:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --skip-windows, -q/--quiet, --config   as for `fastdir scan`
+  --skip-hidden, --skip-windows, --mft, -q/--quiet, --config
+                          as for `fastdir scan`
 ";
 
 pub const DIFF_HELP: &str = "\
@@ -874,6 +890,9 @@ Scanning (only when <new> is a folder):
   --skip-hidden           skip hidden and system entries (alias: --skip-system)
   --skip-windows          skip the Windows folder (%SystemRoot%) for a faster
                           system-drive scan
+  --mft                   read the NTFS Master File Table directly (much faster;
+                          needs administrator rights, falls back to a normal
+                          scan otherwise)
   -q, --quiet             no progress or summary on stderr
   --config[=<file>]       use the [scan] section of config.toml (default file, or
                           <file>); flags override it, --exclude adds to it
@@ -1049,6 +1068,7 @@ mod tests {
             "--cross-volumes",
             "--skip-system",
             "--skip-windows",
+            "--mft",
             "--owners",
             "-q",
             "--pretty",
@@ -1064,6 +1084,7 @@ mod tests {
         assert!(c.scan.follow_junctions && c.scan.cross_volumes);
         assert!(c.scan.skip_hidden_system && c.scan.quiet && c.scan.collect_owners);
         assert!(c.scan.skip_windows_dir && c.scan.scan_options().skip_windows_dir);
+        assert!(c.scan.use_mft && c.scan.scan_options().use_mft);
         assert_eq!(c.scan.path, PathBuf::from("dir"));
         let opts = c.scan.scan_options();
         assert_eq!(opts.threads, Some(8));

@@ -365,6 +365,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Unix의 점 파일도 건너뜁니다.",
         "set.scan.skip_windows" => "Windows 폴더 건너뛰기",
         "set.scan.skip_windows_cap" => "%SystemRoot%(보통 C:\\Windows)를 제외해 시스템 드라이브를 훨씬 빠르게 검사합니다. 해당 크기는 <알 수 없음>에 포함됩니다.",
+        "set.scan.mft" => "빠른 NTFS 검사 (MFT)",
+        "set.scan.mft_cap" => "NTFS 마스터 파일 테이블(MFT)을 직접 읽어 큰 드라이브에서 몇 배 더 빠릅니다. 관리자 권한이 필요하며, 권한이 없거나 다른 파일 시스템에서는 일반 검사가 실행됩니다. 연결 지점을 따라가거나 소유자를 수집할 때는 사용되지 않습니다.",
         "set.scan.junctions" => "정션 및 심볼릭 링크 따라가기",
         "set.scan.junctions_cap" => "파일이 중복 집계될 수 있습니다. 각 대상은 한 번씩만 들어갑니다.",
         "set.scan.cross" => "다른 볼륨으로 이동",

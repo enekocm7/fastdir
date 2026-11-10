@@ -202,5 +202,27 @@ fn tree_build(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, scans, tree_build);
+/// Parsing raw MFT records and building the tree from them (the CPU side of
+/// the opt-in MFT scan; reading a real volume needs administrator rights).
+fn mft(c: &mut Criterion) {
+    use fastdir_core::mft::synthetic;
+    let (dirs, files) = (2_000, 100);
+    let image = synthetic::volume(dirs, files);
+    let options = ScanOptions::default();
+    let sanity = synthetic::build(image.clone(), &options);
+    assert_eq!(sanity.root().files as usize, dirs * files);
+    let mut g = c.benchmark_group("mft");
+    g.sample_size(20);
+    g.throughput(Throughput::Elements((dirs * (files + 1)) as u64));
+    g.bench_function("parse_and_build", |b| {
+        b.iter_batched(
+            || image.clone(),
+            |img| black_box(synthetic::build(img, &options)),
+            BatchSize::LargeInput,
+        )
+    });
+    g.finish();
+}
+
+criterion_group!(benches, scans, tree_build, mft);
 criterion_main!(benches);

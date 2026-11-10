@@ -363,6 +363,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Überspringt auch Punktdateien auf Unix.",
         "set.scan.skip_windows" => "Windows-Ordner überspringen",
         "set.scan.skip_windows_cap" => "Lässt %SystemRoot% (meist C:\\Windows) aus, damit das Systemlaufwerk viel schneller gescannt wird. Seine Größe zählt zu <Unbekannt>.",
+        "set.scan.mft" => "Schneller NTFS-Scan (MFT)",
+        "set.scan.mft_cap" => "Liest die NTFS-Master-File-Table direkt, was auf großen Laufwerken um ein Vielfaches schneller ist. Erfordert Administratorrechte; sonst oder auf anderen Dateisystemen läuft der normale Scan. Wird nicht verwendet, wenn Verknüpfungen gefolgt oder Besitzer erfasst werden.",
         "set.scan.junctions" => "Junctions und Symlinks folgen",
         "set.scan.junctions_cap" => "Kann Dateien doppelt zählen; jedes Ziel wird einmal betreten.",
         "set.scan.cross" => "Andere Volumes einbeziehen",

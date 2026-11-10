@@ -341,6 +341,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Unix'te nokta dosyalarını da atlar.",
         "set.scan.skip_windows" => "Windows klasörünü atla",
         "set.scan.skip_windows_cap" => "%SystemRoot% (genellikle C:\\Windows) dışarıda bırakılır, böylece sistem sürücüsü çok daha hızlı taranır. Boyutu <Bilinmiyor> altında sayılır.",
+        "set.scan.mft" => "Hızlı NTFS taraması (MFT)",
+        "set.scan.mft_cap" => "NTFS Ana Dosya Tablosu'nu (MFT) doğrudan okur; büyük sürücülerde kat kat daha hızlıdır. Yönetici hakları gerekir; aksi halde veya başka dosya sistemlerinde normal tarama çalışır. Bağlantı noktaları izlenirken veya sahipler toplanırken kullanılmaz.",
         "set.scan.junctions" => "Bağlantıları ve simgesel bağları izle",
         "set.scan.junctions_cap" => "Dosyaları iki kez sayabilir; her hedef bir kez gezilir.",
         "set.scan.cross" => "Diğer birimlere geç",

@@ -363,6 +363,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Também ignora dot-files no Unix.",
         "set.scan.skip_windows" => "Ignorar a pasta do Windows",
         "set.scan.skip_windows_cap" => "Exclui %SystemRoot% (normalmente C:\\Windows) para que a unidade do sistema seja analisada muito mais rápido. O tamanho conta em <Desconhecido>.",
+        "set.scan.mft" => "Análise NTFS rápida (MFT)",
+        "set.scan.mft_cap" => "Lê diretamente a Master File Table do NTFS, várias vezes mais rápido em unidades grandes. Requer direitos de administrador; caso contrário, ou noutros sistemas de ficheiros, é usada a análise normal. Não é usada ao seguir junções nem ao recolher proprietários.",
         "set.scan.junctions" => "Seguir junções e links simbólicos",
         "set.scan.junctions_cap" => "Pode contar arquivos duas vezes; cada destino é visitado uma vez.",
         "set.scan.cross" => "Entrar em outros volumes",

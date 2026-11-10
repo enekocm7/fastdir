@@ -363,6 +363,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Ignore aussi les fichiers point sur Unix.",
         "set.scan.skip_windows" => "Ignorer le dossier Windows",
         "set.scan.skip_windows_cap" => "Exclut %SystemRoot% (généralement C:\\Windows) pour analyser le lecteur système bien plus vite. Sa taille est comptée dans <Inconnu>.",
+        "set.scan.mft" => "Analyse NTFS rapide (MFT)",
+        "set.scan.mft_cap" => "Lit directement la table de fichiers maître (MFT) NTFS, plusieurs fois plus rapide sur les gros lecteurs. Nécessite les droits d'administrateur ; sinon, ou sur d'autres systèmes de fichiers, l'analyse normale est utilisée. Ignoré lors du suivi des jonctions ou de la collecte des propriétaires.",
         "set.scan.junctions" => "Suivre les jonctions et liens symboliques",
         "set.scan.junctions_cap" => "Peut compter les fichiers deux fois ; chaque cible n'est visitée qu'une fois.",
         "set.scan.cross" => "Explorer les autres volumes",

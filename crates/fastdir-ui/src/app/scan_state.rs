@@ -170,7 +170,9 @@ impl FastDir {
         if !self.tree.as_ref().is_some_and(|t| Arc::ptr_eq(t, &tree)) {
             return;
         }
-        let LiveScanResult { elapsed, cancelled } = result;
+        let LiveScanResult {
+            elapsed, cancelled, ..
+        } = result;
         // Drive scans get `<Free space>` and `<Unknown>` pseudo-items so the
         // picture is complete (scanned vs used), with what could be measured
         // (NTFS metadata, shadow copies) split out of `<Unknown>`. Volume

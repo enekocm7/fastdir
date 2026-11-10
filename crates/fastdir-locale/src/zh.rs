@@ -361,6 +361,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "同时跳过 Unix 上的点文件。",
         "set.scan.skip_windows" => "跳过 Windows 文件夹",
         "set.scan.skip_windows_cap" => "排除 %SystemRoot%（通常为 C:\\Windows），使系统盘扫描快得多。其大小计入 <未知>。",
+        "set.scan.mft" => "快速 NTFS 扫描 (MFT)",
+        "set.scan.mft_cap" => "直接读取 NTFS 主文件表 (MFT)，在大容量驱动器上快数倍。需要管理员权限；否则或在其他文件系统上将使用普通扫描。跟随联接或收集所有者时不使用。",
         "set.scan.junctions" => "跟踪联接和符号链接",
         "set.scan.junctions_cap" => "可能重复计算文件；每个目标仅进入一次。",
         "set.scan.cross" => "跨越到其他卷",
