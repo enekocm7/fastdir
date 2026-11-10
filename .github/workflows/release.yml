@@ -143,8 +143,9 @@ jobs:
 
       - name: Install packaging tools
         run: |
-          sudo apt-get install -y dpkg-dev binutils librsvg2-bin \
-            desktop-file-utils appstream
+          # No `appstream` here: 22.04's validator predates tags the
+          # metainfo uses (the `metadata` job validates with a current one).
+          sudo apt-get install -y dpkg-dev binutils librsvg2-bin desktop-file-utils
           curl -fsSLo nfpm.deb \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
           sudo apt-get install -y ./nfpm.deb
@@ -154,12 +155,6 @@ jobs:
         env:
           NFPM_VERSION: 2.48.0
           LINUXDEPLOY_VERSION: 1-alpha-20251107-1
-
-      - name: Validate desktop entry and AppStream metadata
-        run: |
-          desktop-file-validate packaging/linux/io.github.enekocm7.FastDir.desktop
-          appstreamcli validate --no-net --explain \
-            packaging/linux/io.github.enekocm7.FastDir.metainfo.xml
 
       - name: Build .deb, .rpm and AppImage
         run: packaging/linux/package.sh "${{ steps.version.outputs.version }}" target/release dist
@@ -172,6 +167,22 @@ jobs:
         with:
           name: FastDir-${{ steps.version.outputs.version }}-linux-x64
           path: dist/*
+
+  # Desktop entry and AppStream metadata, checked with current validators
+  # (software centers and Flathub read the newer AppStream tags).
+  metadata:
+    name: Validate Linux metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils appstream
+          desktop-file-validate packaging/linux/io.github.enekocm7.FastDir.desktop
+          appstreamcli validate --no-net --explain \
+            packaging/linux/io.github.enekocm7.FastDir.metainfo.xml
 
   macos:
     name: macOS arm64
@@ -296,18 +307,12 @@ jobs:
           ./result/bin/fastdir-cli scan / --max-depth 1 > /dev/null
           nix flake check --no-build
 
-      - name: Upload flake.lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: flake-lock
-          path: flake.lock
-
   # One release with every platform's files and a single SHA256SUMS.txt (the
   # in-app updater looks its download up in that file).
   publish:
     name: Publish release
     if: github.ref_type == 'tag'
-    needs: [windows, linux, macos, linux-test]
+    needs: [windows, linux, macos, metadata, linux-test]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
