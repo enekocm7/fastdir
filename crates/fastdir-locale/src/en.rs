@@ -144,6 +144,12 @@ pub const KEYS: &[&str] = &[
     "banner.limited",
     "banner.restart_admin",
     "banner.restart_tip",
+    "banner.show_unreadable",
+    "unreadable.title",
+    "unreadable.body",
+    "unreadable.admin_hint",
+    "unreadable.shadow_hint",
+    "unreadable.windows_skipped",
     "banner.elev_cancelled_title",
     "banner.elev_cancelled_body",
     "banner.elev_failed_title",
@@ -252,6 +258,8 @@ pub const KEYS: &[&str] = &[
     "list.files_col",
     "list.free_space",
     "list.unknown",
+    "list.ntfs_metadata",
+    "list.shadow_copies",
     "tree.empty",
     "tree.rendering",
     "tree.zoom_hint",
@@ -679,6 +687,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Relaunch FastDir elevated so protected folders can be scanned"
         }
+        "banner.show_unreadable" => "Show folders",
+        "unreadable.title" => "Unreadable folders",
+        "unreadable.body" => {
+            "{n} folders could not be read, so their contents are missing from the scan and counted as unknown space."
+        }
+        "unreadable.admin_hint" => "Run FastDir as administrator to include them.",
+        "unreadable.shadow_hint" => {
+            "Restore points (shadow copies) are only measured when FastDir runs as administrator."
+        }
+        "unreadable.windows_skipped" => {
+            "The Windows folder was skipped by the scan settings, so its size is counted as unknown space."
+        }
         "banner.elev_cancelled_title" => "Elevation cancelled",
         "banner.elev_cancelled_body" => {
             "Staying without elevation — protected folders will be skipped."
@@ -797,6 +817,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Files",
         "list.free_space" => "<Free space>",
         "list.unknown" => "<Unknown>",
+        "list.ntfs_metadata" => "<NTFS metadata>",
+        "list.shadow_copies" => "<Shadow copies>",
         "tree.empty" => "Treemap appears here after a scan",
         "tree.rendering" => "Rendering treemap…",
         "tree.zoom_hint" => "Z zoom in · Shift+Z zoom out",

@@ -19,3 +19,4 @@ pub mod integration;
 pub mod model;
 pub mod scanner;
 pub mod sysprefs;
+pub mod windows_apps;

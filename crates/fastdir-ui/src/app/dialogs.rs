@@ -12,7 +12,13 @@ impl FastDir {
     }
 
     pub(super) fn open_selected(&mut self, _: &OpenItem, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_multi() || self.selected_is_special() {
+        if self.is_multi() {
+            return;
+        }
+        if self.selected_is_special() {
+            if let Some(path) = self.selected_path() {
+                self.open_pseudo_item(&path, window, cx);
+            }
             return;
         }
         if let Some((_, p, _)) = self.selected_fs_path() {
@@ -22,6 +28,196 @@ impl FastDir {
             }
             fsops::open(&p);
         }
+    }
+
+    /// "Open" a drive pseudo-item: `<Unknown>` explains what is in it and
+    /// `<Shadow copies>` opens the System Protection settings (nothing is
+    /// changed or deleted). Returns whether `path` was such an item.
+    pub(super) fn open_pseudo_item(
+        &mut self,
+        path: &[u32],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let name = self.tree.as_ref().and_then(|tree| {
+            let t = tree.read();
+            t.get(path)
+                .filter(|n| n.kind() == NodeKind::Unknown)
+                .map(|n| t.name(n).to_string())
+        });
+        match name.as_deref() {
+            Some(UNKNOWN_NAME) => {
+                self.show_unreadable(window, cx);
+                true
+            }
+            Some(SHADOW_COPIES_NAME) => {
+                if let Err(e) = drives::open_system_protection() {
+                    window.push_notification(Notification::error(e), cx);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// List the folders the scan could not read: their contents are missing
+    /// from the totals, which on a drive scan makes up much of `<Unknown>`.
+    /// Clicking a folder shows it in the tree. Also says when the Windows
+    /// folder was skipped by the scan settings (its bytes are in `<Unknown>`
+    /// too); with nothing to list that note is all that is shown.
+    pub(super) fn show_unreadable(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        /// Rows rendered in the dialog; the rest are summarised.
+        const SHOWN: usize = 500;
+        let Some(tree) = self.tree.clone() else {
+            return;
+        };
+        let (entries, windows_skipped, drive_scan) = {
+            let t = tree.read();
+            let entries: Vec<(NodePath, SharedString)> = t
+                .unreadable_dirs()
+                .into_iter()
+                .filter_map(|p| {
+                    let fs = t.fs_path(&p)?;
+                    Some((p, fs.display().to_string().into()))
+                })
+                .collect();
+            // The Windows folder is inside the scan but not in the tree:
+            // "Skip the Windows folder" left it out.
+            let windows_skipped = scanner::windows_dir().is_some_and(|w| {
+                w != t.root_path && w.starts_with(&t.root_path) && t.find(&w).is_none()
+            });
+            (entries, windows_skipped, t.is_drive_scan())
+        };
+        if entries.is_empty() {
+            if windows_skipped {
+                window.push_notification(
+                    Notification::info(self.tr("unreadable.windows_skipped")),
+                    cx,
+                );
+            }
+            return;
+        }
+        let total = entries.len();
+        let elevated = elevate::is_elevated();
+        let mut body = self.tr_fmt("unreadable.body", &[("n", &self.count(total as u64))]);
+        if !elevated {
+            body.push(' ');
+            body.push_str(self.tr("unreadable.admin_hint"));
+            if drive_scan {
+                body.push(' ');
+                body.push_str(self.tr("unreadable.shadow_hint"));
+            }
+        }
+        if windows_skipped {
+            body.push(' ');
+            body.push_str(self.tr("unreadable.windows_skipped"));
+        }
+        let body: SharedString = body.into();
+        let more: Option<SharedString> = (total > SHOWN).then(|| {
+            self.tr_fmt("dlg.more", &[("n", &self.count((total - SHOWN) as u64))])
+                .into()
+        });
+        let entries: Arc<[(NodePath, SharedString)]> = entries.into_iter().take(SHOWN).collect();
+        let title = self.tr("unreadable.title");
+        let close = self.tr("action.close");
+        let restart = self.tr("banner.restart_admin");
+        let restart_tip = self.tr("banner.restart_tip");
+        let root = self.scan_root.clone();
+        let entity = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let theme = cx.theme();
+            let hover = theme.list_hover;
+            let muted = theme.muted_foreground;
+            let rows = entries.iter().enumerate().map(|(i, (path, label))| {
+                let entity = entity.clone();
+                let path = path.clone();
+                div()
+                    .id(("unreadable", i))
+                    .px_2()
+                    .py_0p5()
+                    .rounded_sm()
+                    .text_xs()
+                    .whitespace_nowrap()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(hover))
+                    .child(label.clone())
+                    .on_click(move |_, window, cx| {
+                        let path = path.clone();
+                        entity
+                            .update(cx, |this, cx| this.reveal_path(path, window, cx))
+                            .ok();
+                        window.close_dialog(cx);
+                    })
+            });
+            let restart_entity = entity.clone();
+            let root = root.clone();
+            dialog
+                .title(title)
+                .w(sp(640.).to_pixels(window.rem_size()))
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(div().text_xs().text_color(muted).child(body.clone()))
+                        .child(
+                            v_flex()
+                                .id("unreadable-list")
+                                .max_h(sp(360.))
+                                .overflow_y_scroll()
+                                .children(rows),
+                        )
+                        .when_some(more.clone(), |d, more| {
+                            d.child(div().text_xs().text_color(muted).child(more))
+                        }),
+                )
+                .footer(
+                    h_flex()
+                        .w_full()
+                        .justify_end()
+                        .gap_2()
+                        .when(!elevated, |d| {
+                            d.child(
+                                Button::new("unreadable-restart-admin")
+                                    .outline()
+                                    .icon(IconName::Shield)
+                                    .label(restart)
+                                    .tooltip(restart_tip)
+                                    .on_click(move |_, window, cx| {
+                                        let root = root.clone();
+                                        restart_entity
+                                            .update(cx, |this, cx| {
+                                                this.restart_elevated(root, window, cx)
+                                            })
+                                            .ok();
+                                    }),
+                            )
+                        })
+                        .child(
+                            Button::new("unreadable-close")
+                                .outline()
+                                .label(close)
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        ),
+                )
+        });
+    }
+
+    /// Show the node at `path` in the directory tree, clearing filters that
+    /// would hide it.
+    pub(super) fn reveal_path(
+        &mut self,
+        path: NodePath,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.filter.is_active() {
+            self.clear_filters(window, cx);
+        }
+        self.tab = ListTab::Tree;
+        self.marked.clear();
+        self.reveal_in_list(path, ClickMode::Plain, cx);
+        self.focus.focus(window, cx);
     }
 
     pub(super) fn reveal_selected(

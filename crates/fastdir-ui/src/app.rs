@@ -11,8 +11,12 @@ use fastdir_core::filter::Filter;
 use fastdir_core::format;
 use fastdir_core::fsops;
 use fastdir_core::integration;
-use fastdir_core::model::{FileEntry, NO_EXT, NO_OWNER, Node, NodePath, OwnerTotal, Subtree, Tree};
+use fastdir_core::model::{
+    FileEntry, NO_EXT, NO_OWNER, Node, NodeKind, NodePath, OwnerTotal, SHADOW_COPIES_NAME, Subtree,
+    Tree, UNKNOWN_NAME, UnknownBreakdown,
+};
 use fastdir_core::scanner::{self, LiveScanResult, Progress};
+use fastdir_core::windows_apps;
 use fastdir_settings::{
     DateFormat, DeleteAction, ExtGrouping, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
     StartupMode, ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency,
@@ -1045,6 +1049,7 @@ impl FastDir {
         let theme = cx.theme();
         let root = self.scan_root.clone();
         let elevated = elevate::is_elevated();
+        let ready = matches!(self.phase, Phase::Ready);
         Some(
             h_flex()
                 .flex_shrink_0()
@@ -1067,6 +1072,17 @@ impl FastDir {
                         .text_color(theme.warning)
                         .child(self.tr_fmt("banner.limited", &[("errors", &self.count(errors))])),
                 )
+                .when(ready, |d| {
+                    d.child(
+                        Button::new("show-unreadable")
+                            .small()
+                            .ghost()
+                            .icon(IconName::FolderOpen)
+                            .label(self.tr("banner.show_unreadable"))
+                            .tooltip(self.tr("unreadable.title"))
+                            .on_click(cx.listener(|this, _, w, cx| this.show_unreadable(w, cx))),
+                    )
+                })
                 .when(!elevated, |d| {
                     d.child(
                         Button::new("restart-admin-ready")

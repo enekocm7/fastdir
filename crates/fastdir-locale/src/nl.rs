@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Start FastDir opnieuw met verhoogde rechten om beveiligde mappen te scannen"
         }
+        "banner.show_unreadable" => "Mappen tonen",
+        "unreadable.title" => "Onleesbare mappen",
+        "unreadable.body" => {
+            "{n} mappen konden niet worden gelezen; hun inhoud ontbreekt in de scan en telt als onbekende ruimte."
+        }
+        "unreadable.admin_hint" => "Start FastDir als administrator om ze mee te nemen.",
+        "unreadable.shadow_hint" => {
+            "Herstelpunten (schaduwkopieën) worden alleen gemeten als FastDir als administrator draait."
+        }
+        "unreadable.windows_skipped" => {
+            "De Windows-map is door de scaninstellingen overgeslagen, dus de grootte ervan telt als onbekende ruimte."
+        }
         "banner.elev_cancelled_title" => "Verhoging geannuleerd",
         "banner.elev_cancelled_body" => {
             "Doorgaan zonder verhoogde rechten — beveiligde mappen worden overgeslagen."
@@ -271,6 +283,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Bestanden",
         "list.free_space" => "<Vrije ruimte>",
         "list.unknown" => "<Onbekend>",
+        "list.ntfs_metadata" => "<NTFS-metagegevens>",
+        "list.shadow_copies" => "<Schaduwkopieën>",
         "tree.empty" => "Treemap verschijnt hier na een scan",
         "tree.rendering" => "Treemap renderen…",
         "tree.zoom_hint" => "Z inzoomen · Shift+Z uitzoomen",

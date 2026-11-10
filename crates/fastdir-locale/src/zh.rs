@@ -149,6 +149,14 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "以提升权限重新启动 FastDir，以便扫描受保护的文件夹"
         }
+        "banner.show_unreadable" => "显示文件夹",
+        "unreadable.title" => "无法读取的文件夹",
+        "unreadable.body" => "有 {n} 个文件夹无法读取，其内容未计入扫描，算作未知空间。",
+        "unreadable.admin_hint" => "以管理员身份运行 FastDir 即可包含它们。",
+        "unreadable.shadow_hint" => "仅当 FastDir 以管理员身份运行时才会统计还原点（卷影副本）。",
+        "unreadable.windows_skipped" => {
+            "根据扫描设置已跳过 Windows 文件夹，因此其大小计入未知空间。"
+        }
         "banner.elev_cancelled_title" => "已取消提权",
         "banner.elev_cancelled_body" => {
             "将保持未提权状态——受保护的文件夹将被跳过。"
@@ -273,6 +281,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "文件数",
         "list.free_space" => "<可用空间>",
         "list.unknown" => "<未知>",
+        "list.ntfs_metadata" => "<NTFS 元数据>",
+        "list.shadow_copies" => "<卷影副本>",
         "tree.empty" => "扫描后树状图将显示在此处",
         "tree.rendering" => "正在渲染树状图…",
         "tree.zoom_hint" => "Z 放大 · Shift+Z 缩小",

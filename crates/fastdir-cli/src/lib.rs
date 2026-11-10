@@ -25,6 +25,7 @@ use fastdir_core::filter::FilterView;
 use fastdir_core::format;
 use fastdir_core::model::Tree;
 use fastdir_core::scanner::{self, Progress, ScanOptions};
+use fastdir_core::windows_apps;
 use schema::{ScanDoc, ScanMeta, TreeShape};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -216,7 +217,15 @@ pub fn scan_with_progress(args: &ScanArgs) -> Result<Scanned, CliError> {
         std::thread::spawn(move || report_progress(&progress, &done, quiet))
     };
     let scanned_at = schema::now_iso();
-    let result = scanner::scan(root.clone(), progress.clone(), &args.scan_options());
+    let options = args.scan_options();
+    let mut result = scanner::scan(root.clone(), progress.clone(), &options);
+    // Store packages in an unreadable `WindowsApps` folder can still be
+    // scanned one by one.
+    let packages = if result.cancelled || signal::interrupted() {
+        0
+    } else {
+        windows_apps::recover_packages(&mut result.tree, &options, &progress)
+    };
     done.store(true, Ordering::Relaxed);
     let _ = reporter.join();
     if result.cancelled || signal::interrupted() {
@@ -236,6 +245,12 @@ pub fn scan_with_progress(args: &ScanArgs) -> Result<Scanned, CliError> {
         );
         if errors > 0 {
             line.push_str(&format!(" ({} unreadable)", format::count(errors)));
+        }
+        if packages > 0 {
+            line.push_str(&format!(
+                "; {} Store packages read individually",
+                format::count(packages as u64)
+            ));
         }
         eprintln!("{line}");
     }

@@ -141,6 +141,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.limited" => "{errors} klasör okunamadı (erişim reddedildi) — toplamlar eksik",
         "banner.restart_admin" => "Yönetici olarak yeniden başlat",
         "banner.restart_tip" => "Korumalı klasörleri tarayabilmek için FastDir'i yükseltilmiş olarak yeniden başlatın",
+        "banner.show_unreadable" => "Klasörleri göster",
+        "unreadable.title" => "Okunamayan klasörler",
+        "unreadable.body" => {
+            "{n} klasör okunamadı; içerikleri taramada eksik ve bilinmeyen alan olarak sayılıyor."
+        }
+        "unreadable.admin_hint" => "Bunları dahil etmek için FastDir'i yönetici olarak çalıştırın.",
+        "unreadable.shadow_hint" => {
+            "Geri yükleme noktaları (gölge kopyalar) yalnızca FastDir yönetici olarak çalıştığında ölçülür."
+        }
+        "unreadable.windows_skipped" => {
+            "Windows klasörü tarama ayarları nedeniyle atlandı, bu yüzden boyutu bilinmeyen alan olarak sayılıyor."
+        }
         "banner.elev_cancelled_title" => "Yükseltme iptal edildi",
         "banner.elev_cancelled_body" => "Yükseltmesiz devam ediliyor — korumalı klasörler atlanacak.",
         "banner.elev_failed_title" => "Yönetici olarak yeniden başlatılamadı",
@@ -249,6 +261,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Dosyalar",
         "list.free_space" => "<Boş alan>",
         "list.unknown" => "<Bilinmiyor>",
+        "list.ntfs_metadata" => "<NTFS meta verileri>",
+        "list.shadow_copies" => "<Gölge kopyalar>",
         "tree.empty" => "Ağaç haritası taramadan sonra burada görünür",
         "tree.rendering" => "Ağaç haritası oluşturuluyor…",
         "tree.zoom_hint" => "Z yakınlaştır · Shift+Z uzaklaştır",

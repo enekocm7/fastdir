@@ -141,6 +141,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.limited" => "{errors} папок не вдалося прочитати (доступ заборонено) — підсумки неповні",
         "banner.restart_admin" => "Перезапустити від імені адміністратора",
         "banner.restart_tip" => "Перезапустіть FastDir із підвищенням, щоб сканувати захищені папки",
+        "banner.show_unreadable" => "Показати папки",
+        "unreadable.title" => "Папки, які не вдалося прочитати",
+        "unreadable.body" => {
+            "Не вдалося прочитати папок: {n}. Їхній вміст відсутній у скануванні й враховується як невідоме місце."
+        }
+        "unreadable.admin_hint" => "Запустіть FastDir від імені адміністратора, щоб включити їх.",
+        "unreadable.shadow_hint" => {
+            "Точки відновлення (тіньові копії) вимірюються, лише якщо FastDir запущено від імені адміністратора."
+        }
+        "unreadable.windows_skipped" => {
+            "Папку Windows пропущено згідно з налаштуваннями сканування, тому її розмір враховується як невідоме місце."
+        }
         "banner.elev_cancelled_title" => "Підвищення скасовано",
         "banner.elev_cancelled_body" => "Продовжуємо без підвищення — захищені папки буде пропущено.",
         "banner.elev_failed_title" => "Не вдалося перезапустити від імені адміністратора",
@@ -249,6 +261,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Файли",
         "list.free_space" => "<Вільне місце>",
         "list.unknown" => "<Невідомо>",
+        "list.ntfs_metadata" => "<Метадані NTFS>",
+        "list.shadow_copies" => "<Тіньові копії>",
         "tree.empty" => "Карта з'явиться тут після сканування",
         "tree.rendering" => "Побудова карти…",
         "tree.zoom_hint" => "Z наблизити · Shift+Z віддалити",

@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Restartujte FastDir se zvýšenými právy, aby bylo možné skenovat chráněné složky"
         }
+        "banner.show_unreadable" => "Zobrazit složky",
+        "unreadable.title" => "Nečitelné složky",
+        "unreadable.body" => {
+            "Nepodařilo se přečíst složky: {n}. Jejich obsah ve skenu chybí a počítá se jako neznámé místo."
+        }
+        "unreadable.admin_hint" => "Spusťte FastDir jako správce, aby byly zahrnuty.",
+        "unreadable.shadow_hint" => {
+            "Body obnovení (stínové kopie) se měří jen tehdy, když FastDir běží jako správce."
+        }
+        "unreadable.windows_skipped" => {
+            "Složka Windows byla podle nastavení skenování přeskočena, takže její velikost se počítá jako neznámé místo."
+        }
         "banner.elev_cancelled_title" => "Zvýšení práv zrušeno",
         "banner.elev_cancelled_body" => {
             "Pokračuje se bez zvýšených práv — chráněné složky budou přeskočeny."
@@ -267,6 +279,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Soubory",
         "list.free_space" => "<Volné místo>",
         "list.unknown" => "<Neznámé>",
+        "list.ntfs_metadata" => "<Metadata NTFS>",
+        "list.shadow_copies" => "<Stínové kopie>",
         "tree.empty" => "Stromová mapa se zde zobrazí po skenování",
         "tree.rendering" => "Vykreslování stromové mapy…",
         "tree.zoom_hint" => "Z přiblížit · Shift+Z oddálit",

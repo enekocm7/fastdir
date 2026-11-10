@@ -187,7 +187,17 @@ impl Serialize for ScanDoc<'_> {
             .tree
             .fs_path(self.subtree)
             .unwrap_or_else(|| self.tree.root_path.clone());
-        let mut st = s.serialize_struct("ScanDoc", 8)?;
+        // Folders that could not be read, so their contents are missing
+        // from the totals (run elevated to include them). Listed even when
+        // `--max-depth` / `--no-files` / a filter hide them in `tree`.
+        let unreadable: Vec<String> = self
+            .tree
+            .unreadable_dirs_in(self.subtree)
+            .iter()
+            .filter_map(|p| self.tree.fs_path(p))
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let mut st = s.serialize_struct("ScanDoc", 9)?;
         st.serialize_field("schema", SCAN_SCHEMA)?;
         st.serialize_field("version", &SCHEMA_VERSION)?;
         st.serialize_field("fastdir_version", env!("CARGO_PKG_VERSION"))?;
@@ -195,6 +205,7 @@ impl Serialize for ScanDoc<'_> {
         st.serialize_field("scanned_at", &self.meta.scanned_at)?;
         st.serialize_field("elapsed_ms", &self.meta.elapsed_ms)?;
         st.serialize_field("errors", &self.meta.errors)?;
+        st.serialize_field("unreadable", &unreadable)?;
         st.serialize_field(
             "tree",
             &EntryView {
@@ -433,10 +444,12 @@ pub(crate) mod tests {
                 "scanned_at",
                 "schema",
                 "tree",
+                "unreadable",
                 "version"
             ]
         );
         assert_eq!(doc["schema"], "fastdir.scan");
+        assert_eq!(doc["unreadable"], serde_json::json!([]));
         assert_eq!(doc["version"], 1);
         let tree = &doc["tree"];
         assert_eq!(
@@ -506,6 +519,40 @@ pub(crate) mod tests {
             docs["children"][0]["path"],
             format!("root{sep}docs{sep}a.txt")
         );
+    }
+
+    #[test]
+    fn unreadable_folders_are_listed_even_below_max_depth() {
+        let mut arena = Arena::default();
+        let mut locked = DirBuilder::new(0);
+        locked.set_error();
+        let locked = locked.commit(&mut arena);
+        let mut sub = DirBuilder::new(0);
+        sub.add_dir("locked", locked);
+        let sub = sub.commit(&mut arena);
+        let mut root = DirBuilder::new(0);
+        root.add_dir("sub", sub);
+        root.add_file("a.txt", 10, 10, 0);
+        let root = root.commit(&mut arena);
+        let tree = Tree::new(Subtree::new(arena, "root", root), PathBuf::from("root"));
+        let meta = meta();
+        let doc = serde_json::to_value(ScanDoc {
+            meta: &meta,
+            tree: &tree,
+            subtree: &[],
+            shape: TreeShape {
+                max_depth: Some(0),
+                include_files: false,
+            },
+            filter: None,
+        })
+        .unwrap();
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            doc["unreadable"],
+            serde_json::json!([format!("root{sep}sub{sep}locked")])
+        );
+        assert_eq!(doc["tree"]["truncated"], true);
     }
 
     #[test]

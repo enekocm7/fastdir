@@ -54,6 +54,25 @@ culprit? Rename, move, recycle or delete it right there.
   comparison does not double the memory of a large scan.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
+- **`<Free space>` and an explained `<Unknown>`** – a whole-drive scan adds
+  the free space and `<Unknown>` (used space the scan could not attribute to
+  a file) so the picture adds up to the volume. What can be measured is
+  split out of `<Unknown>`:
+  - `<NTFS metadata>`: the metadata files a listing never returns (`$MFT`
+    and friends, often several GB on a system drive).
+  - `<Shadow copies>`: restore-point storage in `System Volume Information`,
+    measured when running as administrator. Double-click it to open the
+    System Protection settings (nothing is deleted).
+  - Store apps: `C:\Program Files\WindowsApps` cannot be listed without
+    elevation, but each registered package folder is read on its own and
+    shown under it, so those GBs are no longer unknown.
+
+  Folders that could not be read are listed by **Show folders** on the
+  warning banner, or by double-clicking `<Unknown>`; click one to jump to it
+  in the tree. Run as administrator to include them. When *Skip the Windows
+  folder* is on, the same dialog notes that its bytes are in `<Unknown>`. The
+  CLI lists the unreadable folders in the `unreadable` field and also reads
+  Store packages one by one.
 - **Live progress** – files, folders, bytes, files/s, the current path, and a
   real percentage when you scan a whole drive.
 - **Partial results while scanning** – each top-level folder appears in the
@@ -389,6 +408,9 @@ bytes, and timestamps are ISO 8601 UTC (`null` when unknown).
   "scanned_at": "2026-11-03T12:00:00Z",
   "elapsed_ms": 1234,
   "errors": 2,                        // folders that could not be read
+  "unreadable": [                     // their paths (contents missing from the totals)
+    "C:\\Users\\Default\\Application Data", "C:\\Users\\other"
+  ],
   "tree": {                           // an entry, see below
     "name": "C:\\Users", "path": "C:\\Users", "type": "dir",
     "size": 123456789,                // logical size

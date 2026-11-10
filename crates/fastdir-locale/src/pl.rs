@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Uruchom ponownie FastDir z podwyższonymi uprawnieniami, aby skanować chronione foldery"
         }
+        "banner.show_unreadable" => "Pokaż foldery",
+        "unreadable.title" => "Nieczytelne foldery",
+        "unreadable.body" => {
+            "Nie można odczytać folderów: {n}. Ich zawartość nie została przeskanowana i liczy się jako nieznane miejsce."
+        }
+        "unreadable.admin_hint" => "Uruchom FastDir jako administrator, aby je uwzględnić.",
+        "unreadable.shadow_hint" => {
+            "Punkty przywracania (kopie w tle) są mierzone tylko wtedy, gdy FastDir działa jako administrator."
+        }
+        "unreadable.windows_skipped" => {
+            "Folder Windows został pominięty zgodnie z ustawieniami skanowania, więc jego rozmiar liczy się jako nieznane miejsce."
+        }
         "banner.elev_cancelled_title" => "Podwyższenie anulowane",
         "banner.elev_cancelled_body" => {
             "Kontynuacja bez podwyższenia — chronione foldery zostaną pominięte."
@@ -267,6 +279,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Pliki",
         "list.free_space" => "<Wolne miejsce>",
         "list.unknown" => "<Nieznane>",
+        "list.ntfs_metadata" => "<Metadane NTFS>",
+        "list.shadow_copies" => "<Kopie w tle>",
         "tree.empty" => "Treemap pojawi się tutaj po skanowaniu",
         "tree.rendering" => "Renderowanie treemapa…",
         "tree.zoom_hint" => "Z powiększ · Shift+Z pomniejsz",

@@ -152,6 +152,203 @@ pub fn list() -> Vec<Drive> {
     out
 }
 
+/// NTFS metadata files at the root of a volume. A directory listing never
+/// returns them, so their bytes would otherwise end up in `<Unknown>`.
+/// `$MFT` (often several GB) can be measured without elevation; the others
+/// need administrator rights and are simply skipped when access is denied.
+/// `$BadClus` is left out on purpose: its logical size is the whole volume.
+pub const NTFS_METADATA_FILES: &[&str] = &[
+    "$MFT",
+    "$MFTMirr",
+    "$LogFile",
+    "$Bitmap",
+    "$Boot",
+    "$UpCase",
+    "$AttrDef",
+    "$Secure:$SDS",
+    "$Extend\\$UsnJrnl:$J",
+];
+
+/// Bytes used on disk by the NTFS metadata files of the volume whose root is
+/// `root` (`C:\`): see [`NTFS_METADATA_FILES`]. `0` when `root` is not a
+/// volume root, the volume is not NTFS, or nothing could be measured, and
+/// always `0` off Windows.
+#[cfg(windows)]
+pub fn ntfs_metadata_bytes(root: &std::path::Path) -> u64 {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetCompressedFileSizeW, GetFileAttributesExW, GetFileExInfoStandard, INVALID_FILE_SIZE,
+        WIN32_FILE_ATTRIBUTE_DATA,
+    };
+
+    // Only a bare volume root (`C:\`) holds the metadata files.
+    if root.parent().is_some() || !root.has_root() {
+        return 0;
+    }
+    let mut base: Vec<u16> = root.as_os_str().encode_wide().collect();
+    if base.last() != Some(&(b'\\' as u16)) {
+        base.push(b'\\' as u16);
+    }
+    NTFS_METADATA_FILES
+        .iter()
+        .map(|name| {
+            let mut path = base.clone();
+            path.extend(name.encode_utf16());
+            path.push(0);
+            // Allocated size first: the change journal is sparse, so its
+            // logical size overstates what it occupies.
+            let mut high = 0u32;
+            // SAFETY: `path` is NUL-terminated and `high` is a valid out
+            // pointer.
+            let low = unsafe { GetCompressedFileSizeW(path.as_ptr(), &mut high) };
+            // `INVALID_FILE_SIZE` is also a valid low word, so a failure is
+            // only certain together with a zero high word (and it never
+            // matters for these sizes: we fall back to the attributes).
+            if low != INVALID_FILE_SIZE || high != 0 {
+                return (high as u64) << 32 | low as u64;
+            }
+            let mut data: WIN32_FILE_ATTRIBUTE_DATA = unsafe { std::mem::zeroed() };
+            // SAFETY: `path` is NUL-terminated and `data` matches the
+            // `GetFileExInfoStandard` level.
+            let ok = unsafe {
+                GetFileAttributesExW(
+                    path.as_ptr(),
+                    GetFileExInfoStandard,
+                    (&mut data as *mut WIN32_FILE_ATTRIBUTE_DATA).cast(),
+                )
+            } != 0;
+            if ok {
+                (data.nFileSizeHigh as u64) << 32 | data.nFileSizeLow as u64
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
+/// Bytes used by NTFS metadata files; there are none to measure off Windows.
+#[cfg(not(windows))]
+pub fn ntfs_metadata_bytes(_root: &std::path::Path) -> u64 {
+    0
+}
+
+/// The drive letter of a bare volume root (`C:\` -> `'C'`), if `root` is one.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn drive_letter(root: &std::path::Path) -> Option<char> {
+    let s = root.to_str()?;
+    let s = s.strip_suffix(['\\', '/']).unwrap_or(s);
+    let mut chars = s.chars();
+    let (letter, colon) = (chars.next()?, chars.next()?);
+    (letter.is_ascii_alphabetic() && colon == ':' && chars.next().is_none())
+        .then(|| letter.to_ascii_uppercase())
+}
+
+/// Bytes used by volume shadow copies (restore points) stored on the volume
+/// whose root is `root`, from WMI's `Win32_ShadowStorage.UsedSpace`.
+///
+/// The storage lives in `System Volume Information`, which a scan cannot
+/// read, so these bytes otherwise land in `<Unknown>`. WMI only answers
+/// elevated processes, so this returns `None` without elevation, for a path
+/// that is not a drive root, off Windows, or when the query fails or takes
+/// longer than a few seconds. Blocking: runs PowerShell, so call it from a
+/// background thread.
+#[cfg(windows)]
+pub fn shadow_storage_bytes(root: &std::path::Path) -> Option<u64> {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// Don't flash a console window from the GUI.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const TIMEOUT: Duration = Duration::from_secs(20);
+
+    if !crate::elevate::is_elevated() {
+        return None;
+    }
+    let letter = drive_letter(root)?;
+    // `letter` is a validated ASCII letter, so the script cannot be altered.
+    // Storage is attributed to the volume that holds it (`DiffVolume`).
+    let script = format!(
+        "$ErrorActionPreference='Stop';\
+         $v=(Get-CimInstance Win32_Volume -Filter \"DriveLetter='{letter}:'\").DeviceID;\
+         $t=[uint64]0;\
+         Get-CimInstance Win32_ShadowStorage |\
+         Where-Object {{ $_.DiffVolume.DeviceID -eq $v }} |\
+         ForEach-Object {{ $t += [uint64]$_.UsedSpace }};\
+         $t"
+    );
+    let mut child = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .ok()?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if start.elapsed() < TIMEOUT => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_shadow_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Shadow copies are a Windows feature.
+#[cfg(not(windows))]
+pub fn shadow_storage_bytes(_root: &std::path::Path) -> Option<u64> {
+    None
+}
+
+/// The byte count PowerShell printed (the last non-empty line).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn parse_shadow_output(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())?
+        .parse()
+        .ok()
+}
+
+/// Measure what can be split out of `<Unknown>` for the drive scan of
+/// `root`: NTFS metadata always, shadow copy storage when elevated. Blocking
+/// (see [`shadow_storage_bytes`]), so call it from a background thread.
+pub fn unknown_breakdown(root: &std::path::Path) -> crate::model::UnknownBreakdown {
+    crate::model::UnknownBreakdown {
+        ntfs_metadata: ntfs_metadata_bytes(root),
+        shadow_copies: shadow_storage_bytes(root).unwrap_or(0),
+    }
+}
+
+/// Open the System Protection settings (restore points and their disk
+/// usage). Nothing is changed or deleted. Does nothing off Windows.
+pub fn open_system_protection() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("SystemPropertiesProtection.exe")
+            .spawn()
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 #[cfg(not(windows))]
 pub fn list() -> Vec<Drive> {
     let mut out: Vec<Drive> = mounts()
@@ -458,6 +655,53 @@ fn fs_space(_path: &std::path::Path) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drive_letters_are_only_bare_roots() {
+        use std::path::Path;
+        assert_eq!(drive_letter(Path::new("C:\\")), Some('C'));
+        assert_eq!(drive_letter(Path::new("d:")), Some('D'));
+        assert_eq!(drive_letter(Path::new("C:\\Users")), None);
+        assert_eq!(drive_letter(Path::new("/")), None);
+        assert_eq!(drive_letter(Path::new("1:\\")), None);
+        assert_eq!(drive_letter(Path::new("C:'; rm")), None);
+    }
+
+    #[test]
+    fn shadow_output_takes_the_last_number() {
+        assert_eq!(parse_shadow_output("12345\r\n"), Some(12345));
+        assert_eq!(parse_shadow_output("warning\n\n 42 \n\n"), Some(42));
+        assert_eq!(parse_shadow_output(""), None);
+        assert_eq!(parse_shadow_output("Access denied"), None);
+    }
+
+    #[test]
+    fn shadow_storage_needs_a_drive_root() {
+        assert_eq!(shadow_storage_bytes(&std::env::temp_dir()), None);
+    }
+
+    #[test]
+    fn ntfs_metadata_is_only_measured_at_a_volume_root() {
+        let dir = std::env::temp_dir();
+        assert_eq!(ntfs_metadata_bytes(&dir), 0);
+        assert_eq!(ntfs_metadata_bytes(std::path::Path::new("relative")), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ntfs_metadata_of_the_system_drive_includes_the_mft() {
+        // `$MFT` is readable without elevation on an NTFS system drive.
+        let Some(drive) = std::env::var_os("SystemDrive") else {
+            return;
+        };
+        let root = PathBuf::from(format!("{}\\", drive.to_string_lossy()));
+        let ntfs = list()
+            .iter()
+            .any(|d| d.path == root && d.fs.eq_ignore_ascii_case("NTFS"));
+        if ntfs {
+            assert!(ntfs_metadata_bytes(&root) > 0);
+        }
+    }
 
     #[test]
     fn list_never_returns_blank_paths() {
