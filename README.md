@@ -194,8 +194,11 @@ FastDir never replaces a binary that a package manager installed: for
 `.deb`, `.rpm`, AUR and Nix installs the update notification tells you to
 update from your package manager instead. It renders through Vulkan, so a
 Vulkan driver is needed (Mesa's `mesa-vulkan-drivers` on most distributions).
-Flatpak, Snap and other channels are tracked in
-[#96](https://github.com/enekocm7/fastdir/issues/96). Release and packaging
+Flathub ([#114](https://github.com/enekocm7/fastdir/issues/114)), Snap
+([#115](https://github.com/enekocm7/fastdir/issues/115)), Alpine
+([#116](https://github.com/enekocm7/fastdir/issues/116)), nixpkgs
+([#117](https://github.com/enekocm7/fastdir/issues/117)) and the Debian
+archive ([#118](https://github.com/enekocm7/fastdir/issues/118)) are planned. Release and packaging
 details for contributors are in [`packaging/README.md`](packaging/README.md).
 
 ### Updates
