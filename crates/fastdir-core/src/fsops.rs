@@ -359,6 +359,73 @@ fn copy_file(src: &Path, dest: &Path, len: u64, progress: &OpProgress) -> io::Re
     Ok(())
 }
 
+/// Replace `duplicate` with a hard link to `original`, freeing the
+/// duplicate's bytes while keeping a file at its path.
+///
+/// Both files must be on the same volume and still have the same content:
+/// they are compared byte by byte first, so a file that changed since it
+/// was hashed is never replaced. The link is created under a temporary name
+/// and renamed over `duplicate`, so a failure at any step leaves the
+/// duplicate untouched.
+pub fn replace_with_hard_link(original: &Path, duplicate: &Path) -> Result<(), String> {
+    let a = std::fs::metadata(original).map_err(|e| format!("{}: {e}", original.display()))?;
+    let b = std::fs::metadata(duplicate).map_err(|e| format!("{}: {e}", duplicate.display()))?;
+    if !a.is_file() || !b.is_file() {
+        return Err("Only files can be replaced with hard links".into());
+    }
+    if a.len() != b.len() || !same_content(original, duplicate).map_err(|e| e.to_string())? {
+        return Err("The files are no longer identical".into());
+    }
+    let parent = duplicate.parent().ok_or("The duplicate has no folder")?;
+    let name = duplicate
+        .file_name()
+        .ok_or("The duplicate has no name")?
+        .to_string_lossy();
+    let temp = (0..100)
+        .map(|n| parent.join(format!(".{name}.fastdir-link-{}-{n}", std::process::id())))
+        .find(|p| !path_exists(p))
+        .ok_or("Could not pick a temporary name")?;
+    std::fs::hard_link(original, &temp).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&temp, duplicate) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+
+/// Whether two files hold the same bytes, stopping at the first difference.
+fn same_content(a: &Path, b: &Path) -> io::Result<bool> {
+    const CHUNK: usize = 256 * 1024;
+    let mut a = std::fs::File::open(a)?;
+    let mut b = std::fs::File::open(b)?;
+    let mut buf_a = vec![0u8; CHUNK];
+    let mut buf_b = vec![0u8; CHUNK];
+    loop {
+        let n = read_full(&mut a, &mut buf_a)?;
+        let m = read_full(&mut b, &mut buf_b)?;
+        if n != m || buf_a[..n] != buf_b[..m] {
+            return Ok(false);
+        }
+        if n == 0 {
+            return Ok(true);
+        }
+    }
+}
+
+/// Fill `buf` as far as the file allows; a short count means end of file.
+fn read_full(file: &mut std::fs::File, buf: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match file.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
+}
+
 /// Show the item selected in the system file manager.
 pub fn reveal(path: &Path) {
     #[cfg(windows)]
@@ -517,5 +584,43 @@ mod tests {
         let err = copy_file(&big, &dir.join("copy.bin"), CHUNKED_COPY_MIN, &p).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Interrupted);
         delete_tracked(&dir, true, &OpProgress::default());
+    }
+
+    #[test]
+    fn hard_link_replaces_an_identical_copy() {
+        let dir = temp_dir();
+        let original = dir.join("original.bin");
+        let copy = dir.join("copy.bin");
+        std::fs::write(&original, b"identical bytes").unwrap();
+        std::fs::write(&copy, b"identical bytes").unwrap();
+        if let Err(e) = replace_with_hard_link(&original, &copy) {
+            // Some file systems (FAT, some network shares) have no hard links.
+            eprintln!("skipped: {e}");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        assert_eq!(std::fs::read(&copy).unwrap(), b"identical bytes");
+        // Writing through one name shows through the other: one file now.
+        std::fs::write(&original, b"changed through original").unwrap();
+        assert_eq!(std::fs::read(&copy).unwrap(), b"changed through original");
+        // No temporary file is left behind.
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+        assert_eq!(names.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hard_link_refuses_files_that_differ() {
+        let dir = temp_dir();
+        let original = dir.join("original.bin");
+        let copy = dir.join("copy.bin");
+        std::fs::write(&original, b"aaaa").unwrap();
+        std::fs::write(&copy, b"aaab").unwrap();
+        assert!(replace_with_hard_link(&original, &copy).is_err());
+        assert_eq!(std::fs::read(&copy).unwrap(), b"aaab");
+        std::fs::write(&copy, b"aaaaa").unwrap();
+        assert!(replace_with_hard_link(&original, &copy).is_err());
+        assert_eq!(std::fs::read(&copy).unwrap(), b"aaaaa");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

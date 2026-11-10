@@ -565,6 +565,34 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Stan",
         "list.removed_tab" => "Usunięte ({n})",
         "list.removed_empty" => "Nic nie zostało usunięte",
+        "list.dups_tab" => "Duplikaty",
+        "list.dups_tab_n" => "Duplikaty ({n})",
+        "dups.intro" => {
+            "Wyszukuje pliki o identycznej zawartości w tym skanie. Pliki mniejsze niż {size} są pomijane."
+        }
+        "dups.find" => "Znajdź duplikaty",
+        "dups.again" => "Szukaj ponownie",
+        "dups.hashing" => "Porównywanie plików: {files} przetworzonych, {bytes} odczytanych",
+        "dups.none" => "Nie znaleziono zduplikowanych plików",
+        "dups.summary" => "Grupy: {groups} · do odzyskania {wasted}",
+        "dups.unreadable" => "Nie można odczytać plików: {n}",
+        "dups.group" => "Kopie: {n} · zmarnowane {wasted}",
+        "dups.keep" => "Zachowaj",
+        "dups.keep_hint" => "Zachowywana jest zaznaczona kopia (pierwsza, gdy zaznaczono grupę)",
+        "dups.recycle" => "Pozostałe kopie do: {trash}",
+        "dups.link" => "Połącz pozostałe kopie",
+        "dups.confirm_recycle_title" => "Przenieść kopie ({n}) do: {trash}?",
+        "dups.confirm_recycle" => {
+            "{keep} zostanie zachowany, a pozostałe kopie ({n}, {size}) trafią do: {trash}."
+        }
+        "dups.confirm_link_title" => "Zastąpić kopie ({n}) dowiązaniami twardymi?",
+        "dups.confirm_link" => {
+            "{keep} zostanie zachowany, a pozostałe kopie ({n}) zostaną zastąpione dowiązaniami twardymi do niego, co zwolni {size}. Pliki zostają na miejscu, ale współdzielą jedną kopię danych: zmiana jednego zmienia wszystkie."
+        }
+        "dups.ok_link" => "Zastąp dowiązaniami twardymi",
+        "dups.op_linking" => "Zastępowanie kopii ({n}) dowiązaniami twardymi",
+        "dups.done_link" => "Zastąpiono kopie ({n}) dowiązaniami twardymi, zwolniono {size}",
+        "dups.link_failed" => "Nie można zastąpić kopii: {n}",
         "change.new" => "Nowy",
         "change.grew" => "Urósł",
         "change.shrank" => "Zmalał",

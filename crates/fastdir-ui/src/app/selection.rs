@@ -21,6 +21,7 @@ impl FastDir {
             // Removed items are gone from the current tree, so there is
             // nothing to reveal in it or act on.
             ListTab::Removed => None,
+            ListTab::Duplicates => self.selected_dup_path(),
         }
     }
 
@@ -222,6 +223,8 @@ impl FastDir {
         // A file operation shifted node ids, so a comparison built before it
         // no longer points at the right rows.
         self.clear_comparison(cx);
+        // Deleted, moved or hard-linked copies no longer waste space.
+        self.prune_duplicates();
         if let Some(p) = &select {
             // Make sure the new selection is visible.
             if let Some(tree) = &self.tree {
@@ -279,6 +282,7 @@ impl FastDir {
             self.tree_changed(select, cx);
             return;
         };
+        self.prune_duplicates();
         // Node paths shifted, so a multi-selection no longer points anywhere.
         self.marked.clear();
         self.selected = None;
@@ -311,6 +315,7 @@ impl FastDir {
         match self.tab {
             ListTab::TopFiles => self.select_top_row(ix, cx),
             ListTab::Removed => self.select_removed_row(ix, cx),
+            ListTab::Duplicates => self.select_dup_row(ix, cx),
             ListTab::Tree => self.select_row(ix, cx),
         }
     }
@@ -319,6 +324,7 @@ impl FastDir {
         match self.tab {
             ListTab::TopFiles => self.select_top_row(ix, cx),
             ListTab::Removed => self.select_removed_row(ix, cx),
+            ListTab::Duplicates => self.select_dup_row(ix, cx),
             ListTab::Tree => self.extend_row(ix, cx),
         }
     }
@@ -328,6 +334,7 @@ impl FastDir {
             ListTab::Tree => self.selected,
             ListTab::TopFiles => self.top_selected,
             ListTab::Removed => self.removed_selected,
+            ListTab::Duplicates => self.dups.selected,
         }
     }
 
@@ -381,6 +388,10 @@ impl FastDir {
             self.reveal_top_file(ix, window, cx);
             return;
         }
+        if self.tab == ListTab::Duplicates {
+            self.reveal_dup(window, cx);
+            return;
+        }
         if self.tab != ListTab::Tree {
             return;
         }
@@ -432,6 +443,10 @@ impl FastDir {
         if self.tab == ListTab::TopFiles {
             let ix = self.top_selected.unwrap_or(0);
             self.reveal_top_file(ix, window, cx);
+            return;
+        }
+        if self.tab == ListTab::Duplicates {
+            self.reveal_dup(window, cx);
             return;
         }
         if self.tab != ListTab::Tree {

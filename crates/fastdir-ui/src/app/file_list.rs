@@ -1065,6 +1065,7 @@ impl FastDir {
                 ListTab::Tree => self.render_tree_table(cx).into_any_element(),
                 ListTab::TopFiles => self.render_top_table(cx).into_any_element(),
                 ListTab::Removed => self.render_removed_table(cx).into_any_element(),
+                ListTab::Duplicates => self.render_duplicates_table(cx),
             })
     }
 
@@ -1078,6 +1079,7 @@ impl FastDir {
         let tree_tab = self.tab == ListTab::Tree;
         let top_tab = self.tab == ListTab::TopFiles;
         let removed_tab = self.tab == ListTab::Removed;
+        let dups_tab = self.tab == ListTab::Duplicates;
         let removed_count = self
             .compare
             .as_ref()
@@ -1147,6 +1149,13 @@ impl FastDir {
                     cx,
                 ))
             })
+            .child(tab(
+                "tab-duplicates",
+                self.duplicates_tab_label(),
+                dups_tab,
+                ListTab::Duplicates,
+                cx,
+            ))
     }
 
     fn render_tree_table(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1217,6 +1226,11 @@ impl FastDir {
                     .unwrap_or(0);
                 if self.removed_selected.is_none() && count > 0 {
                     self.removed_selected = Some(0);
+                }
+            }
+            ListTab::Duplicates => {
+                if self.dups.selected.is_none() && !self.dups.rows.is_empty() {
+                    self.dups.selected = Some(0);
                 }
             }
             ListTab::Tree => {}
