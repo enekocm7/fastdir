@@ -5,6 +5,7 @@
 //! benchmarked on its own.
 
 pub mod actions;
+pub mod basket;
 pub mod categories;
 pub mod compress;
 pub mod diff;

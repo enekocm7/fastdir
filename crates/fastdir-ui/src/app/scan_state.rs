@@ -204,6 +204,8 @@ impl FastDir {
             0
         };
         self.phase = Phase::Ready;
+        // Basket items from before a re-scan stay if the new scan has them.
+        self.sync_basket();
         if let Some(tree) = &self.tree {
             let t = tree.read();
             let done = self.tr_fmt(

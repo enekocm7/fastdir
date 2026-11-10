@@ -2,6 +2,7 @@
 //! and treemap, laid out like WinDirStat.
 
 use crate::treemap_view::{TreemapEvent, TreemapView, is_toggle_click};
+use fastdir_core::basket::Basket;
 use fastdir_core::categories::{CategoryMap, FileCategory};
 use fastdir_core::compress;
 use fastdir_core::diff::{ChangeStatus, ScanDiff};
@@ -97,6 +98,8 @@ actions!(
         OpenFilters,
         OpenSettings,
         ExportResults,
+        AddToBasket,
+        ShowBasket,
         RunAction1,
         RunAction2,
         RunAction3,
@@ -110,6 +113,7 @@ actions!(
 );
 
 mod actions_ui;
+mod basket_ui;
 mod compare;
 mod compress_ui;
 mod context_menu;
@@ -174,6 +178,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("ctrl-shift-e", ExportResults, Some(CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("ctrl-b", AddToBasket, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-b", ShowBasket, Some(CONTEXT)),
         KeyBinding::new("ctrl-1", RunAction1, Some(CONTEXT)),
         KeyBinding::new("ctrl-2", RunAction2, Some(CONTEXT)),
         KeyBinding::new("ctrl-3", RunAction3, Some(CONTEXT)),
@@ -200,6 +206,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-f", FocusSearch, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-f", OpenFilters, Some(CONTEXT)),
         KeyBinding::new("cmd-,", OpenSettings, Some(CONTEXT)),
+        KeyBinding::new("cmd-b", AddToBasket, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-b", ShowBasket, Some(CONTEXT)),
         KeyBinding::new("cmd-1", RunAction1, Some(CONTEXT)),
         KeyBinding::new("cmd-2", RunAction2, Some(CONTEXT)),
         KeyBinding::new("cmd-3", RunAction3, Some(CONTEXT)),
@@ -471,6 +479,9 @@ pub struct FastDir {
     marked: BTreeSet<NodePath>,
     /// Where a Shift+click range starts.
     anchor: Option<NodePath>,
+    /// The deletion basket: items collected across folders, tabs and filters.
+    /// Keyed by file-system path, so it survives anything that shifts nodes.
+    basket: Basket,
     /// Extension rank highlighted in the treemap, picked from the ext list.
     selected_ext: Option<u16>,
     /// Owner highlighted in the treemap, picked from the per-user totals view.
@@ -678,6 +689,7 @@ impl FastDir {
             selected: None,
             marked: BTreeSet::new(),
             anchor: None,
+            basket: Basket::default(),
             selected_ext: None,
             selected_owner: None,
             owner_rows: Vec::new(),
@@ -1350,6 +1362,8 @@ impl Render for FastDir {
             .on_action(cx.listener(Self::open_filters))
             .on_action(cx.listener(Self::open_export))
             .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::toggle_basket))
+            .on_action(cx.listener(Self::show_basket))
             .on_action(cx.listener(|this, _: &RunAction1, window, cx| {
                 this.run_action_shortcut(1, window, cx)
             }))

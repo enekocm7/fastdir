@@ -313,10 +313,22 @@ impl FastDir {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let targets = self.targets();
+        self.confirm_delete_targets(targets, permanent, window, cx);
+    }
+
+    /// Confirm (as configured) and queue a delete of `targets`: the
+    /// selection, or everything in the deletion basket.
+    pub(super) fn confirm_delete_targets(
+        &mut self,
+        targets: Vec<Target>,
+        permanent: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.is_refreshing() {
             return;
         }
-        let targets = self.targets();
         if targets.is_empty() {
             return;
         }
