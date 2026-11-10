@@ -266,6 +266,7 @@ impl FastDir {
                 let color_by_change = self.settings.treemap.color_mode == TreemapColorMode::Change;
                 let comparing = self.compare.is_some();
                 let can_compare = matches!(self.phase, Phase::Ready) && self.tree.is_some();
+                let can_snapshot = self.can_snapshot();
                 let show_partial = self.settings.scan.show_partial_results;
                 let show_treemap = self.settings.treemap.show;
                 let hide_empty = self.settings.list.hide_empty_folders;
@@ -273,6 +274,8 @@ impl FastDir {
                 let menu_open_scan = self.tr("menu.open_scan");
                 let menu_compare = self.tr("menu.compare");
                 let menu_compare_clear = self.tr("menu.compare_clear");
+                let menu_growth = self.tr("menu.growth");
+                let menu_save_snapshot = self.tr("menu.save_snapshot");
                 let menu_change = self.tr("tb.menu_change");
                 let menu_settings = self.tr("tb.menu_settings");
                 let menu_check = self.tr("tb.menu_check");
@@ -300,6 +303,8 @@ impl FastDir {
                     let e_open = entity.clone();
                     let e_compare = entity.clone();
                     let e_clear = entity.clone();
+                    let e_growth = entity.clone();
+                    let e_snapshot = entity.clone();
                     menu = menu
                         .item(
                             gpui_kit::component::menu::PopupMenuItem::new(menu_open_scan)
@@ -319,6 +324,27 @@ impl FastDir {
                                 .on_click(move |_, window, cx| {
                                     e_compare
                                         .update(cx, |this, cx| this.compare_with(window, cx))
+                                        .ok();
+                                }),
+                        );
+                    menu = menu
+                        .item(
+                            gpui_kit::component::menu::PopupMenuItem::new(menu_growth)
+                                .icon(IconName::ChartColumnIncreasing)
+                                .disabled(!can_compare)
+                                .on_click(move |_, window, cx| {
+                                    e_growth
+                                        .update(cx, |this, cx| this.show_growth(window, cx))
+                                        .ok();
+                                }),
+                        )
+                        .item(
+                            gpui_kit::component::menu::PopupMenuItem::new(menu_save_snapshot)
+                                .icon(IconName::Camera)
+                                .disabled(!can_snapshot)
+                                .on_click(move |_, window, cx| {
+                                    e_snapshot
+                                        .update(cx, |this, cx| this.save_snapshot(window, cx))
                                         .ok();
                                 }),
                         );

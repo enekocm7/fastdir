@@ -259,6 +259,9 @@ impl FastDir {
                 }),
             cx,
         );
+        if !cancelled {
+            self.auto_snapshot(tree, window, cx);
+        }
         self.focus.focus(window, cx);
         cx.notify();
     }

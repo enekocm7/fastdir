@@ -52,6 +52,12 @@ culprit? Rename, move, recycle or delete it right there.
   red = grew, with a legend). The status bar shows the net change and, for
   drive scans, the change in free space. Only changed nodes are kept, so the
   comparison does not double the memory of a large scan.
+- **Scan history and growth over time** – save timestamped snapshots
+  (`…` → *Save snapshot*, automatically after every scan, or from a scheduled
+  `fastdir-cli snapshot`) and see how a folder grew: `…` → *Growth over
+  time…* charts the selected folder's size across every snapshot that
+  contains it, with the change between snapshots and a one-click comparison.
+  Retention settings keep the snapshot folder from growing without limit.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
 - **`<Free space>` and an explained `<Unknown>`** – a whole-drive scan adds
@@ -170,8 +176,8 @@ newer version exists, a notification and a toolbar button offer **Update now**
 this version**. Use the toolbar's `…` menu to check manually or to turn the
 automatic check off. All settings live in `%APPDATA%\FastDir\config.toml`,
 grouped into `[scan] [treemap] [list] [sort] [ops] [startup] [updates]` and
-`[appearance]`, `[integration]`, `[locale]`, `[categories]` and `[[actions]]`
-sections (older config files migrate automatically). Unknown extensions fall
+`[appearance]`, `[integration]`, `[locale]`, `[snapshots]`, `[categories]` and
+`[[actions]]` sections (older config files migrate automatically). Unknown extensions fall
 into *Other*; move or add extensions to a category in `[categories]`:
 
 ```toml
@@ -281,6 +287,49 @@ The diff keeps only changed nodes plus the top-most removed entries, so a
 comparison starts quickly and does not keep a second copy of the whole tree in
 memory.
 
+### Scan history and growth over time
+
+A **snapshot** is a compact saved scan with the time it was taken. Snapshots
+live in `%APPDATA%\FastDir\snapshots`, one sub-folder per scanned folder or
+drive, named by UTC time (`20261110T081500Z.json`). Each one is an ordinary
+saved scan: it opens with *Open scan…*, works with *Compare with a saved
+scan…* and with `fastdir-cli diff`.
+
+- **Saving.** `…` → *Save snapshot* saves the scan on screen. Settings →
+  Snapshots → *Save a snapshot after every scan* does it automatically (off
+  by default, since whole-drive snapshots can be large). For a regular
+  history without opening the app, schedule `fastdir-cli snapshot` (below).
+- **Growth over time.** `…` → *Growth over time…* shows the selected folder
+  (or the scan root) in every snapshot that contains it: snapshots of the
+  folder itself *and* of any folder or drive above it, so a nightly snapshot
+  of `D:\` gives a history for every folder on `D:`. The dialog charts the
+  size per snapshot (plus the current scan), lists the change between
+  snapshots and offers **Compare** to open the full comparison view against a
+  snapshot of the same root.
+- **Retention.** Settings → Snapshots keeps at most 10, 30 (default) or 100
+  snapshots per folder, or no limit, and removes snapshots older than 90 days,
+  a year (default) or never. It is applied every time a snapshot is saved; the
+  newest snapshot is always kept. The same values live in `config.toml`:
+
+```toml
+[snapshots]
+dir = "D:\\FastDir snapshots"   # optional; default %APPDATA%\FastDir\snapshots
+auto_save = false
+keep_count = 30                 # 0 = no limit
+max_age_days = 365              # 0 = no limit
+```
+
+A scheduled task that snapshots `D:` every night and follows the app's
+retention settings:
+
+```powershell
+# Per-user install path; all-users installs live in C:\Program Files\FastDir
+$cli = "$env:LOCALAPPDATA\Programs\FastDir\fastdir-cli.exe"
+$action = New-ScheduledTaskAction -Execute $cli -Argument 'snapshot D:\ --config --quiet'
+$trigger = New-ScheduledTaskTrigger -Daily -At 3am
+Register-ScheduledTask -TaskName 'FastDir snapshot D' -Action $action -Trigger $trigger
+```
+
 ### Command line (for scripts and agents)
 
 FastDir also runs headless: it scans, prints JSON or CSV and exits without
@@ -295,6 +344,10 @@ fastdir-cli top <path> [options]    the largest files under <path>
 fastdir-cli duplicates <path> [options]
                                     groups of identical files and the space they waste
 fastdir-cli diff <old> <new>        what changed between two scans
+fastdir-cli snapshot <path> [options]
+                                    scan <path> and save a timestamped snapshot
+fastdir-cli history <path> [options]
+                                    the size of <path> in every saved snapshot
 fastdir-cli mcp                     MCP server on stdin/stdout (see below)
 fastdir-cli config [<file>]         the scan options a config file gives (see --config)
 fastdir-cli help [<command>]        help for a command
@@ -317,7 +370,20 @@ fastdir-cli diff saved.json D:\ --min-change 1GB
 
 # ISO files over 1 GB that were not touched this year
 fastdir-cli top D:\ --ext .iso --min-size 1GB --older-than 1y
+
+# Nightly snapshot of D: (folders only), keeping 60 days
+fastdir-cli snapshot D:\ --no-files --max-age 60d --quiet
+
+# How did D:\Projects grow over those snapshots?
+fastdir-cli history D:\Projects --format csv
 ```
+
+`snapshot` scans `<path>`, saves the result in the snapshot folder (see
+[Scan history](#scan-history-and-growth-over-time)) and prints a small
+`fastdir.snapshot` summary. Without `--keep`, `--max-age` or `--config` it
+removes nothing; with `--config` it uses the `[snapshots]` folder and
+retention of `config.toml` (flags still win). `history` reads the snapshots
+only and never scans.
 
 `diff` takes a saved scan as `<old>` and either another saved scan or a
 folder to scan now as `<new>`. It uses the same matcher as the GUI: entries
@@ -344,15 +410,20 @@ row has its own sizes.
 | `--min-size <size>` | duplicates | Smallest file to hash (default 1 MB); accepts `500MB` or `1.5 GiB` |
 | `--ext <ext>` | duplicates | Only files with this extension; repeatable |
 | `-n, --limit <groups>` | duplicates | How many groups to report (default all); totals still count every group |
-| `--threads <n>` | scan, top, duplicates, diff | Scan threads, 1–64 (default automatic) |
-| `--exclude <glob>` | scan, top, duplicates, diff | Skip entries whose name matches; repeatable |
-| `--follow-junctions` | scan, top, duplicates, diff | Descend into junctions / symlinked folders |
-| `--cross-volumes` | scan, top, duplicates, diff | With `--follow-junctions`, also enter other volumes |
-| `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff | Skip hidden and system entries |
-| `--skip-windows` | scan, top, duplicates, diff | Skip the Windows folder (`%SystemRoot%`, usually `C:\Windows`) for a much faster system-drive scan; its bytes count as `<Unknown>` |
-| `--owners` | scan, top, diff | Record the owning account of every entry (Owner field, per-user totals) |
-| `-q, --quiet` | scan, top, duplicates, diff | Nothing on stderr except errors |
-| `--config[=<file>]` | scan, top, duplicates, diff, mcp | Use the `[scan]` section of `config.toml` (the default file, or `<file>`) |
+| `--threads <n>` | scan, top, duplicates, diff, snapshot | Scan threads, 1–64 (default automatic) |
+| `--exclude <glob>` | scan, top, duplicates, diff, snapshot | Skip entries whose name matches; repeatable |
+| `--follow-junctions` | scan, top, duplicates, diff, snapshot | Descend into junctions / symlinked folders |
+| `--cross-volumes` | scan, top, duplicates, diff, snapshot | With `--follow-junctions`, also enter other volumes |
+| `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff, snapshot | Skip hidden and system entries |
+| `--skip-windows` | scan, top, duplicates, diff, snapshot | Skip the Windows folder (`%SystemRoot%`, usually `C:\Windows`) for a much faster system-drive scan; its bytes count as `<Unknown>` |
+| `--owners` | scan, top, diff, snapshot | Record the owning account of every entry (Owner field, per-user totals) |
+| `-q, --quiet` | scan, top, duplicates, diff, snapshot | Nothing on stderr except errors |
+| `--dir <folder>` | snapshot, history | Snapshot folder (default `%APPDATA%\FastDir\snapshots`, or `[snapshots] dir` with `--config`) |
+| `--keep <n>` | snapshot | Keep at most `<n>` snapshots of this root (`0` = no limit); the newest is always kept |
+| `--max-age <age>` | snapshot | Remove snapshots older than `90d`, `6m`, `1y`, … (`0` = no limit) |
+| `--max-depth <n>` / `--no-files` | snapshot | Store a smaller snapshot: entries up to `<n>` levels / folders only (sizes still count everything) |
+| `--format json\|csv`, `-o`, `--pretty` | history | Output format and destination, as for `scan` |
+| `--config[=<file>]` | scan, top, duplicates, diff, snapshot, history, mcp | Use the `[scan]` section of `config.toml` (the default file, or `<file>`); `snapshot` and `history` also read `[snapshots]` |
 
 `scan` filters work like the GUI's filtered tree: matching entries and the
 ancestors needed to reach them are kept, while every folder's totals still
@@ -519,6 +590,45 @@ group,wasted,path,size,hash,modified_iso
 
 `group` is 1-based; rows of the same group share `wasted` (the group's
 reclaimable bytes) and `hash`.
+
+`fastdir snapshot` (`schema: "fastdir.snapshot"`) reports the saved file:
+
+```jsonc
+{
+  "schema": "fastdir.snapshot", "version": 1, "fastdir_version": "0.3.2",
+  "root": "D:\\", "scanned_at": "2026-11-10T03:00:00Z",
+  "elapsed_ms": 15400, "errors": 3,
+  "file": "C:\\Users\\me\\AppData\\Roaming\\FastDir\\snapshots\\D-…\\20261110T030000Z.json",
+  "snapshots_dir": "C:\\Users\\me\\AppData\\Roaming\\FastDir\\snapshots",
+  "size": 512000000000, "disk_size": 515000000000,
+  "files": 2700000, "folders": 310000,
+  "snapshots": 30,                   // snapshots of this root after retention
+  "pruned": ["…\\20261010T030000Z.json"]   // files removed by retention
+}
+```
+
+`fastdir history` (`schema: "fastdir.history"`) lists `<path>` in every
+snapshot that contains it, oldest first:
+
+```jsonc
+{
+  "schema": "fastdir.history", "version": 1, "fastdir_version": "0.3.2",
+  "path": "D:\\Projects", "snapshots_dir": "…",
+  "change": 2147483648,              // last size - first size, or null
+  "points": [
+    {
+      "scanned_at": "2026-11-09T03:00:00Z", "file": "…", "root": "D:\\",
+      "found": true,                 // false when <path> was not in that snapshot
+      "size": 10737418240, "disk_size": 10800000000,
+      "files": 52000, "folders": 4100,
+      "delta": null                  // change since the previous point that had it
+    }
+  ]
+}
+```
+
+CSV uses the header
+`scanned_at,size,disk_size,files,folders,delta,root,file`.
 
 ### MCP server
 

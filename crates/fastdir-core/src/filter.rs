@@ -344,8 +344,8 @@ pub fn parse_modified(input: &str, end: bool) -> Option<i64> {
         .map(|local| local.timestamp())
 }
 
-/// Seconds in an age such as `30d` or `6m`.
-fn parse_age(input: &str) -> Option<i64> {
+/// Seconds in an age such as `30d` or `6m` (`d`, `w`, `m` = 30 days, `y` = 365 days).
+pub fn parse_age(input: &str) -> Option<i64> {
     let lower = input.trim().to_ascii_lowercase();
     let split = lower.find(|c: char| !c.is_ascii_digit())?;
     let (number, unit) = lower.split_at(split);
