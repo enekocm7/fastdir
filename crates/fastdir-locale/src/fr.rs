@@ -591,6 +591,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Remplacement de {n} copies par des liens physiques",
         "dups.done_link" => "{n} copies remplacées par des liens physiques, {size} libérés",
         "dups.link_failed" => "Impossible de remplacer {n} copies",
+        "list.cleanup_tab" => "Nettoyage",
+        "list.cleanup_tab_n" => "Nettoyage ({n})",
+        "cleanup.intro" => {
+            "Repère dans cette analyse les emplacements connus qui contiennent de l'espace récupérable : dossiers temporaires, caches des navigateurs, dossiers node_modules et target, fichiers de Windows Update et anciens téléchargements."
+        }
+        "cleanup.find" => "Rechercher des suggestions de nettoyage",
+        "cleanup.again" => "Chercher à nouveau",
+        "cleanup.searching" => "Recherche d'espace récupérable…",
+        "cleanup.none" => "Rien à nettoyer n'a été trouvé dans cette analyse",
+        "cleanup.summary" => "{n} suggestions · {size} récupérables",
+        "cleanup.hint" => "Nettoie la suggestion sélectionnée après confirmation",
+        "cleanup.recycle" => "Déplacer vers {trash}",
+        "cleanup.delete" => "Supprimer définitivement",
+        "cleanup.confirm_recycle" => "Déplacer {n} éléments ({size}) de {location} vers {trash} ?",
+        "cleanup.confirm_delete" => {
+            "Supprimer définitivement {n} éléments ({size}) de {location} ? Cette action est irréversible."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows peut refuser de supprimer certains fichiers protégés de l'ancienne installation."
+        }
+        "cleanup.kind.temp" => "Fichiers temporaires",
+        "cleanup.kind.browser_cache" => "Cache du navigateur",
+        "cleanup.kind.node_modules" => "Dossier node_modules",
+        "cleanup.kind.build_target" => "Sortie de compilation Cargo",
+        "cleanup.kind.windows_update" => "Téléchargements Windows Update",
+        "cleanup.kind.windows_old" => "Installation précédente de Windows",
+        "cleanup.kind.stale_downloads" => "Anciens téléchargements",
         "change.new" => "Nouveau",
         "change.grew" => "A grandi",
         "change.shrank" => "A diminué",

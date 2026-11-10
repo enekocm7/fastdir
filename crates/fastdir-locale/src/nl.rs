@@ -591,6 +591,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "{n} kopieën worden vervangen door hardlinks",
         "dups.done_link" => "{n} kopieën vervangen door hardlinks, {size} vrijgemaakt",
         "dups.link_failed" => "{n} kopieën konden niet worden vervangen",
+        "list.cleanup_tab" => "Opschonen",
+        "list.cleanup_tab_n" => "Opschonen ({n})",
+        "cleanup.intro" => {
+            "Zoek in deze scan naar bekende plekken met terug te winnen ruimte: tijdelijke mappen, browsercaches, node_modules- en target-mappen, Windows Update-bestanden en oude downloads."
+        }
+        "cleanup.find" => "Opschoonsuggesties zoeken",
+        "cleanup.again" => "Opnieuw zoeken",
+        "cleanup.searching" => "Zoeken naar terug te winnen ruimte…",
+        "cleanup.none" => "Er is niets om op te schonen gevonden in deze scan",
+        "cleanup.summary" => "{n} suggesties · {size} terug te winnen",
+        "cleanup.hint" => "Ruimt de geselecteerde suggestie op na bevestiging",
+        "cleanup.recycle" => "Naar {trash} verplaatsen",
+        "cleanup.delete" => "Definitief verwijderen",
+        "cleanup.confirm_recycle" => "{n} items ({size}) in {location} naar {trash} verplaatsen?",
+        "cleanup.confirm_delete" => {
+            "{n} items ({size}) in {location} definitief verwijderen? Dit kan niet ongedaan worden gemaakt."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows weigert mogelijk enkele beschermde bestanden van de oude installatie te verwijderen."
+        }
+        "cleanup.kind.temp" => "Tijdelijke bestanden",
+        "cleanup.kind.browser_cache" => "Browsercache",
+        "cleanup.kind.node_modules" => "Map node_modules",
+        "cleanup.kind.build_target" => "Cargo-buildoutput",
+        "cleanup.kind.windows_update" => "Windows Update-downloads",
+        "cleanup.kind.windows_old" => "Vorige Windows-installatie",
+        "cleanup.kind.stale_downloads" => "Oude downloads",
         "change.new" => "Nieuw",
         "change.grew" => "Gegroeid",
         "change.shrank" => "Gekrompen",

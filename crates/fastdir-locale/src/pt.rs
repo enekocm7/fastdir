@@ -591,6 +591,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Substituindo {n} cópias por links físicos",
         "dups.done_link" => "{n} cópias substituídas por links físicos, {size} liberados",
         "dups.link_failed" => "Não foi possível substituir {n} cópias",
+        "list.cleanup_tab" => "Limpeza",
+        "list.cleanup_tab_n" => "Limpeza ({n})",
+        "cleanup.intro" => {
+            "Encontre nesta análise lugares conhecidos com espaço recuperável: pastas temporárias, caches de navegadores, pastas node_modules e target, ficheiros do Windows Update e transferências antigas."
+        }
+        "cleanup.find" => "Procurar sugestões de limpeza",
+        "cleanup.again" => "Pesquisar novamente",
+        "cleanup.searching" => "A procurar espaço recuperável…",
+        "cleanup.none" => "Não foi encontrado nada para limpar nesta análise",
+        "cleanup.summary" => "{n} sugestões · {size} recuperáveis",
+        "cleanup.hint" => "Limpa a sugestão selecionada após pedir confirmação",
+        "cleanup.recycle" => "Mover para {trash}",
+        "cleanup.delete" => "Eliminar permanentemente",
+        "cleanup.confirm_recycle" => "Mover {n} itens ({size}) em {location} para {trash}?",
+        "cleanup.confirm_delete" => {
+            "Eliminar permanentemente {n} itens ({size}) em {location}? Esta ação não pode ser anulada."
+        }
+        "cleanup.windows_old_note" => {
+            "O Windows pode recusar-se a remover alguns ficheiros protegidos da instalação anterior."
+        }
+        "cleanup.kind.temp" => "Ficheiros temporários",
+        "cleanup.kind.browser_cache" => "Cache do navegador",
+        "cleanup.kind.node_modules" => "Pasta node_modules",
+        "cleanup.kind.build_target" => "Resultado de compilação do Cargo",
+        "cleanup.kind.windows_update" => "Transferências do Windows Update",
+        "cleanup.kind.windows_old" => "Instalação anterior do Windows",
+        "cleanup.kind.stale_downloads" => "Transferências antigas",
         "change.new" => "Novo",
         "change.grew" => "Cresceu",
         "change.shrank" => "Diminuiu",

@@ -573,6 +573,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Заміна копій ({n}) жорсткими посиланнями",
         "dups.done_link" => "Копії ({n}) замінено жорсткими посиланнями, звільнено {size}",
         "dups.link_failed" => "Не вдалося замінити копії: {n}",
+        "list.cleanup_tab" => "Очищення",
+        "list.cleanup_tab_n" => "Очищення ({n})",
+        "cleanup.intro" => {
+            "Знаходить у цьому скануванні відомі місця, де можна звільнити місце: тимчасові теки, кеші браузерів, теки node_modules і target, файли Windows Update та старі завантаження."
+        }
+        "cleanup.find" => "Знайти пропозиції очищення",
+        "cleanup.again" => "Шукати знову",
+        "cleanup.searching" => "Пошук місця для звільнення…",
+        "cleanup.none" => "У цьому скануванні немає чого очищати",
+        "cleanup.summary" => "Пропозицій: {n} · можна звільнити {size}",
+        "cleanup.hint" => "Очищає вибрану пропозицію після підтвердження",
+        "cleanup.recycle" => "Перемістити в {trash}",
+        "cleanup.delete" => "Видалити назавжди",
+        "cleanup.confirm_recycle" => "Перемістити елементи ({n}, {size}) із {location} у {trash}?",
+        "cleanup.confirm_delete" => {
+            "Видалити назавжди елементи ({n}, {size}) із {location}? Цю дію не можна скасувати."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows може відмовитися видаляти деякі захищені файли попереднього встановлення."
+        }
+        "cleanup.kind.temp" => "Тимчасові файли",
+        "cleanup.kind.browser_cache" => "Кеш браузера",
+        "cleanup.kind.node_modules" => "Тека node_modules",
+        "cleanup.kind.build_target" => "Результат збирання Cargo",
+        "cleanup.kind.windows_update" => "Завантаження Windows Update",
+        "cleanup.kind.windows_old" => "Попереднє встановлення Windows",
+        "cleanup.kind.stale_downloads" => "Старі завантаження",
         "change.new" => "Новий",
         "change.grew" => "Збільшився",
         "change.shrank" => "Зменшився",

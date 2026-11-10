@@ -110,6 +110,7 @@ actions!(
 );
 
 mod actions_ui;
+mod cleanup_ui;
 mod compare;
 mod compress_ui;
 mod context_menu;
@@ -309,6 +310,8 @@ enum ListTab {
     Removed,
     /// Groups of byte-identical files.
     Duplicates,
+    /// Known places that hold reclaimable space.
+    Cleanup,
 }
 
 /// One row of the extension panel: a category header or an extension below
@@ -435,6 +438,8 @@ pub struct FastDir {
     removed_selected: Option<usize>,
     /// The Duplicates tab: search state, results and cursor.
     dups: duplicates_ui::Duplicates,
+    /// The Cleanup tab: suggestions and cursor.
+    cleanup: cleanup_ui::Cleanup,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
     /// Folders that could not be read in the last finished scan (access denied).
@@ -657,6 +662,7 @@ impl FastDir {
             removed_scroll: UniformListScrollHandle::new(),
             removed_selected: None,
             dups: duplicates_ui::Duplicates::default(),
+            cleanup: cleanup_ui::Cleanup::default(),
             scan_root: None,
             last_scan: None,
             last_errors: 0,

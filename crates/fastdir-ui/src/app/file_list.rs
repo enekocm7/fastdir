@@ -1066,6 +1066,7 @@ impl FastDir {
                 ListTab::TopFiles => self.render_top_table(cx).into_any_element(),
                 ListTab::Removed => self.render_removed_table(cx).into_any_element(),
                 ListTab::Duplicates => self.render_duplicates_table(cx),
+                ListTab::Cleanup => self.render_cleanup_table(cx),
             })
     }
 
@@ -1080,6 +1081,7 @@ impl FastDir {
         let top_tab = self.tab == ListTab::TopFiles;
         let removed_tab = self.tab == ListTab::Removed;
         let dups_tab = self.tab == ListTab::Duplicates;
+        let cleanup_tab = self.tab == ListTab::Cleanup;
         let removed_count = self
             .compare
             .as_ref()
@@ -1154,6 +1156,13 @@ impl FastDir {
                 self.duplicates_tab_label(),
                 dups_tab,
                 ListTab::Duplicates,
+                cx,
+            ))
+            .child(tab(
+                "tab-cleanup",
+                self.cleanup_tab_label(),
+                cleanup_tab,
+                ListTab::Cleanup,
                 cx,
             ))
     }
@@ -1231,6 +1240,11 @@ impl FastDir {
             ListTab::Duplicates => {
                 if self.dups.selected.is_none() && !self.dups.rows.is_empty() {
                     self.dups.selected = Some(0);
+                }
+            }
+            ListTab::Cleanup => {
+                if matches!(self.cleanup.state, cleanup_ui::CleanupState::Idle) {
+                    self.start_cleanup_search(cx);
                 }
             }
             ListTab::Tree => {}

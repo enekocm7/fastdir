@@ -591,6 +591,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "{n} 個のコピーをハードリンクに置き換え中",
         "dups.done_link" => "{n} 個のコピーをハードリンクに置き換え、{size} を解放しました",
         "dups.link_failed" => "{n} 個のコピーを置き換えられませんでした",
+        "list.cleanup_tab" => "クリーンアップ",
+        "list.cleanup_tab_n" => "クリーンアップ ({n})",
+        "cleanup.intro" => {
+            "このスキャンで、空き容量を取り戻せる既知の場所を探します: 一時フォルダー、ブラウザーのキャッシュ、node_modules と target フォルダー、Windows Update のファイル、古いダウンロード。"
+        }
+        "cleanup.find" => "クリーンアップの候補を探す",
+        "cleanup.again" => "もう一度検索",
+        "cleanup.searching" => "回収できる容量を検索しています…",
+        "cleanup.none" => "このスキャンにはクリーンアップできるものがありませんでした",
+        "cleanup.summary" => "{n} 件の候補 · {size} を回収可能",
+        "cleanup.hint" => "確認のあと、選択した候補をクリーンアップします",
+        "cleanup.recycle" => "{trash}に移動",
+        "cleanup.delete" => "完全に削除",
+        "cleanup.confirm_recycle" => "{location} の {n} 個の項目 ({size}) を{trash}に移動しますか?",
+        "cleanup.confirm_delete" => {
+            "{location} の {n} 個の項目 ({size}) を完全に削除しますか? この操作は元に戻せません。"
+        }
+        "cleanup.windows_old_note" => {
+            "古いインストールの保護されたファイルの一部は、Windows によって削除を拒否されることがあります。"
+        }
+        "cleanup.kind.temp" => "一時ファイル",
+        "cleanup.kind.browser_cache" => "ブラウザーのキャッシュ",
+        "cleanup.kind.node_modules" => "node_modules フォルダー",
+        "cleanup.kind.build_target" => "Cargo のビルド出力",
+        "cleanup.kind.windows_update" => "Windows Update のダウンロード",
+        "cleanup.kind.windows_old" => "以前の Windows インストール",
+        "cleanup.kind.stale_downloads" => "古いダウンロード",
         "change.new" => "新規",
         "change.grew" => "増加",
         "change.shrank" => "減少",
