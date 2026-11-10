@@ -60,10 +60,12 @@ echo "Linked libraries: ${needed[*]}"
 echo "Newest glibc symbol: $glibc"
 
 # Loaded with dlopen at run time, so invisible to objdump / dpkg-shlibdeps:
-# the Vulkan loader (rendering), Wayland and xkbcommon (windowing, input).
-deb_extra=(libvulkan1 libwayland-client0 libxkbcommon0 libxkbcommon-x11-0)
+# the Vulkan loader (rendering), Wayland and xkbcommon (windowing, input)
+# and fontconfig (font lookup).
+deb_extra=(libvulkan1 libwayland-client0 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1)
 rpm_extra=("libvulkan.so.1()(64bit)" "libwayland-client.so.0()(64bit)"
-    "libxkbcommon.so.0()(64bit)" "libxkbcommon-x11.so.0()(64bit)")
+    "libxkbcommon.so.0()(64bit)" "libxkbcommon-x11.so.0()(64bit)"
+    "libfontconfig.so.1()(64bit)")
 
 mkdir -p "$work/shlibdeps/debian"
 echo "Source: fastdir" > "$work/shlibdeps/debian/control"

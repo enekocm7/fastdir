@@ -2,5 +2,6 @@
 *.sh text eol=lf
 PKGBUILD text eol=lf
 *.nix text eol=lf
+flake.lock text eol=lf
 *.desktop text eol=lf
 *.metainfo.xml text eol=lf

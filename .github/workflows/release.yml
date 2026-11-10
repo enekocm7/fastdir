@@ -85,9 +85,18 @@ jobs:
   linux:
     name: Linux x64
     runs-on: ubuntu-24.04
+    # Built against glibc 2.35 (Ubuntu 22.04), so the binaries, the .deb and
+    # the AppImage also run on Debian 12 and other distros older than the
+    # runner. Bump only together with the oldest distro you want to support.
+    container: ubuntu:22.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y sudo curl git ca-certificates jq xz-utils file
+
       - uses: actions/checkout@v4
 
       - name: Install Rust
@@ -98,9 +107,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          # Verified GPUI build inputs on Ubuntu 24.04 (gpui-kit install
-          # guide); libasound2-dev is only needed by the `speech` feature.
-          sudo apt-get update
+          # Verified GPUI build inputs (gpui-kit install guide);
+          # libasound2-dev is only needed by the `speech` feature.
           sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev \
             libwayland-dev libwebkit2gtk-4.1-dev libxkbcommon-x11-dev \
             libx11-xcb-dev libssl-dev libzstd-dev libasound2-dev \
@@ -140,9 +148,9 @@ jobs:
           curl -fsSLo nfpm.deb \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
           sudo apt-get install -y ./nfpm.deb
-          curl -fsSLo "$RUNNER_TEMP/linuxdeploy" \
+          sudo curl -fsSLo /usr/local/bin/linuxdeploy \
             "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage"
-          chmod +x "$RUNNER_TEMP/linuxdeploy"
+          sudo chmod +x /usr/local/bin/linuxdeploy
         env:
           NFPM_VERSION: 2.48.0
           LINUXDEPLOY_VERSION: 1-alpha-20251107-1
@@ -156,7 +164,6 @@ jobs:
       - name: Build .deb, .rpm and AppImage
         run: packaging/linux/package.sh "${{ steps.version.outputs.version }}" target/release dist
         env:
-          LINUXDEPLOY: ${{ runner.temp }}/linuxdeploy
           # GitHub runners have no FUSE for the linuxdeploy AppImage itself.
           APPIMAGE_EXTRACT_AND_RUN: "1"
 
