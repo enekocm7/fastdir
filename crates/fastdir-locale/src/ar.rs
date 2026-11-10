@@ -614,6 +614,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "جارٍ استبدال {n} نسخ بروابط ثابتة",
         "dups.done_link" => "تم استبدال {n} نسخ بروابط ثابتة وتحرير {size}",
         "dups.link_failed" => "تعذر استبدال {n} نسخ",
+        "list.cleanup_tab" => "التنظيف",
+        "list.cleanup_tab_n" => "التنظيف ({n})",
+        "cleanup.intro" => {
+            "اعثر على الأماكن المعروفة التي تحتوي على مساحة يمكن استرجاعها في هذا الفحص: مجلدات الملفات المؤقتة وذاكرات التخزين المؤقت للمتصفحات ومجلدات node_modules وtarget وملفات Windows Update والتنزيلات القديمة."
+        }
+        "cleanup.find" => "البحث عن اقتراحات التنظيف",
+        "cleanup.again" => "البحث مرة أخرى",
+        "cleanup.searching" => "جارٍ البحث عن مساحة يمكن استرجاعها…",
+        "cleanup.none" => "لم يتم العثور على شيء للتنظيف في هذا الفحص",
+        "cleanup.summary" => "{n} اقتراحات · {size} يمكن استرجاعها",
+        "cleanup.hint" => "ينظّف الاقتراح المحدد بعد طلب التأكيد",
+        "cleanup.recycle" => "نقل إلى {trash}",
+        "cleanup.delete" => "حذف نهائي",
+        "cleanup.confirm_recycle" => "هل تريد نقل {n} عنصر ({size}) في {location} إلى {trash}؟",
+        "cleanup.confirm_delete" => {
+            "هل تريد حذف {n} عنصر ({size}) في {location} نهائيًا؟ لا يمكن التراجع عن ذلك."
+        }
+        "cleanup.windows_old_note" => {
+            "قد يرفض Windows إزالة بعض الملفات المحمية من التثبيت القديم."
+        }
+        "cleanup.kind.temp" => "ملفات مؤقتة",
+        "cleanup.kind.browser_cache" => "ذاكرة المتصفح المؤقتة",
+        "cleanup.kind.node_modules" => "مجلد node_modules",
+        "cleanup.kind.build_target" => "مخرجات بناء Cargo",
+        "cleanup.kind.windows_update" => "تنزيلات Windows Update",
+        "cleanup.kind.windows_old" => "تثبيت Windows السابق",
+        "cleanup.kind.stale_downloads" => "تنزيلات قديمة",
         "change.new" => "جديد",
         "change.grew" => "زاد",
         "change.shrank" => "قلّ",

@@ -602,6 +602,35 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Nahrazování kopií ({n}) pevnými odkazy",
         "dups.done_link" => "Kopie ({n}) nahrazeny pevnými odkazy, uvolněno {size}",
         "dups.link_failed" => "Nepodařilo se nahradit kopie: {n}",
+        "list.cleanup_tab" => "Úklid",
+        "list.cleanup_tab_n" => "Úklid ({n})",
+        "cleanup.intro" => {
+            "Najděte v tomto skenu známá místa se získatelným místem: složky s dočasnými soubory, mezipaměti prohlížečů, složky node_modules a target, soubory služby Windows Update a staré stažené soubory."
+        }
+        "cleanup.find" => "Najít návrhy úklidu",
+        "cleanup.again" => "Hledat znovu",
+        "cleanup.searching" => "Hledání získatelného místa…",
+        "cleanup.none" => "V tomto skenu se nenašlo nic k úklidu",
+        "cleanup.summary" => "{n} návrhů · {size} k získání",
+        "cleanup.hint" => "Po potvrzení uklidí vybraný návrh",
+        "cleanup.recycle" => "Přesunout do {trash}",
+        "cleanup.delete" => "Trvale odstranit",
+        "cleanup.confirm_recycle" => {
+            "Přesunout {n} položek ({size}) ve složce {location} do {trash}?"
+        }
+        "cleanup.confirm_delete" => {
+            "Trvale odstranit {n} položek ({size}) ve složce {location}? Tuto akci nelze vrátit zpět."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows může odmítnout odstranit některé chráněné soubory staré instalace."
+        }
+        "cleanup.kind.temp" => "Dočasné soubory",
+        "cleanup.kind.browser_cache" => "Mezipaměť prohlížeče",
+        "cleanup.kind.node_modules" => "Složka node_modules",
+        "cleanup.kind.build_target" => "Výstup sestavení Cargo",
+        "cleanup.kind.windows_update" => "Soubory ke stažení Windows Update",
+        "cleanup.kind.windows_old" => "Předchozí instalace Windows",
+        "cleanup.kind.stale_downloads" => "Staré stažené soubory",
         "change.new" => "Nové",
         "change.grew" => "Zvětšilo se",
         "change.shrank" => "Zmenšilo se",

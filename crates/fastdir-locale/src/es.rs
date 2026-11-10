@@ -604,6 +604,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Reemplazando {n} copias por enlaces duros",
         "dups.done_link" => "{n} copias reemplazadas por enlaces duros, {size} liberados",
         "dups.link_failed" => "No se pudieron reemplazar {n} copias",
+        "list.cleanup_tab" => "Limpieza",
+        "list.cleanup_tab_n" => "Limpieza ({n})",
+        "cleanup.intro" => {
+            "Encuentra lugares conocidos con espacio recuperable en este análisis: carpetas temporales, cachés de navegadores, carpetas node_modules y target, archivos de Windows Update y descargas antiguas."
+        }
+        "cleanup.find" => "Buscar sugerencias de limpieza",
+        "cleanup.again" => "Buscar de nuevo",
+        "cleanup.searching" => "Buscando espacio recuperable…",
+        "cleanup.none" => "No se encontró nada que limpiar en este análisis",
+        "cleanup.summary" => "{n} sugerencias · {size} recuperables",
+        "cleanup.hint" => "Limpia la sugerencia seleccionada tras pedir confirmación",
+        "cleanup.recycle" => "Mover a {trash}",
+        "cleanup.delete" => "Eliminar permanentemente",
+        "cleanup.confirm_recycle" => "¿Mover {n} elementos ({size}) de {location} a {trash}?",
+        "cleanup.confirm_delete" => {
+            "¿Eliminar permanentemente {n} elementos ({size}) de {location}? Esta acción no se puede deshacer."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows puede negarse a eliminar algunos archivos protegidos de la instalación anterior."
+        }
+        "cleanup.kind.temp" => "Archivos temporales",
+        "cleanup.kind.browser_cache" => "Caché del navegador",
+        "cleanup.kind.node_modules" => "Carpeta node_modules",
+        "cleanup.kind.build_target" => "Resultado de compilación de Cargo",
+        "cleanup.kind.windows_update" => "Descargas de Windows Update",
+        "cleanup.kind.windows_old" => "Instalación anterior de Windows",
+        "cleanup.kind.stale_downloads" => "Descargas antiguas",
         "change.new" => "Nuevo",
         "change.grew" => "Creció",
         "change.shrank" => "Encogió",

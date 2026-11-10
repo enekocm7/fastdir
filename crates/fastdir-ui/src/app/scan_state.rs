@@ -45,6 +45,7 @@ impl FastDir {
         // Apply the user's `[categories]` overrides before any file arrives.
         tree.write().set_category_map(self.category_map());
         self.reset_duplicates();
+        self.reset_cleanup();
         self.tree = Some(tree.clone());
         self.partial_generation = 0;
         self.rows.clear();
@@ -350,6 +351,7 @@ impl FastDir {
         self.home_drives = true;
         self.saved = None;
         self.reset_duplicates();
+        self.reset_cleanup();
         self.tree = None;
         self.rows.clear();
         self.selected = None;

@@ -602,6 +602,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "사본 {n}개를 하드 링크로 바꾸는 중",
         "dups.done_link" => "사본 {n}개를 하드 링크로 바꿔 {size}를 확보했습니다",
         "dups.link_failed" => "사본 {n}개를 바꿀 수 없습니다",
+        "list.cleanup_tab" => "정리",
+        "list.cleanup_tab_n" => "정리 ({n})",
+        "cleanup.intro" => {
+            "이 스캔에서 되찾을 수 있는 공간이 있는 알려진 위치를 찾습니다: 임시 폴더, 브라우저 캐시, node_modules 및 target 폴더, Windows Update 파일, 오래된 다운로드."
+        }
+        "cleanup.find" => "정리 제안 찾기",
+        "cleanup.again" => "다시 검색",
+        "cleanup.searching" => "되찾을 수 있는 공간을 찾는 중…",
+        "cleanup.none" => "이 스캔에서 정리할 항목을 찾지 못했습니다",
+        "cleanup.summary" => "제안 {n}개 · {size} 확보 가능",
+        "cleanup.hint" => "확인을 거친 뒤 선택한 제안을 정리합니다",
+        "cleanup.recycle" => "{trash}(으)로 이동",
+        "cleanup.delete" => "영구 삭제",
+        "cleanup.confirm_recycle" => "{location}의 항목 {n}개({size})를 {trash}(으)로 이동할까요?",
+        "cleanup.confirm_delete" => {
+            "{location}의 항목 {n}개({size})를 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows가 이전 설치의 보호된 파일 일부를 삭제하지 못하게 할 수 있습니다."
+        }
+        "cleanup.kind.temp" => "임시 파일",
+        "cleanup.kind.browser_cache" => "브라우저 캐시",
+        "cleanup.kind.node_modules" => "node_modules 폴더",
+        "cleanup.kind.build_target" => "Cargo 빌드 출력",
+        "cleanup.kind.windows_update" => "Windows Update 다운로드",
+        "cleanup.kind.windows_old" => "이전 Windows 설치",
+        "cleanup.kind.stale_downloads" => "오래된 다운로드",
         "change.new" => "새 항목",
         "change.grew" => "증가",
         "change.shrank" => "감소",

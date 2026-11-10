@@ -608,6 +608,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Zastępowanie kopii ({n}) dowiązaniami twardymi",
         "dups.done_link" => "Zastąpiono kopie ({n}) dowiązaniami twardymi, zwolniono {size}",
         "dups.link_failed" => "Nie można zastąpić kopii: {n}",
+        "list.cleanup_tab" => "Czyszczenie",
+        "list.cleanup_tab_n" => "Czyszczenie ({n})",
+        "cleanup.intro" => {
+            "Znajdź w tym skanie znane miejsca, w których można odzyskać miejsce: foldery tymczasowe, pamięci podręczne przeglądarek, foldery node_modules i target, pliki Windows Update oraz stare pobrane pliki."
+        }
+        "cleanup.find" => "Znajdź propozycje czyszczenia",
+        "cleanup.again" => "Szukaj ponownie",
+        "cleanup.searching" => "Szukanie miejsca do odzyskania…",
+        "cleanup.none" => "W tym skanie nie znaleziono niczego do wyczyszczenia",
+        "cleanup.summary" => "Propozycje: {n} · do odzyskania: {size}",
+        "cleanup.hint" => "Czyści zaznaczoną propozycję po potwierdzeniu",
+        "cleanup.recycle" => "Przenieś do {trash}",
+        "cleanup.delete" => "Usuń trwale",
+        "cleanup.confirm_recycle" => "Przenieść elementy ({n}, {size}) z {location} do {trash}?",
+        "cleanup.confirm_delete" => {
+            "Trwale usunąć elementy ({n}, {size}) z {location}? Tej operacji nie można cofnąć."
+        }
+        "cleanup.windows_old_note" => {
+            "System Windows może odmówić usunięcia niektórych chronionych plików poprzedniej instalacji."
+        }
+        "cleanup.kind.temp" => "Pliki tymczasowe",
+        "cleanup.kind.browser_cache" => "Pamięć podręczna przeglądarki",
+        "cleanup.kind.node_modules" => "Folder node_modules",
+        "cleanup.kind.build_target" => "Wynik kompilacji Cargo",
+        "cleanup.kind.windows_update" => "Pobrane pliki Windows Update",
+        "cleanup.kind.windows_old" => "Poprzednia instalacja systemu Windows",
+        "cleanup.kind.stale_downloads" => "Stare pobrane pliki",
         "change.new" => "Nowy",
         "change.grew" => "Urósł",
         "change.shrank" => "Zmalał",

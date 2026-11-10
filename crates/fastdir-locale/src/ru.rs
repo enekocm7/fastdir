@@ -584,6 +584,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "Замена копий ({n}) жёсткими ссылками",
         "dups.done_link" => "Копии ({n}) заменены жёсткими ссылками, освобождено {size}",
         "dups.link_failed" => "Не удалось заменить копии: {n}",
+        "list.cleanup_tab" => "Очистка",
+        "list.cleanup_tab_n" => "Очистка ({n})",
+        "cleanup.intro" => {
+            "Находит в этом сканировании известные места, где можно освободить место: временные папки, кэши браузеров, папки node_modules и target, файлы Центра обновления Windows и старые загрузки."
+        }
+        "cleanup.find" => "Найти варианты очистки",
+        "cleanup.again" => "Искать снова",
+        "cleanup.searching" => "Поиск места для освобождения…",
+        "cleanup.none" => "В этом сканировании нечего очищать",
+        "cleanup.summary" => "Вариантов: {n} · можно освободить {size}",
+        "cleanup.hint" => "Очищает выбранный вариант после подтверждения",
+        "cleanup.recycle" => "Переместить в {trash}",
+        "cleanup.delete" => "Удалить навсегда",
+        "cleanup.confirm_recycle" => "Переместить элементы ({n}, {size}) из {location} в {trash}?",
+        "cleanup.confirm_delete" => {
+            "Удалить навсегда элементы ({n}, {size}) из {location}? Это действие нельзя отменить."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows может отказаться удалять некоторые защищённые файлы прежней установки."
+        }
+        "cleanup.kind.temp" => "Временные файлы",
+        "cleanup.kind.browser_cache" => "Кэш браузера",
+        "cleanup.kind.node_modules" => "Папка node_modules",
+        "cleanup.kind.build_target" => "Результат сборки Cargo",
+        "cleanup.kind.windows_update" => "Загрузки Центра обновления Windows",
+        "cleanup.kind.windows_old" => "Предыдущая установка Windows",
+        "cleanup.kind.stale_downloads" => "Старые загрузки",
         "change.new" => "Новый",
         "change.grew" => "Вырос",
         "change.shrank" => "Уменьшился",

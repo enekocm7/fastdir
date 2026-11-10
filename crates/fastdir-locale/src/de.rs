@@ -602,6 +602,33 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "{n} Kopien werden durch Hardlinks ersetzt",
         "dups.done_link" => "{n} Kopien durch Hardlinks ersetzt, {size} freigegeben",
         "dups.link_failed" => "{n} Kopien konnten nicht ersetzt werden",
+        "list.cleanup_tab" => "Bereinigung",
+        "list.cleanup_tab_n" => "Bereinigung ({n})",
+        "cleanup.intro" => {
+            "Findet bekannte Orte mit freigebbarem Speicherplatz in diesem Scan: temporäre Ordner, Browser-Caches, node_modules- und target-Ordner, Windows-Update-Dateien und alte Downloads."
+        }
+        "cleanup.find" => "Bereinigungsvorschläge suchen",
+        "cleanup.again" => "Erneut suchen",
+        "cleanup.searching" => "Suche nach freigebbarem Speicherplatz …",
+        "cleanup.none" => "In diesem Scan wurde nichts zum Bereinigen gefunden",
+        "cleanup.summary" => "{n} Vorschläge · {size} freigebbar",
+        "cleanup.hint" => "Bereinigt den ausgewählten Vorschlag nach einer Bestätigung",
+        "cleanup.recycle" => "In {trash} verschieben",
+        "cleanup.delete" => "Endgültig löschen",
+        "cleanup.confirm_recycle" => "{n} Elemente ({size}) in {location} in {trash} verschieben?",
+        "cleanup.confirm_delete" => {
+            "{n} Elemente ({size}) in {location} endgültig löschen? Das kann nicht rückgängig gemacht werden."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows verweigert möglicherweise das Entfernen einiger geschützter Dateien der alten Installation."
+        }
+        "cleanup.kind.temp" => "Temporäre Dateien",
+        "cleanup.kind.browser_cache" => "Browser-Cache",
+        "cleanup.kind.node_modules" => "node_modules-Ordner",
+        "cleanup.kind.build_target" => "Cargo-Build-Ausgabe",
+        "cleanup.kind.windows_update" => "Windows-Update-Downloads",
+        "cleanup.kind.windows_old" => "Vorherige Windows-Installation",
+        "cleanup.kind.stale_downloads" => "Alte Downloads",
         "change.new" => "Neu",
         "change.grew" => "Gewachsen",
         "change.shrank" => "Geschrumpft",

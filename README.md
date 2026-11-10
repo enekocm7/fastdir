@@ -108,6 +108,15 @@ culprit? Rename, move, recycle or delete it right there.
     reports how much space each group wastes. Zero-byte files and extra hard
     links are not duplicates. In the GUI, keep one copy of a group and send
     the rest to the Recycle Bin or replace them with hard links.
+  - **Cleanup suggestions** – the **Cleanup** tab lists well-known places that
+    hold reclaimable space in the current scan, biggest first: temp folders,
+    browser caches, `node_modules` and Cargo `target` folders, Windows Update
+    downloads, a previous Windows installation (`Windows.old`) and stale
+    downloads (older than 90 days). Each suggestion shows its size and item
+    count; **Recycle** / **Delete** clean up the selected suggestion after
+    asking for confirmation (always, regardless of the confirm settings) and
+    run through the same queue as other deletes. `Enter` shows the suggestion
+    in the tree.
   - **Extension list** with the colour each type has in the treemap. A
     *By category / By extension* switch groups extensions into file-type
     categories (video, images, audio, archives, documents, code, executables,
@@ -391,6 +400,28 @@ hashed in full.
 - The list and treemap update in place: deleted, moved and hard-linked copies
   drop out of their groups. `Enter` shows the selected copy in the tree; the
   context menu and `Delete` act on it like anywhere else.
+
+### Cleaning up known locations
+
+The **Cleanup** tab next to *Duplicates* looks for reclaimable space in the
+current scan: temp folders, browser caches, `node_modules` and Cargo `target`
+folders (the latter only next to a `Cargo.toml`), Windows Update downloads,
+`Windows.old` and downloads older than 90 days. Suggestions below 1 MB are
+skipped and only locations inside the scan take part.
+
+- Results are listed biggest first with their size and item count, plus a
+  total at the top.
+- **Move to Recycle Bin** / **Delete permanently** clean up the selected
+  suggestion after asking for confirmation — always, whatever the confirm
+  settings say, since a suggestion can stand for thousands of files. Both run
+  through the same file-operation queue as other deletes, and the list refreshes
+  in place as its targets leave the tree.
+- Temp folders, caches and Windows Update files suggest their *contents* (the
+  folder itself stays); `Windows.old` and stale downloads suggest the folders
+  and files themselves.
+- `Enter` shows the selected suggestion in the tree. The regular `Delete` key
+  and the context menu stay away from this tab: a suggestion stands for many
+  items, so it can only be cleaned up through the tab's own confirmed actions.
 
 ### Command line (for scripts and agents)
 
