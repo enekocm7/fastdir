@@ -107,6 +107,7 @@ impl FastDir {
         });
         self.scan_root = Some(root.clone());
         self.reset_duplicates();
+        self.reset_cleanup();
         self.tree = Some(tree.clone());
         self.home_drives = true;
         self.last_scan = None;

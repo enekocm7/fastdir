@@ -22,6 +22,9 @@ impl FastDir {
             // nothing to reveal in it or act on.
             ListTab::Removed => None,
             ListTab::Duplicates => self.selected_dup_path(),
+            // A suggestion stands for a folder's contents or several items:
+            // nothing here may reach the regular Delete / move commands.
+            ListTab::Cleanup => None,
         }
     }
 
@@ -225,6 +228,7 @@ impl FastDir {
         self.clear_comparison(cx);
         // Deleted, moved or hard-linked copies no longer waste space.
         self.prune_duplicates();
+        self.prune_cleanup();
         if let Some(p) = &select {
             // Make sure the new selection is visible.
             if let Some(tree) = &self.tree {
@@ -283,6 +287,7 @@ impl FastDir {
             return;
         };
         self.prune_duplicates();
+        self.prune_cleanup();
         // Node paths shifted, so a multi-selection no longer points anywhere.
         self.marked.clear();
         self.selected = None;
@@ -316,6 +321,7 @@ impl FastDir {
             ListTab::TopFiles => self.select_top_row(ix, cx),
             ListTab::Removed => self.select_removed_row(ix, cx),
             ListTab::Duplicates => self.select_dup_row(ix, cx),
+            ListTab::Cleanup => self.select_cleanup_row(ix, cx),
             ListTab::Tree => self.select_row(ix, cx),
         }
     }
@@ -325,6 +331,7 @@ impl FastDir {
             ListTab::TopFiles => self.select_top_row(ix, cx),
             ListTab::Removed => self.select_removed_row(ix, cx),
             ListTab::Duplicates => self.select_dup_row(ix, cx),
+            ListTab::Cleanup => self.select_cleanup_row(ix, cx),
             ListTab::Tree => self.extend_row(ix, cx),
         }
     }
@@ -335,6 +342,7 @@ impl FastDir {
             ListTab::TopFiles => self.top_selected,
             ListTab::Removed => self.removed_selected,
             ListTab::Duplicates => self.dups.selected,
+            ListTab::Cleanup => self.cleanup.selected,
         }
     }
 
@@ -392,6 +400,10 @@ impl FastDir {
             self.reveal_dup(window, cx);
             return;
         }
+        if self.tab == ListTab::Cleanup {
+            self.reveal_cleanup(window, cx);
+            return;
+        }
         if self.tab != ListTab::Tree {
             return;
         }
@@ -447,6 +459,10 @@ impl FastDir {
         }
         if self.tab == ListTab::Duplicates {
             self.reveal_dup(window, cx);
+            return;
+        }
+        if self.tab == ListTab::Cleanup {
+            self.reveal_cleanup(window, cx);
             return;
         }
         if self.tab != ListTab::Tree {

@@ -561,6 +561,35 @@ pub fn get(key: &str) -> Option<&'static str> {
         "dups.op_linking" => "{n} kopya sabit bağlantılarla değiştiriliyor",
         "dups.done_link" => "{n} kopya sabit bağlantılarla değiştirildi, {size} boşaltıldı",
         "dups.link_failed" => "{n} kopya değiştirilemedi",
+        "list.cleanup_tab" => "Temizlik",
+        "list.cleanup_tab_n" => "Temizlik ({n})",
+        "cleanup.intro" => {
+            "Bu taramada geri kazanılabilir alan barındıran bilinen yerleri bulur: geçici klasörler, tarayıcı önbellekleri, node_modules ve target klasörleri, Windows Update dosyaları ve eski indirmeler."
+        }
+        "cleanup.find" => "Temizlik önerilerini bul",
+        "cleanup.again" => "Yeniden ara",
+        "cleanup.searching" => "Geri kazanılabilir alan aranıyor…",
+        "cleanup.none" => "Bu taramada temizlenecek bir şey bulunamadı",
+        "cleanup.summary" => "{n} öneri · {size} geri kazanılabilir",
+        "cleanup.hint" => "Onay istedikten sonra seçili öneriyi temizler",
+        "cleanup.recycle" => "{trash} konumuna taşı",
+        "cleanup.delete" => "Kalıcı olarak sil",
+        "cleanup.confirm_recycle" => {
+            "{location} içindeki {n} öğe ({size}) {trash} konumuna taşınsın mı?"
+        }
+        "cleanup.confirm_delete" => {
+            "{location} içindeki {n} öğe ({size}) kalıcı olarak silinsin mi? Bu işlem geri alınamaz."
+        }
+        "cleanup.windows_old_note" => {
+            "Windows, eski kurulumun korumalı bazı dosyalarının kaldırılmasını reddedebilir."
+        }
+        "cleanup.kind.temp" => "Geçici dosyalar",
+        "cleanup.kind.browser_cache" => "Tarayıcı önbelleği",
+        "cleanup.kind.node_modules" => "node_modules klasörü",
+        "cleanup.kind.build_target" => "Cargo derleme çıktısı",
+        "cleanup.kind.windows_update" => "Windows Update indirmeleri",
+        "cleanup.kind.windows_old" => "Önceki Windows kurulumu",
+        "cleanup.kind.stale_downloads" => "Eski indirmeler",
         "change.new" => "Yeni",
         "change.grew" => "Büyüdü",
         "change.shrank" => "Küçüldü",
