@@ -99,6 +99,10 @@ culprit? Rename, move, recycle or delete it right there.
   - **Search and filters** – `Ctrl+F` filters the tree by name or glob
     (`*.iso`), expanding to every match. Filter by minimum size, extension and
     modified date (`Ctrl+Shift+F`).
+  - **Cleanup finders** – the same dialog (`Ctrl+Shift+F`) has a *cleanup
+    finders* choice that narrows the list to empty folders, zero-byte files or
+    paths longer than a length limit (260 characters by default). Results are
+    ordinary rows: select, open, delete or move them as usual.
   - **Top files** – a flat, sortable list of the N largest files in the whole
     scan (bounded heap, default 1,000), the quickest way to find cleanup
     targets.
@@ -764,7 +768,7 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 | Ctrl+R | Rescan everything |
 | Ctrl+O | Scan a folder… |
 | Ctrl+F | Focus the search box |
-| Ctrl+Shift+F | Minimum size / extension / date filters |
+| Ctrl+Shift+F | Minimum size / extension / date filters and cleanup finders |
 | Ctrl+1 … Ctrl+9 | Run the custom action bound to that number |
 | Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |
