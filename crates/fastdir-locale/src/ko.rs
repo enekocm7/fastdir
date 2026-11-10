@@ -559,6 +559,34 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "상태",
         "list.removed_tab" => "삭제됨 ({n})",
         "list.removed_empty" => "삭제된 항목이 없습니다",
+        "list.dups_tab" => "중복",
+        "list.dups_tab_n" => "중복 ({n})",
+        "dups.intro" => {
+            "이 스캔에서 내용이 같은 파일을 찾습니다. {size}보다 작은 파일은 건너뜁니다."
+        }
+        "dups.find" => "중복 찾기",
+        "dups.again" => "다시 찾기",
+        "dups.hashing" => "파일 비교 중: {files}개 처리, {bytes} 읽음",
+        "dups.none" => "중복 파일이 없습니다",
+        "dups.summary" => "{groups}개 그룹 · {wasted} 확보 가능",
+        "dups.unreadable" => "파일 {n}개를 읽을 수 없습니다",
+        "dups.group" => "사본 {n}개 · {wasted} 낭비",
+        "dups.keep" => "유지",
+        "dups.keep_hint" => "선택한 사본이 유지됩니다 (그룹을 선택하면 첫 번째 사본)",
+        "dups.recycle" => "나머지 사본을 {trash}(으)로",
+        "dups.link" => "나머지 사본을 하드 링크로",
+        "dups.confirm_recycle_title" => "사본 {n}개를 {trash}(으)로 이동할까요?",
+        "dups.confirm_recycle" => {
+            "{keep}을(를) 유지하고 나머지 사본 {n}개({size})를 {trash}(으)로 이동합니다."
+        }
+        "dups.confirm_link_title" => "사본 {n}개를 하드 링크로 바꿀까요?",
+        "dups.confirm_link" => {
+            "{keep}을(를) 유지하고 나머지 사본 {n}개를 그 파일의 하드 링크로 바꿔 {size}를 확보합니다. 파일은 제자리에 남지만 데이터 하나를 공유하므로 하나를 편집하면 모두 바뀝니다."
+        }
+        "dups.ok_link" => "하드 링크로 바꾸기",
+        "dups.op_linking" => "사본 {n}개를 하드 링크로 바꾸는 중",
+        "dups.done_link" => "사본 {n}개를 하드 링크로 바꿔 {size}를 확보했습니다",
+        "dups.link_failed" => "사본 {n}개를 바꿀 수 없습니다",
         "change.new" => "새 항목",
         "change.grew" => "증가",
         "change.shrank" => "감소",

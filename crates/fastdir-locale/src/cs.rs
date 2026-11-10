@@ -559,6 +559,34 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Stav",
         "list.removed_tab" => "Odstraněno ({n})",
         "list.removed_empty" => "Nic nebylo odstraněno",
+        "list.dups_tab" => "Duplikáty",
+        "list.dups_tab_n" => "Duplikáty ({n})",
+        "dups.intro" => {
+            "Vyhledá soubory se shodným obsahem v této analýze. Soubory menší než {size} se přeskakují."
+        }
+        "dups.find" => "Najít duplikáty",
+        "dups.again" => "Hledat znovu",
+        "dups.hashing" => "Porovnávání souborů: zpracováno {files}, přečteno {bytes}",
+        "dups.none" => "Nebyly nalezeny žádné duplicitní soubory",
+        "dups.summary" => "Skupiny: {groups} · lze uvolnit {wasted}",
+        "dups.unreadable" => "Nepodařilo se přečíst soubory: {n}",
+        "dups.group" => "Kopie: {n} · promarněno {wasted}",
+        "dups.keep" => "Ponechat",
+        "dups.keep_hint" => "Ponechá se vybraná kopie (první, je-li vybrána skupina)",
+        "dups.recycle" => "Ostatní kopie do: {trash}",
+        "dups.link" => "Propojit ostatní kopie",
+        "dups.confirm_recycle_title" => "Přesunout kopie ({n}) do: {trash}?",
+        "dups.confirm_recycle" => {
+            "{keep} zůstane a ostatní kopie ({n}, {size}) se přesunou do: {trash}."
+        }
+        "dups.confirm_link_title" => "Nahradit kopie ({n}) pevnými odkazy?",
+        "dups.confirm_link" => {
+            "{keep} zůstane a ostatní kopie ({n}) se nahradí pevnými odkazy na něj, čímž se uvolní {size}. Soubory zůstanou na svém místě, ale sdílejí jednu kopii dat: úprava jednoho změní všechny."
+        }
+        "dups.ok_link" => "Nahradit pevnými odkazy",
+        "dups.op_linking" => "Nahrazování kopií ({n}) pevnými odkazy",
+        "dups.done_link" => "Kopie ({n}) nahrazeny pevnými odkazy, uvolněno {size}",
+        "dups.link_failed" => "Nepodařilo se nahradit kopie: {n}",
         "change.new" => "Nové",
         "change.grew" => "Zvětšilo se",
         "change.shrank" => "Zmenšilo se",

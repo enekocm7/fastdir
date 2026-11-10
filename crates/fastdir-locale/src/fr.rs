@@ -557,6 +557,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "État",
         "list.removed_tab" => "Supprimés ({n})",
         "list.removed_empty" => "Rien n'a été supprimé",
+        "list.dups_tab" => "Doublons",
+        "list.dups_tab_n" => "Doublons ({n})",
+        "dups.intro" => {
+            "Recherche les fichiers au contenu identique dans cette analyse. Les fichiers de moins de {size} sont ignorés."
+        }
+        "dups.find" => "Rechercher les doublons",
+        "dups.again" => "Relancer la recherche",
+        "dups.hashing" => "Comparaison : {files} fichiers hachés, {bytes} lus",
+        "dups.none" => "Aucun doublon trouvé",
+        "dups.summary" => "{groups} groupes · {wasted} récupérables",
+        "dups.unreadable" => "{n} fichiers n’ont pas pu être lus",
+        "dups.group" => "{n} copies · {wasted} perdus",
+        "dups.keep" => "Garder",
+        "dups.keep_hint" => {
+            "La copie sélectionnée est conservée (la première si un groupe est sélectionné)"
+        }
+        "dups.recycle" => "Autres copies vers {trash}",
+        "dups.link" => "Lier les autres copies",
+        "dups.confirm_recycle_title" => "Déplacer {n} copies vers {trash} ?",
+        "dups.confirm_recycle" => {
+            "{keep} est conservé et les {n} autres copies ({size}) sont déplacées vers {trash}."
+        }
+        "dups.confirm_link_title" => "Remplacer {n} copies par des liens physiques ?",
+        "dups.confirm_link" => {
+            "{keep} est conservé et les {n} autres copies sont remplacées par des liens physiques vers lui, ce qui libère {size}. Les fichiers restent à leur place mais partagent une seule copie des données : en modifier un les modifie tous."
+        }
+        "dups.ok_link" => "Remplacer par des liens physiques",
+        "dups.op_linking" => "Remplacement de {n} copies par des liens physiques",
+        "dups.done_link" => "{n} copies remplacées par des liens physiques, {size} libérés",
+        "dups.link_failed" => "Impossible de remplacer {n} copies",
         "change.new" => "Nouveau",
         "change.grew" => "A grandi",
         "change.shrank" => "A diminué",

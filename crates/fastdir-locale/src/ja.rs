@@ -559,6 +559,34 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "状態",
         "list.removed_tab" => "削除済み ({n})",
         "list.removed_empty" => "削除された項目はありません",
+        "list.dups_tab" => "重複",
+        "list.dups_tab_n" => "重複 ({n})",
+        "dups.intro" => {
+            "このスキャン内で内容が同一のファイルを探します。{size} 未満のファイルは対象外です。"
+        }
+        "dups.find" => "重複を検索",
+        "dups.again" => "再検索",
+        "dups.hashing" => "ファイルを比較中: {files} 件処理、{bytes} 読み込み",
+        "dups.none" => "重複ファイルは見つかりませんでした",
+        "dups.summary" => "{groups} グループ · {wasted} 解放可能",
+        "dups.unreadable" => "{n} 件のファイルを読み込めませんでした",
+        "dups.group" => "{n} 個のコピー · {wasted} 無駄",
+        "dups.keep" => "保持",
+        "dups.keep_hint" => "選択したコピーが保持されます (グループを選択した場合は最初のコピー)",
+        "dups.recycle" => "他のコピーを{trash}へ",
+        "dups.link" => "他のコピーをハードリンク化",
+        "dups.confirm_recycle_title" => "{n} 個のコピーを{trash}に移動しますか?",
+        "dups.confirm_recycle" => {
+            "{keep} を保持し、他の {n} 個のコピー ({size}) を{trash}に移動します。"
+        }
+        "dups.confirm_link_title" => "{n} 個のコピーをハードリンクに置き換えますか?",
+        "dups.confirm_link" => {
+            "{keep} を保持し、他の {n} 個のコピーをそれへのハードリンクに置き換えて {size} を解放します。ファイルは元の場所に残りますが、データは 1 つを共有するため、1 つを編集するとすべてが変わります。"
+        }
+        "dups.ok_link" => "ハードリンクに置き換え",
+        "dups.op_linking" => "{n} 個のコピーをハードリンクに置き換え中",
+        "dups.done_link" => "{n} 個のコピーをハードリンクに置き換え、{size} を解放しました",
+        "dups.link_failed" => "{n} 個のコピーを置き換えられませんでした",
         "change.new" => "新規",
         "change.grew" => "増加",
         "change.shrank" => "減少",

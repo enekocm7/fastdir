@@ -557,6 +557,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Status",
         "list.removed_tab" => "Entfernt ({n})",
         "list.removed_empty" => "Nichts wurde entfernt",
+        "list.dups_tab" => "Duplikate",
+        "list.dups_tab_n" => "Duplikate ({n})",
+        "dups.intro" => {
+            "Sucht Dateien mit identischem Inhalt in diesem Scan. Dateien unter {size} werden übersprungen."
+        }
+        "dups.find" => "Duplikate suchen",
+        "dups.again" => "Erneut suchen",
+        "dups.hashing" => "Dateien werden verglichen: {files} gehasht, {bytes} gelesen",
+        "dups.none" => "Keine doppelten Dateien gefunden",
+        "dups.summary" => "{groups} Gruppen · {wasted} freizugeben",
+        "dups.unreadable" => "{n} Dateien konnten nicht gelesen werden",
+        "dups.group" => "{n} Kopien · {wasted} verschwendet",
+        "dups.keep" => "Behalten",
+        "dups.keep_hint" => {
+            "Die ausgewählte Kopie wird behalten (bei einer ausgewählten Gruppe die erste)"
+        }
+        "dups.recycle" => "Andere Kopien in den {trash}",
+        "dups.link" => "Andere Kopien verlinken",
+        "dups.confirm_recycle_title" => "{n} Kopien in den {trash} verschieben?",
+        "dups.confirm_recycle" => {
+            "{keep} wird behalten, die anderen {n} Kopien ({size}) werden in den {trash} verschoben."
+        }
+        "dups.confirm_link_title" => "{n} Kopien durch Hardlinks ersetzen?",
+        "dups.confirm_link" => {
+            "{keep} wird behalten, die anderen {n} Kopien werden durch Hardlinks darauf ersetzt und {size} freigegeben. Die Dateien bleiben an ihrem Ort, teilen sich aber eine Kopie der Daten: Wird eine geändert, ändern sich alle."
+        }
+        "dups.ok_link" => "Durch Hardlinks ersetzen",
+        "dups.op_linking" => "{n} Kopien werden durch Hardlinks ersetzt",
+        "dups.done_link" => "{n} Kopien durch Hardlinks ersetzt, {size} freigegeben",
+        "dups.link_failed" => "{n} Kopien konnten nicht ersetzt werden",
         "change.new" => "Neu",
         "change.grew" => "Gewachsen",
         "change.shrank" => "Geschrumpft",

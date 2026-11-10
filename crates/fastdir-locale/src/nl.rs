@@ -557,6 +557,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Status",
         "list.removed_tab" => "Verwijderd ({n})",
         "list.removed_empty" => "Er is niets verwijderd",
+        "list.dups_tab" => "Duplicaten",
+        "list.dups_tab_n" => "Duplicaten ({n})",
+        "dups.intro" => {
+            "Zoek bestanden met identieke inhoud in deze scan. Bestanden kleiner dan {size} worden overgeslagen."
+        }
+        "dups.find" => "Duplicaten zoeken",
+        "dups.again" => "Opnieuw zoeken",
+        "dups.hashing" => "Bestanden vergelijken: {files} gehasht, {bytes} gelezen",
+        "dups.none" => "Geen dubbele bestanden gevonden",
+        "dups.summary" => "{groups} groepen · {wasted} vrij te maken",
+        "dups.unreadable" => "{n} bestanden konden niet worden gelezen",
+        "dups.group" => "{n} kopieën · {wasted} verspild",
+        "dups.keep" => "Behouden",
+        "dups.keep_hint" => {
+            "De geselecteerde kopie blijft behouden (de eerste als een groep is geselecteerd)"
+        }
+        "dups.recycle" => "Andere kopieën naar {trash}",
+        "dups.link" => "Andere kopieën hardlinken",
+        "dups.confirm_recycle_title" => "{n} kopieën naar {trash} verplaatsen?",
+        "dups.confirm_recycle" => {
+            "{keep} blijft behouden en de andere {n} kopieën ({size}) gaan naar {trash}."
+        }
+        "dups.confirm_link_title" => "{n} kopieën vervangen door hardlinks?",
+        "dups.confirm_link" => {
+            "{keep} blijft behouden en de andere {n} kopieën worden vervangen door hardlinks ernaar, wat {size} vrijmaakt. De bestanden blijven op hun plek maar delen één kopie van de gegevens: wie er één wijzigt, wijzigt ze allemaal."
+        }
+        "dups.ok_link" => "Vervangen door hardlinks",
+        "dups.op_linking" => "{n} kopieën worden vervangen door hardlinks",
+        "dups.done_link" => "{n} kopieën vervangen door hardlinks, {size} vrijgemaakt",
+        "dups.link_failed" => "{n} kopieën konden niet worden vervangen",
         "change.new" => "Nieuw",
         "change.grew" => "Gegroeid",
         "change.shrank" => "Gekrompen",

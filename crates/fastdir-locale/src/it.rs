@@ -557,6 +557,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Stato",
         "list.removed_tab" => "Rimossi ({n})",
         "list.removed_empty" => "Non è stato rimosso nulla",
+        "list.dups_tab" => "Duplicati",
+        "list.dups_tab_n" => "Duplicati ({n})",
+        "dups.intro" => {
+            "Cerca file con contenuto identico in questa scansione. I file più piccoli di {size} vengono ignorati."
+        }
+        "dups.find" => "Cerca duplicati",
+        "dups.again" => "Cerca di nuovo",
+        "dups.hashing" => "Confronto dei file: {files} elaborati, {bytes} letti",
+        "dups.none" => "Nessun file duplicato trovato",
+        "dups.summary" => "{groups} gruppi · {wasted} recuperabili",
+        "dups.unreadable" => "Impossibile leggere {n} file",
+        "dups.group" => "{n} copie · {wasted} sprecati",
+        "dups.keep" => "Mantieni",
+        "dups.keep_hint" => {
+            "Viene mantenuta la copia selezionata (la prima se è selezionato un gruppo)"
+        }
+        "dups.recycle" => "Altre copie nel {trash}",
+        "dups.link" => "Collega le altre copie",
+        "dups.confirm_recycle_title" => "Spostare {n} copie nel {trash}?",
+        "dups.confirm_recycle" => {
+            "{keep} verrà mantenuto e le altre {n} copie ({size}) verranno spostate nel {trash}."
+        }
+        "dups.confirm_link_title" => "Sostituire {n} copie con collegamenti fisici?",
+        "dups.confirm_link" => {
+            "{keep} verrà mantenuto e le altre {n} copie verranno sostituite da collegamenti fisici a esso, liberando {size}. I file restano dove sono ma condividono un’unica copia dei dati: modificarne uno li modifica tutti."
+        }
+        "dups.ok_link" => "Sostituisci con collegamenti fisici",
+        "dups.op_linking" => "Sostituzione di {n} copie con collegamenti fisici",
+        "dups.done_link" => "{n} copie sostituite con collegamenti fisici, {size} liberati",
+        "dups.link_failed" => "Impossibile sostituire {n} copie",
         "change.new" => "Nuovo",
         "change.grew" => "Cresciuto",
         "change.shrank" => "Ridotto",

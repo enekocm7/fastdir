@@ -573,6 +573,32 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "الحالة",
         "list.removed_tab" => "المحذوفات ({n})",
         "list.removed_empty" => "لم يُحذف أي شيء",
+        "list.dups_tab" => "المكررات",
+        "list.dups_tab_n" => "المكررات ({n})",
+        "dups.intro" => {
+            "يبحث عن الملفات ذات المحتوى المتطابق في هذا الفحص. يتم تخطي الملفات الأصغر من {size}."
+        }
+        "dups.find" => "البحث عن المكررات",
+        "dups.again" => "البحث مجددًا",
+        "dups.hashing" => "جارٍ مقارنة الملفات: تمت معالجة {files}، وقراءة {bytes}",
+        "dups.none" => "لم يُعثر على ملفات مكررة",
+        "dups.summary" => "{groups} مجموعة · {wasted} قابلة للاسترداد",
+        "dups.unreadable" => "تعذرت قراءة {n} ملف",
+        "dups.group" => "{n} نسخ · {wasted} مهدرة",
+        "dups.keep" => "إبقاء",
+        "dups.keep_hint" => "يتم إبقاء النسخة المحددة (الأولى عند تحديد مجموعة)",
+        "dups.recycle" => "النسخ الأخرى إلى {trash}",
+        "dups.link" => "ربط النسخ الأخرى",
+        "dups.confirm_recycle_title" => "نقل {n} نسخ إلى {trash}؟",
+        "dups.confirm_recycle" => "سيتم إبقاء {keep} ونقل النسخ الأخرى ({n}، {size}) إلى {trash}.",
+        "dups.confirm_link_title" => "استبدال {n} نسخ بروابط ثابتة؟",
+        "dups.confirm_link" => {
+            "سيتم إبقاء {keep} واستبدال النسخ الأخرى ({n}) بروابط ثابتة إليه، مما يحرر {size}. تبقى الملفات في أماكنها لكنها تتشارك نسخة واحدة من البيانات: تعديل أحدها يغيّرها جميعًا."
+        }
+        "dups.ok_link" => "استبدال بروابط ثابتة",
+        "dups.op_linking" => "جارٍ استبدال {n} نسخ بروابط ثابتة",
+        "dups.done_link" => "تم استبدال {n} نسخ بروابط ثابتة وتحرير {size}",
+        "dups.link_failed" => "تعذر استبدال {n} نسخ",
         "change.new" => "جديد",
         "change.grew" => "زاد",
         "change.shrank" => "قلّ",

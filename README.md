@@ -95,11 +95,12 @@ culprit? Rename, move, recycle or delete it right there.
   - **Top files** – a flat, sortable list of the N largest files in the whole
     scan (bounded heap, default 1,000), the quickest way to find cleanup
     targets.
-  - **Duplicate finder** – `fastdir-cli duplicates` (and the MCP
-    `find_duplicates` tool) groups byte-identical files by size, a 64 KB
-    prefix/suffix sample and then a full BLAKE3 hash, and reports how much
-    space each group wastes. Zero-byte files and extra hard links are not
-    duplicates.
+  - **Duplicate finder** – the **Duplicates** tab (and `fastdir-cli
+    duplicates` / the MCP `find_duplicates` tool) groups byte-identical files
+    by size, a 64 KB prefix/suffix sample and then a full BLAKE3 hash, and
+    reports how much space each group wastes. Zero-byte files and extra hard
+    links are not duplicates. In the GUI, keep one copy of a group and send
+    the rest to the Recycle Bin or replace them with hard links.
   - **Extension list** with the colour each type has in the treemap. A
     *By category / By extension* switch groups extensions into file-type
     categories (video, images, audio, archives, documents, code, executables,
@@ -329,6 +330,28 @@ $action = New-ScheduledTaskAction -Execute $cli -Argument 'snapshot D:\ --config
 $trigger = New-ScheduledTaskTrigger -Daily -At 3am
 Register-ScheduledTask -TaskName 'FastDir snapshot D' -Action $action -Trigger $trigger
 ```
+
+### Finding duplicates
+
+The **Duplicates** tab next to *Top files* searches the current scan for
+files with identical content (1 MB and larger). Hashing runs in the
+background with a progress line and a Cancel button; only files that share a
+size are read, and only those whose first and last 64 KB also match are
+hashed in full.
+
+- Results are grouped, largest waste first: each group header shows how many
+  copies there are and how much space the extra ones waste.
+- Select a copy to keep it (selecting a group header keeps its first copy),
+  then use **Other copies to Recycle Bin** or **Hard-link other copies**.
+  Both ask for confirmation and run through the same queue as deletes and
+  moves.
+- Hard-linking re-checks that the files are still byte-identical, then
+  replaces each extra copy with a hard link to the kept one, so every path
+  keeps working while the data is stored once. Editing any of the linked
+  paths changes all of them. All copies must be on the same NTFS volume.
+- The list and treemap update in place: deleted, moved and hard-linked copies
+  drop out of their groups. `Enter` shows the selected copy in the tree; the
+  context menu and `Delete` act on it like anywhere else.
 
 ### Command line (for scripts and agents)
 

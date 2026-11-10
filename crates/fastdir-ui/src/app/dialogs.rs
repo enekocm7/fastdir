@@ -514,6 +514,11 @@ impl FastDir {
                 label,
                 ..
             }) => self.start_action_run(label, run, window, cx),
+            Some(PendingOp {
+                targets,
+                kind: PendingKind::HardLink { keep },
+                ..
+            }) => self.start_hard_link(targets, keep, window, cx),
             None => cx.notify(),
         }
     }

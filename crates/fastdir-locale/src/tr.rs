@@ -529,6 +529,34 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Durum",
         "list.removed_tab" => "Kaldırılanlar ({n})",
         "list.removed_empty" => "Hiçbir şey kaldırılmadı",
+        "list.dups_tab" => "Kopyalar",
+        "list.dups_tab_n" => "Kopyalar ({n})",
+        "dups.intro" => {
+            "Bu taramada içeriği aynı olan dosyaları bulur. {size} boyutundan küçük dosyalar atlanır."
+        }
+        "dups.find" => "Kopyaları bul",
+        "dups.again" => "Yeniden ara",
+        "dups.hashing" => "Dosyalar karşılaştırılıyor: {files} işlendi, {bytes} okundu",
+        "dups.none" => "Kopya dosya bulunamadı",
+        "dups.summary" => "{groups} grup · {wasted} geri kazanılabilir",
+        "dups.unreadable" => "{n} dosya okunamadı",
+        "dups.group" => "{n} kopya · {wasted} boşa",
+        "dups.keep" => "Sakla",
+        "dups.keep_hint" => "Seçili kopya saklanır (bir grup seçiliyse ilki)",
+        "dups.recycle" => "Diğer kopyalar {trash} konumuna",
+        "dups.link" => "Diğer kopyaları bağla",
+        "dups.confirm_recycle_title" => "{n} kopya {trash} konumuna taşınsın mı?",
+        "dups.confirm_recycle" => {
+            "{keep} saklanacak ve diğer {n} kopya ({size}) {trash} konumuna taşınacak."
+        }
+        "dups.confirm_link_title" => "{n} kopya sabit bağlantılarla değiştirilsin mi?",
+        "dups.confirm_link" => {
+            "{keep} saklanacak ve diğer {n} kopya ona sabit bağlantılarla değiştirilerek {size} boşaltılacak. Dosyalar yerinde kalır ancak verinin tek bir kopyasını paylaşır: birini düzenlemek hepsini değiştirir."
+        }
+        "dups.ok_link" => "Sabit bağlantılarla değiştir",
+        "dups.op_linking" => "{n} kopya sabit bağlantılarla değiştiriliyor",
+        "dups.done_link" => "{n} kopya sabit bağlantılarla değiştirildi, {size} boşaltıldı",
+        "dups.link_failed" => "{n} kopya değiştirilemedi",
         "change.new" => "Yeni",
         "change.grew" => "Büyüdü",
         "change.shrank" => "Küçüldü",
