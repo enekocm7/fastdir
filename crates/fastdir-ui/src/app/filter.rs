@@ -1,6 +1,7 @@
 //! The search box and the size / extension / date filters.
 
 use super::*;
+use gpui_kit::component::radio::{Radio, RadioGroup};
 
 /// The text in the filter controls. It is only parsed when the user changes
 /// something, so a partially typed date never disturbs the current view.
@@ -11,6 +12,10 @@ pub(super) struct FilterForm {
     pub extension: String,
     pub modified_after: String,
     pub modified_before: String,
+    /// The cleanup check (empty folders, zero-byte files, long paths).
+    pub finder: Option<Finder>,
+    /// Path length limit for the long-paths check; empty means the default.
+    pub path_limit: String,
 }
 
 impl FilterForm {
@@ -25,7 +30,44 @@ impl FilterForm {
         .iter()
         .filter(|s| !s.trim().is_empty())
         .count()
+            + usize::from(self.finder.is_some())
     }
+
+    /// Parse the form into a filter, with errors in `lang`.
+    fn parse(&self, lang: &str) -> Result<Filter, String> {
+        let limit = self.path_limit.trim();
+        let limit = if limit.is_empty() {
+            DEFAULT_PATH_LIMIT
+        } else {
+            limit
+                .parse::<usize>()
+                .ok()
+                .filter(|&n| n > 0)
+                .ok_or_else(|| fastdir_locale::fmt(lang, "filter.err_limit", &[("input", limit)]))?
+        };
+        Ok(Filter::parse_in(
+            &self.query,
+            &self.min_size,
+            &self.extension,
+            &self.modified_after,
+            &self.modified_before,
+            lang,
+        )?
+        .with_finder(self.finder, limit))
+    }
+}
+
+/// Position of a finder in the dialog's radio list (0 is "anything").
+fn finder_index(finder: Option<Finder>) -> usize {
+    finder
+        .and_then(|f| Finder::ALL.iter().position(|&x| x == f))
+        .map_or(0, |ix| ix + 1)
+}
+
+fn finder_at(index: usize) -> Option<Finder> {
+    index
+        .checked_sub(1)
+        .and_then(|ix| Finder::ALL.get(ix).copied())
 }
 
 impl FastDir {
@@ -43,16 +85,7 @@ impl FastDir {
     /// Parse the form and rebuild the tree with the result.
     fn rebuild_filter(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
         let lang = self.settings.locale.language.clone();
-        let form = &self.filter_form;
-        let filter = Filter::parse_in(
-            &form.query,
-            &form.min_size,
-            &form.extension,
-            &form.modified_after,
-            &form.modified_before,
-            &lang,
-        )?;
-        self.filter = filter;
+        self.filter = self.filter_form.parse(&lang)?;
         self.tab = ListTab::Tree;
         self.marked.clear();
         self.anchor = None;
@@ -71,14 +104,7 @@ impl FastDir {
     ) -> bool {
         let lang = self.settings.locale.language.clone();
         let rejected = self.tr("filter.rejected");
-        let filter = match Filter::parse_in(
-            &form.query,
-            &form.min_size,
-            &form.extension,
-            &form.modified_after,
-            &form.modified_before,
-            &lang,
-        ) {
+        let filter = match form.parse(&lang) {
             Ok(filter) => filter,
             Err(error) => {
                 window.push_notification(Notification::warning(error).title(rejected), cx);
@@ -157,6 +183,21 @@ impl FastDir {
                 .placeholder(date_ph)
                 .default_value(form.modified_before)
         });
+        let path_limit = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(DEFAULT_PATH_LIMIT.to_string())
+                .default_value(form.path_limit.clone())
+        });
+        // The finder is edited on a copy so Cancel leaves the filter alone.
+        let finder = Rc::new(Cell::new(form.finder));
+        let finder_labels = [
+            self.tr("filter.finder_none"),
+            self.tr("filter.finder_empty"),
+            self.tr("filter.finder_zero"),
+            self.tr("filter.finder_long"),
+        ];
+        let f_finder = self.tr("filter.finder");
+        let f_limit = self.tr("filter.path_limit");
         let title = self.tr("filter.title");
         let f_min = self.tr("filter.min_size");
         let f_ext = self.tr("filter.ext");
@@ -169,6 +210,7 @@ impl FastDir {
         let entity = cx.entity().downgrade();
         let (min_apply, ext_apply) = (min_size.clone(), extension.clone());
         let (after_apply, before_apply) = (after.clone(), before.clone());
+        let (limit_apply, finder_apply) = (path_limit.clone(), finder.clone());
         let apply = Rc::new(move |window: &mut Window, cx: &mut App| -> bool {
             let (min, ext) = (min_apply.read(cx).value(), ext_apply.read(cx).value());
             let (after, before) = (after_apply.read(cx).value(), before_apply.read(cx).value());
@@ -180,6 +222,8 @@ impl FastDir {
                         extension: ext.to_string(),
                         modified_after: after.to_string(),
                         modified_before: before.to_string(),
+                        finder: finder_apply.get(),
+                        path_limit: limit_apply.read(cx).value().to_string(),
                     };
                     this.apply_filter_form(form, window, cx)
                 })
@@ -189,6 +233,7 @@ impl FastDir {
         let entity = cx.entity().downgrade();
         let (min_clear, ext_clear) = (min_size.clone(), extension.clone());
         let (after_clear, before_clear) = (after.clone(), before.clone());
+        let limit_clear = path_limit.clone();
         window.open_dialog(cx, move |dialog, window, cx| {
             let ok = apply.clone();
             let theme = cx.theme();
@@ -222,7 +267,26 @@ impl FastDir {
                                 .text_xs()
                                 .text_color(theme.muted_foreground)
                                 .child(f_hint),
-                        ),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(f_finder),
+                        )
+                        .child({
+                            let finder = finder.clone();
+                            RadioGroup::vertical("filter-finder")
+                                .selected_index(Some(finder_index(finder.get())))
+                                .children(finder_labels.iter().enumerate().map(|(ix, label)| {
+                                    Radio::new(("filter-finder-opt", ix)).label(*label)
+                                }))
+                                .on_change(move |ix: &usize, window, _| {
+                                    finder.set(finder_at(*ix));
+                                    window.refresh();
+                                })
+                        })
+                        .child(field(f_limit, &path_limit)),
                 )
                 .footer(
                     h_flex()
@@ -232,12 +296,13 @@ impl FastDir {
                         .child({
                             let (min, ext) = (min_clear.clone(), ext_clear.clone());
                             let (after, before) = (after_clear.clone(), before_clear.clone());
+                            let limit = limit_clear.clone();
                             let entity = entity.clone();
                             Button::new("filters-clear")
                                 .outline()
                                 .label(f_clear)
                                 .on_click(move |_, window, cx| {
-                                    for input in [&min, &ext, &after, &before] {
+                                    for input in [&min, &ext, &after, &before, &limit] {
                                         input.update(cx, |input, cx| {
                                             input.set_value("", window, cx)
                                         });

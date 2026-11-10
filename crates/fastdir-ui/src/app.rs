@@ -7,7 +7,7 @@ use fastdir_core::compress;
 use fastdir_core::diff::{ChangeStatus, ScanDiff};
 use fastdir_core::drives::{self, Drive};
 use fastdir_core::elevate;
-use fastdir_core::filter::Filter;
+use fastdir_core::filter::{DEFAULT_PATH_LIMIT, Filter, Finder, child_path_len, root_path_len};
 use fastdir_core::format;
 use fastdir_core::fsops;
 use fastdir_core::integration;
