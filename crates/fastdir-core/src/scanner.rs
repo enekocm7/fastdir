@@ -45,12 +45,16 @@ pub struct ScanResult {
     pub tree: Tree,
     pub elapsed: std::time::Duration,
     pub cancelled: bool,
+    /// The tree was built from the NTFS MFT rather than a directory walk.
+    pub used_mft: bool,
 }
 
 /// Result of a scan that wrote into a caller-owned live tree.
 pub struct LiveScanResult {
     pub elapsed: std::time::Duration,
     pub cancelled: bool,
+    /// The tree was built from the NTFS MFT rather than a directory walk.
+    pub used_mft: bool,
 }
 
 /// File IDs already seen during a scan. Hard links share their ID, so only
@@ -58,7 +62,7 @@ pub struct LiveScanResult {
 ///
 /// The set is sharded so the parallel scan threads rarely contend. Entries are
 /// only inserted for files that can actually contribute bytes.
-struct LinkTracker {
+pub(crate) struct LinkTracker {
     shards: [Mutex<HashSet<u128>>; 16],
 }
 
@@ -74,7 +78,7 @@ impl LinkTracker {
     /// `true` when `id` was seen before. A zero ID means "unknown" and is
     /// never treated as a duplicate. IDs are 128-bit so ReFS file IDs (which
     /// do not fit in 64 bits) stay unique; NTFS and Unix only use the low half.
-    fn is_duplicate(&self, id: u128) -> bool {
+    pub(crate) fn is_duplicate(&self, id: u128) -> bool {
         if id == 0 {
             return false;
         }
@@ -328,6 +332,12 @@ pub struct ScanOptions {
     /// up in `<Unknown>`. Scanning that folder directly still works. No
     /// effect on other platforms.
     pub skip_windows_dir: bool,
+    /// Build the tree from the NTFS Master File Table instead of walking
+    /// directories, which is several times faster on a large volume. Needs
+    /// administrator rights and a local NTFS volume; whenever the MFT cannot
+    /// be read (or the scan follows junctions or collects owners) the scan
+    /// silently falls back to the directory walk. Off by default.
+    pub use_mft: bool,
 }
 
 impl ScanOptions {
@@ -353,13 +363,13 @@ pub fn windows_dir() -> Option<PathBuf> {
 /// A folder skipped by its full path, split into the comparison key of its
 /// parent and its name so a listing only pays for a name check.
 #[derive(Debug)]
-struct ExcludedDir {
+pub(crate) struct ExcludedDir {
     parent: String,
     name: String,
 }
 
 impl ExcludedDir {
-    fn new(dir: &Path) -> Option<Self> {
+    pub(crate) fn new(dir: &Path) -> Option<Self> {
         let name = dir.file_name()?.to_str()?;
         Some(Self {
             parent: path_key(dir.parent()?),
@@ -368,7 +378,7 @@ impl ExcludedDir {
     }
 
     /// `true` when the entry `name` listed in `parent` is this folder.
-    fn matches(&self, parent: &Path, name: &str) -> bool {
+    pub(crate) fn matches(&self, parent: &Path, name: &str) -> bool {
         let same_name = if cfg!(windows) {
             // Only a non-ASCII name pays for a lowercase copy.
             self.name.eq_ignore_ascii_case(name)
@@ -578,7 +588,7 @@ impl<'a> ScanContext<'a> {
 }
 
 /// The folders `options` skips by full path.
-fn excluded_dirs(options: &ScanOptions) -> Vec<ExcludedDir> {
+pub(crate) fn excluded_dirs(options: &ScanOptions) -> Vec<ExcludedDir> {
     let mut dirs = Vec::new();
     if options.skip_windows_dir
         && let Some(d) = windows_dir().as_deref().and_then(ExcludedDir::new)
@@ -634,15 +644,20 @@ pub(crate) fn with_threads<R: Send>(threads: Option<usize>, f: impl FnOnce() -> 
 /// Scan `root` (blocking). Call from a background thread.
 pub fn scan(root: PathBuf, progress: Arc<Progress>, options: &ScanOptions) -> ScanResult {
     let start = Instant::now();
-    let tree = with_threads(options.threads, || {
-        let mut sub = scan_detached(&root, &root.to_string_lossy(), &progress, options);
+    let (tree, used_mft) = with_threads(options.threads, || {
+        let name = root.to_string_lossy();
+        let (mut sub, used_mft) = match crate::mft::scan(&root, &name, &progress, options) {
+            Some(sub) => (sub, true),
+            None => (scan_detached(&root, &name, &progress, options), false),
+        };
         sub.root_mut().set_expanded(true);
-        Tree::new(sub, root.clone())
+        (Tree::new(sub, root.clone()), used_mft)
     });
     ScanResult {
         tree,
         elapsed: start.elapsed(),
         cancelled: progress.cancelled(),
+        used_mft,
     }
 }
 
@@ -660,7 +675,20 @@ pub fn scan_live(
 ) -> LiveScanResult {
     let start = Instant::now();
     let name = root.to_string_lossy();
-    with_threads(options.threads, || {
+    let used_mft = with_threads(options.threads, || {
+        if let Some(mut sub) = crate::mft::scan(&root, &name, &progress, options) {
+            // The MFT yields the whole tree at once: publish it in one go.
+            sub.root_mut().set_expanded(true);
+            let (categories, generation) = {
+                let live = live.read();
+                (live.categories().clone(), live.generation)
+            };
+            let mut tree = Tree::new(sub, root.clone());
+            tree.set_category_map(categories);
+            tree.generation = tree.generation.max(generation.wrapping_add(1));
+            *live.write() = tree;
+            return true;
+        }
         // One tracker across all top-level folders, so hard links are still
         // counted only once when their two names live in different folders.
         let links = LinkTracker::default();
@@ -722,10 +750,12 @@ pub fn scan_live(
         let mut tree = live.write();
         tree.rebuild_extensions();
         tree.generation = tree.generation.wrapping_add(1);
+        false
     });
     LiveScanResult {
         elapsed: start.elapsed(),
         cancelled: progress.cancelled(),
+        used_mft,
     }
 }
 
@@ -1122,8 +1152,8 @@ fn cluster_size(path: &Path) -> u64 {
     }
 }
 
-#[cfg(windows)]
-fn round_up(n: u64, cluster: u64) -> u64 {
+/// `n` rounded up to a whole number of clusters (as-is when unknown).
+pub(crate) fn round_up(n: u64, cluster: u64) -> u64 {
     if n == 0 || cluster == 0 {
         n
     } else {
@@ -1800,6 +1830,42 @@ mod tests {
             .count();
         assert_eq!(links, 1);
         drop(tree);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn mft_option_falls_back_to_the_same_tree_when_unavailable() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("a.txt"), b"hello").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
+
+        let walked = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
+        let options = ScanOptions {
+            use_mft: true,
+            ..ScanOptions::default()
+        };
+        let fast = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        if !crate::elevate::is_elevated() || cfg!(not(windows)) {
+            // No raw volume access here: the walk ran.
+            assert!(!fast.used_mft);
+        }
+        for result in [&walked, &fast] {
+            let root = result.tree.root();
+            assert_eq!((root.files, root.dirs, root.size), (2, 1, 15));
+        }
+        assert_eq!(walked.tree.root().disk_size, fast.tree.root().disk_size);
+        // Options the MFT reader does not handle always use the walk.
+        assert!(!crate::mft::supports(&ScanOptions {
+            use_mft: true,
+            collect_owners: true,
+            ..ScanOptions::default()
+        }));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

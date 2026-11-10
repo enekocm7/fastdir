@@ -23,6 +23,13 @@ culprit? Rename, move, recycle or delete it right there.
   `GetFileInformationByHandleEx` call (`FileIdBothDirectoryInfo`) that returns
   names, sizes, timestamps and file IDs together, so there's no per-file
   `stat`. ~2.7 million files / 500 GB in about 17 s on a warm cache.
+- **Fast NTFS scan (opt-in)** - with *Settings → Fast NTFS scan (MFT)* (or
+  `--mft` on the command line) and FastDir running as administrator, an NTFS
+  volume is scanned by reading its Master File Table directly: large
+  sequential reads instead of one listing per folder. Sizes, size on disk,
+  hard links and `<Unknown>` follow the same rules as the normal scan. On
+  other file systems, without administrator rights, or when following
+  junctions or collecting owners, the normal scan runs instead.
 - **Size on disk** - every row shows the allocated size next to the logical
   size, so compressed, sparse and tiny cluster-slack files are counted the way
   the volume sees them. The treemap can use either metric (`. menu` →
@@ -143,7 +150,8 @@ culprit? Rename, move, recycle or delete it right there.
   colour-blind-safe one), flat shading, cell borders, age-tinted dates,
   list-only mode, excluded
     paths, hidden/system skipping, skipping the Windows folder (opt-in, makes
-  system-drive scans much faster), junction following (opt-in), thread count,
+  system-drive scans much faster), fast NTFS scanning through the MFT (opt-in,
+  needs administrator rights), junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
   frequency, per-action delete confirmations, custom cleanup actions, whether
   the list stays on the current item after a delete (on by default) and the
@@ -439,6 +447,7 @@ row has its own sizes.
 | `--cross-volumes` | scan, top, duplicates, diff, snapshot | With `--follow-junctions`, also enter other volumes |
 | `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff, snapshot | Skip hidden and system entries |
 | `--skip-windows` | scan, top, duplicates, diff, snapshot | Skip the Windows folder (`%SystemRoot%`, usually `C:\Windows`) for a much faster system-drive scan; its bytes count as `<Unknown>` |
+| `--mft` | scan, top, duplicates, diff, snapshot | Read the NTFS Master File Table directly (much faster on large volumes). Needs administrator rights; otherwise a normal scan runs and the summary on stderr says so |
 | `--owners` | scan, top, diff, snapshot | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top, duplicates, diff, snapshot | Nothing on stderr except errors |
 | `--dir <folder>` | snapshot, history | Snapshot folder (default `%APPDATA%\FastDir\snapshots`, or `[snapshots] dir` with `--config`) |
@@ -463,7 +472,8 @@ Add `--config` to opt in: the `[scan]` section of
 `%APPDATA%\FastDir\config.toml` (or `--config=<file>`; a bare `--config
 <file>` also works when the file ends in `.toml`) becomes the base for the
 scan. It covers excluded names, hidden/system skipping, Windows-folder
-skipping (`skip_windows_dir`), junction following, cross-volume and thread
+skipping (`skip_windows_dir`), MFT scanning (`use_mft`), junction following,
+cross-volume and thread
 count. Explicit flags win over it: `--threads`
 replaces the configured count, `--exclude` adds to the configured exclusions,
 and switches such as `--follow-junctions` turn things on. A missing or

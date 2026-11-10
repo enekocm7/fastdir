@@ -250,6 +250,11 @@ pub fn scan_with_progress(args: &ScanArgs) -> Result<Scanned, CliError> {
             format::bytes(root_node.size),
             format::duration(result.elapsed),
         );
+        if result.used_mft {
+            line.push_str(" (read from the NTFS MFT)");
+        } else if options.use_mft {
+            line.push_str(" (MFT unavailable, walked the folders)");
+        }
         if errors > 0 {
             line.push_str(&format!(" ({} unreadable)", format::count(errors)));
         }

@@ -365,6 +365,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Přeskakuje také tečkové soubory na Unixu.",
         "set.scan.skip_windows" => "Přeskočit složku Windows",
         "set.scan.skip_windows_cap" => "Vynechá %SystemRoot% (obvykle C:\\Windows), takže se systémová jednotka prohledá mnohem rychleji. Její velikost se započítá do <Neznámé>.",
+        "set.scan.mft" => "Rychlé skenování NTFS (MFT)",
+        "set.scan.mft_cap" => "Čte přímo hlavní tabulku souborů (MFT) systému NTFS, což je na velkých jednotkách mnohonásobně rychlejší. Vyžaduje oprávnění správce; jinak, nebo na jiných souborových systémech, proběhne běžné skenování. Nepoužije se při sledování propojení ani při zjišťování vlastníků.",
         "set.scan.junctions" => "Sledovat křížení a symbolické odkazy",
         "set.scan.junctions_cap" => "Může počítat soubory dvakrát; každý cíl se navštíví jednou.",
         "set.scan.cross" => "Přecházet na jiné svazky",

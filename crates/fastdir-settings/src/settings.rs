@@ -379,6 +379,10 @@ pub struct ScanSettings {
     /// Skip the Windows folder (`%SystemRoot%`) when scanning the system
     /// drive, which makes the scan much faster. Off by default.
     pub skip_windows_dir: bool,
+    /// Read the NTFS Master File Table directly instead of walking folders
+    /// (much faster). Needs administrator rights; scans fall back to the
+    /// normal walk when the MFT cannot be read. Off by default.
+    pub use_mft: bool,
 }
 
 impl Default for ScanSettings {
@@ -392,6 +396,7 @@ impl Default for ScanSettings {
             show_partial_results: true,
             collect_owners: false,
             skip_windows_dir: false,
+            use_mft: false,
         }
     }
 }
@@ -1077,6 +1082,7 @@ mod tests {
                 show_partial_results: false,
                 collect_owners: true,
                 skip_windows_dir: true,
+                use_mft: true,
             },
             treemap: TreemapSettings {
                 show_free_space: true,

@@ -371,6 +371,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.scan.skip_hidden_cap" => "Pomija także pliki z kropką w systemach Unix.",
         "set.scan.skip_windows" => "Pomiń folder Windows",
         "set.scan.skip_windows_cap" => "Pomija %SystemRoot% (zwykle C:\\Windows), dzięki czemu dysk systemowy skanuje się znacznie szybciej. Jego rozmiar trafia do <Nieznane>.",
+        "set.scan.mft" => "Szybkie skanowanie NTFS (MFT)",
+        "set.scan.mft_cap" => "Odczytuje bezpośrednio główną tabelę plików (MFT) NTFS, co na dużych dyskach jest wielokrotnie szybsze. Wymaga uprawnień administratora; w przeciwnym razie, lub w innych systemach plików, działa zwykłe skanowanie. Nieużywane przy podążaniu za połączeniami lub zbieraniu właścicieli.",
         "set.scan.junctions" => "Podążaj za dowiązaniami i linkami symbolicznymi",
         "set.scan.junctions_cap" => "Może liczyć pliki podwójnie; każdy cel jest odwiedzany raz.",
         "set.scan.cross" => "Wchodź na inne woluminy",

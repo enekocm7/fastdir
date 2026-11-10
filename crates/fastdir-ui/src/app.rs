@@ -836,6 +836,7 @@ impl FastDir {
             threads: s.thread_count.map(|n| (n as usize).clamp(1, 64)),
             collect_owners: s.collect_owners,
             skip_windows_dir: s.skip_windows_dir,
+            use_mft: s.use_mft,
         }
     }
 
