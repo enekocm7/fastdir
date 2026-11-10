@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Persisted FastDir settings"
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
 fastdir-locale.workspace = true

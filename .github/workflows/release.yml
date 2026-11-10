@@ -75,11 +75,6 @@ jobs:
           Copy-Item target\release\fastdir-cli.exe staging\fastdir-cli.exe
           Copy-Item README.md staging\
           Compress-Archive -Path staging\* -DestinationPath "dist\FastDir-$v-portable-x64.zip" -Force
-          Get-ChildItem dist | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)"
-          } | Set-Content dist\SHA256SUMS.txt
-          Get-Content dist\SHA256SUMS.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -87,18 +82,21 @@ jobs:
           name: FastDir-${{ steps.version.outputs.version }}-windows-x64
           path: dist/*
 
-      - name: Publish GitHub release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          name: FastDir ${{ steps.version.outputs.version }}
-          generate_release_notes: true
-          files: dist/*
-
   linux:
     name: Linux x64
     runs-on: ubuntu-24.04
+    # Built against glibc 2.35 (Ubuntu 22.04), so the binaries, the .deb and
+    # the AppImage also run on Debian 12 and other distros older than the
+    # runner. Bump only together with the oldest distro you want to support.
+    container: ubuntu:22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y sudo curl git ca-certificates jq xz-utils file
+
       - uses: actions/checkout@v4
 
       - name: Install Rust
@@ -109,9 +107,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          # Verified GPUI build inputs on Ubuntu 24.04 (gpui-kit install
-          # guide); libasound2-dev is only needed by the `speech` feature.
-          sudo apt-get update
+          # Verified GPUI build inputs (gpui-kit install guide);
+          # libasound2-dev is only needed by the `speech` feature.
           sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev \
             libwayland-dev libwebkit2gtk-4.1-dev libxkbcommon-x11-dev \
             libx11-xcb-dev libssl-dev libzstd-dev libasound2-dev \
@@ -141,10 +138,29 @@ jobs:
           mkdir -p staging dist
           cp target/release/fastdir staging/FastDir
           cp target/release/fastdir-cli staging/fastdir-cli
-          cp README.md staging/
+          cp README.md LICENSE staging/
           tar -czf "dist/FastDir-$v-linux-x64.tar.gz" -C staging .
-          (cd dist && sha256sum ./* > SHA256SUMS.txt)
-          cat dist/SHA256SUMS.txt
+
+      - name: Install packaging tools
+        run: |
+          # No `appstream` here: 22.04's validator predates tags the
+          # metainfo uses (the `metadata` job validates with a current one).
+          sudo apt-get install -y dpkg-dev binutils librsvg2-bin desktop-file-utils
+          curl -fsSLo nfpm.deb \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          sudo apt-get install -y ./nfpm.deb
+          sudo curl -fsSLo /usr/local/bin/linuxdeploy \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_VERSION}/linuxdeploy-x86_64.AppImage"
+          sudo chmod +x /usr/local/bin/linuxdeploy
+        env:
+          NFPM_VERSION: 2.48.0
+          LINUXDEPLOY_VERSION: 1-alpha-20251107-1
+
+      - name: Build .deb, .rpm and AppImage
+        run: packaging/linux/package.sh "${{ steps.version.outputs.version }}" target/release dist
+        env:
+          # GitHub runners have no FUSE for the linuxdeploy AppImage itself.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -152,13 +168,21 @@ jobs:
           name: FastDir-${{ steps.version.outputs.version }}-linux-x64
           path: dist/*
 
-      - name: Publish GitHub release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          name: FastDir ${{ steps.version.outputs.version }}
-          # Release notes are generated once, by the Windows job.
-          files: dist/*
+  # Desktop entry and AppStream metadata, checked with current validators
+  # (software centers and Flathub read the newer AppStream tags).
+  metadata:
+    name: Validate Linux metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils appstream
+          desktop-file-validate packaging/linux/io.github.enekocm7.FastDir.desktop
+          appstreamcli validate --no-net --explain \
+            packaging/linux/io.github.enekocm7.FastDir.metainfo.xml
 
   macos:
     name: macOS arm64
@@ -203,8 +227,6 @@ jobs:
           cp README.md dmg-root/
           hdiutil create -volname "FastDir $v" -srcfolder dmg-root \
             -ov -format UDZO "dist/FastDir-$v-macos-arm64.dmg"
-          (cd dist && shasum -a 256 ./* > SHA256SUMS.txt)
-          cat dist/SHA256SUMS.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -212,10 +234,142 @@ jobs:
           name: FastDir-${{ steps.version.outputs.version }}-macos-arm64
           path: dist/*
 
+  # Installs the packages on clean distro images and runs both binaries, so a
+  # missing runtime dependency fails the release instead of a user's install.
+  linux-test:
+    name: Install test (${{ matrix.image }}, ${{ matrix.format }})
+    needs: linux
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:12", format: deb }
+          - { image: "ubuntu:24.04", format: deb }
+          - { image: "fedora:latest", format: rpm }
+          - { image: "debian:12", format: AppImage }
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: FastDir-${{ needs.linux.outputs.version }}-linux-x64
+          path: dist
+
+      - name: Install the package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          case "${{ matrix.format }}" in
+            deb)
+              apt-get update
+              apt-get install -y ./dist/*.deb
+              fastdir=fastdir; cli=fastdir-cli ;;
+            rpm)
+              dnf install -y ./dist/*.rpm
+              fastdir=fastdir; cli=fastdir-cli ;;
+            AppImage)
+              apt-get update
+              # What a desktop already has; the AppImage brings the rest.
+              apt-get install -y libfontconfig1 libvulkan1 libwayland-client0 \
+                libxkbcommon0 libxkbcommon-x11-0
+              chmod +x dist/*.AppImage
+              export APPIMAGE_EXTRACT_AND_RUN=1
+              fastdir=$(ls "$PWD"/dist/*.AppImage)
+              cli=$fastdir ;;
+          esac
+          if [ "${{ matrix.format }}" != AppImage ]; then
+            # Every shared library resolves, the files are where the desktop
+            # and software centers look for them.
+            ! ldd /usr/bin/fastdir /usr/bin/fastdir-cli | grep 'not found'
+            test -f /usr/share/applications/io.github.enekocm7.FastDir.desktop
+            test -f /usr/share/metainfo/io.github.enekocm7.FastDir.metainfo.xml
+            test -f /usr/share/icons/hicolor/256x256/apps/io.github.enekocm7.FastDir.png
+            test -f /usr/share/icons/hicolor/scalable/apps/io.github.enekocm7.FastDir.svg
+          fi
+          # The GUI binary runs headless for CLI subcommands, which loads all
+          # of its libraries; then scan the whole file system.
+          "$fastdir" scan /usr --max-depth 1 > /dev/null
+          "$cli" scan / --max-depth 1 > scan.json
+          head -c 400 scan.json; echo
+
+  # Builds the Nix flake so `nix run github:enekocm7/fastdir` keeps working.
+  nix:
+    name: Nix flake
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Build
+        run: |
+          nix build -L .#fastdir
+          ./result/bin/fastdir-cli scan / --max-depth 1 > /dev/null
+          nix flake check --no-build
+
+  # One release with every platform's files and a single SHA256SUMS.txt (the
+  # in-app updater looks its download up in that file).
+  publish:
+    name: Publish release
+    if: github.ref_type == 'tag'
+    needs: [windows, linux, macos, metadata, linux-test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: FastDir-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Publish GitHub release
-        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          name: FastDir ${{ steps.version.outputs.version }}
-          # Release notes are generated once, by the Windows job.
+          name: FastDir ${{ needs.linux.outputs.version }}
+          generate_release_notes: true
           files: dist/*
+
+  # Pushes the `fastdir-bin` PKGBUILD to the AUR for stable tags. Needs the
+  # AUR_SSH_PRIVATE_KEY secret (an SSH key registered with the AUR account
+  # that owns the package); skipped without it.
+  aur:
+    name: AUR (fastdir-bin)
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [linux, publish]
+    runs-on: ubuntu-24.04
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+
+      - uses: actions/download-artifact@v4
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        with:
+          name: FastDir-${{ needs.linux.outputs.version }}-linux-x64
+          path: dist
+
+      - name: Fill in version and checksum
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          v="${{ needs.linux.outputs.version }}"
+          sum=$(sha256sum "dist/FastDir-$v-amd64.deb" | cut -d' ' -f1)
+          sed -i -e "s/^pkgver=.*/pkgver=$v/" -e "s/^pkgrel=.*/pkgrel=1/" \
+            -e "s/^sha256sums=.*/sha256sums=('$sum')/" packaging/aur/fastdir-bin/PKGBUILD
+          cat packaging/aur/fastdir-bin/PKGBUILD
+
+      - name: Push to the AUR
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: fastdir-bin
+          pkgbuild: packaging/aur/fastdir-bin/PKGBUILD
+          commit_username: ${{ vars.AUR_COMMIT_USERNAME || 'enekocm7' }}
+          commit_email: ${{ vars.AUR_COMMIT_EMAIL || 'enekocm7@users.noreply.github.com' }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ needs.linux.outputs.version }}

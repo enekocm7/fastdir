@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata, read by GNOME Software, KDE Discover, Flathub and AppImageHub. -->
+<component type="desktop-application">
+  <id>io.github.enekocm7.FastDir</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>FastDir</name>
+  <summary>Find out what is using your disk space</summary>
+  <developer id="io.github.enekocm7">
+    <name>enekocm7</name>
+  </developer>
+
+  <description>
+    <p>
+      FastDir scans a drive or folder on every CPU core, then shows you exactly
+      where the space went: a sortable directory tree, a per-extension and
+      per-category breakdown, and a cushion-shaded treemap where every square is
+      a file.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Fast parallel scanner with exclusions and hard-link awareness</li>
+      <li>Treemap, directory tree and file-type breakdown that stay in sync</li>
+      <li>Rename, move, trash or delete files without rescanning</li>
+      <li>Duplicate finder, saved scans and scan comparison</li>
+      <li>A headless command-line tool (fastdir-cli) with JSON and CSV output and an MCP server</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.enekocm7.FastDir.desktop</launchable>
+  <icon type="stock">io.github.enekocm7.FastDir</icon>
+
+  <url type="homepage">https://github.com/enekocm7/fastdir</url>
+  <url type="bugtracker">https://github.com/enekocm7/fastdir/issues</url>
+  <url type="vcs-browser">https://github.com/enekocm7/fastdir</url>
+
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+    <category>FileTools</category>
+  </categories>
+  <keywords>
+    <keyword>disk</keyword>
+    <keyword>usage</keyword>
+    <keyword>space</keyword>
+    <keyword>treemap</keyword>
+    <keyword>windirstat</keyword>
+    <keyword>wiztree</keyword>
+  </keywords>
+
+  <provides>
+    <binary>fastdir</binary>
+    <binary>fastdir-cli</binary>
+  </provides>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.3.2" date="2026-11-04">
+      <url type="details">https://github.com/enekocm7/fastdir/releases/tag/v0.3.2</url>
+    </release>
+  </releases>
+</component>

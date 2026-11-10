@@ -178,6 +178,14 @@ impl FastDir {
             ],
         );
         let title = self.tr("upd.avail_title");
+        if let Some(hint) = self.no_self_update_hint(updater::detect_kind()) {
+            // No "Update now" for installs FastDir must not replace itself.
+            window.push_notification(
+                Notification::info(format!("{body}\n{hint}")).title(title),
+                cx,
+            );
+            return;
+        }
         let label = self.tr("upd.update_now");
         window.push_notification(
             Notification::info(body)
@@ -196,6 +204,16 @@ impl FastDir {
                 }),
             cx,
         );
+    }
+
+    /// What to tell the user instead of updating, for installs FastDir does
+    /// not update itself (package-managed or unpacked by hand).
+    fn no_self_update_hint(&self, kind: InstallKind) -> Option<&'static str> {
+        match kind {
+            InstallKind::PackageManager => Some(self.tr("upd.use_package_manager")),
+            InstallKind::Manual => Some(self.tr("upd.manual_download")),
+            InstallKind::Installed { .. } | InstallKind::Portable | InstallKind::AppImage => None,
+        }
     }
 
     pub(super) fn show_release_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -277,6 +295,14 @@ impl FastDir {
         }
         let Some(release) = self.available.clone() else { return };
         let kind = updater::detect_kind();
+        if let Some(hint) = self.no_self_update_hint(kind) {
+            // Never touch binaries a package manager owns; point there instead.
+            window.push_notification(
+                Notification::info(hint).title(self.tr("upd.avail_title")),
+                cx,
+            );
+            return;
+        }
         if release.asset_for(kind).is_none() {
             window.push_notification(
                 Notification::error(self.tr("upd.no_asset")).title(self.tr("upd.fail_title")),

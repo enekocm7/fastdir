@@ -16,6 +16,7 @@ default-members = [".", "crates/fastdir-cli"]
 version = "0.3.2"
 edition = "2024"
 repository = "https://github.com/enekocm7/fastdir"
+license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
 # GUI
@@ -73,6 +74,7 @@ version.workspace = true
 edition.workspace = true
 description = "Blazing fast disk usage analyzer with a WinDirStat-style treemap"
 repository.workspace = true
+license.workspace = true
 build = "build.rs"
 
 [dependencies]

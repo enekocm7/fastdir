@@ -44,6 +44,10 @@ pub fn run() {
             let options = WindowOptions {
                 window_bounds: Some(app::restored_window_bounds(&settings, cx)),
                 window_min_size: Some(size(px(900.), px(600.))),
+                // Wayland app_id / X11 WM_CLASS: matches the Linux desktop
+                // entry (`io.github.enekocm7.FastDir.desktop`) so the window
+                // gets its icon and groups with the launcher.
+                app_id: Some("io.github.enekocm7.FastDir".into()),
                 ..TitleBar::window_options()
             };
             let initial_path = cli_open_path();

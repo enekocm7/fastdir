@@ -176,6 +176,31 @@ Download the latest release from the
 | `FastDir-<version>-setup-x64.exe` | Installer: Start menu shortcut, optional desktop icon and Explorer context menu, uninstaller. Installs per-user by default (no admin prompt). |
 | `FastDir-<version>-portable-x64.zip` | Just the executables (`FastDir.exe` and the console `fastdir-cli.exe`), no installation needed. |
 
+### Linux
+
+Every Linux package installs both `fastdir` (the GUI) and `fastdir-cli`, plus an
+application menu entry, an icon and AppStream metadata. x86_64 only for now.
+
+| Distribution | Install | Updates |
+|---|---|---|
+| Debian, Ubuntu, Mint, Pop!_OS | `sudo apt install ./FastDir-<version>-amd64.deb` | install the next `.deb` the same way |
+| Fedora, RHEL / Alma / Rocky, openSUSE | `sudo dnf install ./FastDir-<version>-x86_64.rpm` (`sudo zypper install …` on openSUSE) | install the next `.rpm` the same way |
+| Arch, Manjaro, EndeavourOS | `paru -S fastdir-bin` (or any AUR helper) | your AUR helper |
+| NixOS / Nix | `nix run github:enekocm7/fastdir` (CLI: `nix run github:enekocm7/fastdir#fastdir-cli -- scan /`) | `nix profile upgrade` / your flake inputs |
+| Any distribution | `chmod +x FastDir-<version>-x86_64.AppImage && ./FastDir-<version>-x86_64.AppImage` | in the app (**Update now** replaces the AppImage file) |
+| Any distribution | unpack `FastDir-<version>-linux-x64.tar.gz` | download the next release by hand |
+
+FastDir never replaces a binary that a package manager installed: for
+`.deb`, `.rpm`, AUR and Nix installs the update notification tells you to
+update from your package manager instead. It renders through Vulkan, so a
+Vulkan driver is needed (Mesa's `mesa-vulkan-drivers` on most distributions).
+Flathub ([#114](https://github.com/enekocm7/fastdir/issues/114)), Snap
+([#115](https://github.com/enekocm7/fastdir/issues/115)), Alpine
+([#116](https://github.com/enekocm7/fastdir/issues/116)), nixpkgs
+([#117](https://github.com/enekocm7/fastdir/issues/117)) and the Debian
+archive ([#118](https://github.com/enekocm7/fastdir/issues/118)) are planned. Release and packaging
+details for contributors are in [`packaging/README.md`](packaging/README.md).
+
 ### Updates
 
 FastDir checks GitHub Releases in the background on its configured schedule
@@ -856,3 +881,13 @@ cargo build --release
 ```
 
 The installer is written to `dist\`.
+
+### Building the Linux packages locally
+
+`packaging/linux/package.sh` builds the `.deb`, `.rpm` and AppImage from the
+release binaries; see [`packaging/README.md`](packaging/README.md) for the
+tools it needs and how the release workflow uses it.
+
+## License
+
+FastDir is licensed under the [GNU General Public License v3.0 or later](LICENSE).

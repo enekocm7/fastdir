@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=FastDir
+GenericName=Disk Usage Analyzer
+Comment=See where your disk space went: a sortable directory tree and a treemap
+Exec=fastdir %f
+Icon=io.github.enekocm7.FastDir
+Terminal=false
+Categories=Utility;System;FileTools;
+Keywords=disk;usage;space;treemap;windirstat;wiztree;
+StartupNotify=true
+StartupWMClass=io.github.enekocm7.FastDir
