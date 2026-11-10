@@ -233,6 +233,7 @@ impl Render for SettingsView {
         let caption = |text: String| div().text_xs().text_color(muted).child(text);
 
         let actions_section = self.render_actions_section(cx);
+        let snapshots_section = self.render_snapshots_section(cx);
 
         v_flex()
             .id("settings-scroll")
@@ -1536,6 +1537,7 @@ impl Render for SettingsView {
                             ),
                     )
                     .child(actions_section)
+                    .child(snapshots_section)
                     .child(
                         section()
                             .gap_4()

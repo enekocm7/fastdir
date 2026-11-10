@@ -114,9 +114,11 @@ mod compare;
 mod compress_ui;
 mod context_menu;
 mod dialogs;
+mod duplicates_ui;
 mod export;
 mod file_list;
 mod filter;
+mod history_ui;
 mod open_scan;
 mod platform;
 mod scan_state;
@@ -305,6 +307,8 @@ enum ListTab {
     TopFiles,
     /// Items that only existed in the baseline scan of a comparison.
     Removed,
+    /// Groups of byte-identical files.
+    Duplicates,
 }
 
 /// One row of the extension panel: a category header or an extension below
@@ -377,6 +381,8 @@ enum PendingKind {
         options: Option<compress::CompressOptions>,
     },
     Action { run: actions_ui::ActionRun },
+    /// Replace each target with a hard link to `keep`.
+    HardLink { keep: PathBuf },
 }
 
 /// A delete or move waiting for the running one to finish. The targets are
@@ -427,6 +433,8 @@ pub struct FastDir {
     removed_sort: (SortKey, bool),
     removed_scroll: UniformListScrollHandle,
     removed_selected: Option<usize>,
+    /// The Duplicates tab: search state, results and cursor.
+    dups: duplicates_ui::Duplicates,
     scan_root: Option<PathBuf>,
     last_scan: Option<(Duration, bool)>,
     /// Folders that could not be read in the last finished scan (access denied).
@@ -648,6 +656,7 @@ impl FastDir {
             removed_sort: (SortKey::Size, true),
             removed_scroll: UniformListScrollHandle::new(),
             removed_selected: None,
+            dups: duplicates_ui::Duplicates::default(),
             scan_root: None,
             last_scan: None,
             last_errors: 0,

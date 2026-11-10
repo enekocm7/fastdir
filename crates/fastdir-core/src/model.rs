@@ -649,6 +649,14 @@ impl Subtree {
         Self::single(name, Node::new(NodeKind::File, size, disk_size, modified))
     }
 
+    /// Another hard link to a file counted elsewhere: a file that adds no
+    /// bytes to any total (see [`Node::hard_link`]).
+    pub fn hard_link(name: &str, modified: i64) -> Self {
+        let mut node = Node::new(NodeKind::File, 0, 0, modified);
+        node.set_flag(HARD_LINK, true);
+        Self::single(name, node)
+    }
+
     fn single(name: &str, node: Node) -> Self {
         let mut arena = Arena::default();
         arena.chunks.push(String::with_capacity(name.len()));

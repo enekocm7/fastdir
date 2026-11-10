@@ -561,6 +561,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Estado",
         "list.removed_tab" => "Eliminados ({n})",
         "list.removed_empty" => "No se eliminó nada",
+        "list.dups_tab" => "Duplicados",
+        "list.dups_tab_n" => "Duplicados ({n})",
+        "dups.intro" => {
+            "Busca archivos con contenido idéntico en este análisis. Se omiten los archivos de menos de {size}."
+        }
+        "dups.find" => "Buscar duplicados",
+        "dups.again" => "Buscar de nuevo",
+        "dups.hashing" => "Comparando archivos: {files} procesados, {bytes} leídos",
+        "dups.none" => "No se encontraron archivos duplicados",
+        "dups.summary" => "{groups} grupos · {wasted} recuperables",
+        "dups.unreadable" => "No se pudieron leer {n} archivos",
+        "dups.group" => "{n} copias · {wasted} desperdiciados",
+        "dups.keep" => "Conservar",
+        "dups.keep_hint" => {
+            "Se conserva la copia seleccionada (la primera si se selecciona un grupo)"
+        }
+        "dups.recycle" => "Otras copias a la {trash}",
+        "dups.link" => "Enlazar otras copias",
+        "dups.confirm_recycle_title" => "¿Mover {n} copias a la {trash}?",
+        "dups.confirm_recycle" => {
+            "Se conservará {keep} y las otras {n} copias ({size}) se moverán a la {trash}."
+        }
+        "dups.confirm_link_title" => "¿Reemplazar {n} copias por enlaces duros?",
+        "dups.confirm_link" => {
+            "Se conservará {keep} y las otras {n} copias se reemplazarán por enlaces duros a él, liberando {size}. Los archivos siguen en su sitio pero comparten una única copia de los datos: modificar uno los cambia todos."
+        }
+        "dups.ok_link" => "Reemplazar por enlaces duros",
+        "dups.op_linking" => "Reemplazando {n} copias por enlaces duros",
+        "dups.done_link" => "{n} copias reemplazadas por enlaces duros, {size} liberados",
+        "dups.link_failed" => "No se pudieron reemplazar {n} copias",
         "change.new" => "Nuevo",
         "change.grew" => "Creció",
         "change.shrank" => "Encogió",
@@ -582,6 +612,39 @@ pub fn get(key: &str) -> Option<&'static str> {
         "compare.err_body" => "No se pudo abrir {path}: {error}",
         "status.compare" => "Δ {delta} ({pct}) frente al análisis guardado",
         "status.compare_free" => " · espacio libre {free}",
+        "menu.growth" => "Crecimiento en el tiempo…",
+        "menu.save_snapshot" => "Guardar instantánea",
+        "history.title" => "Crecimiento de {name}",
+        "history.loading" => "Leyendo instantáneas…",
+        "history.saving" => "Guardando instantánea…",
+        "history.saved_title" => "Instantánea guardada",
+        "history.saved_body" => "Guardada en {path}",
+        "history.pruned" => "Instantáneas antiguas eliminadas: {n}",
+        "history.err_title" => "No se pudo guardar la instantánea",
+        "history.read_err" => "No se pudieron leer las instantáneas: {error}",
+        "history.no_dir" => "No se pudo determinar la carpeta de instantáneas.",
+        "history.empty" => "Ninguna instantánea contiene esta carpeta todavía. Guarda una con … → Guardar instantánea, activa las instantáneas automáticas en Ajustes o programa fastdir-cli snapshot.",
+        "history.summary" => "{from} → {to}: {delta} ({pct})",
+        "history.now" => "Ahora",
+        "history.missing" => "No existía",
+        "history.col_date" => "Analizado",
+        "history.col_size" => "Tamaño",
+        "history.col_change" => "Cambio",
+        "history.compare" => "Comparar",
+        "history.open_folder" => "Abrir carpeta de instantáneas",
+        "history.save_now" => "Guardar instantánea ahora",
+        "history.count" => "Instantáneas: {n}",
+        "set.snapshots.title" => "Instantáneas",
+        "set.snapshots.caption" => "Las instantáneas registran cuánto espacio ocupa cada carpeta a lo largo del tiempo, para … → Crecimiento en el tiempo. Se guardan en {dir}.",
+        "set.snapshots.auto" => "Guardar una instantánea tras cada análisis",
+        "set.snapshots.auto_cap" => "Las instantáneas de una unidad completa pueden ser grandes; los límites de abajo evitan que la carpeta crezca sin fin.",
+        "set.snapshots.keep" => "Instantáneas que conservar por carpeta",
+        "set.snapshots.keep_none" => "Sin límite",
+        "set.snapshots.age" => "Eliminar instantáneas con más de",
+        "set.snapshots.age_90" => "90 días",
+        "set.snapshots.age_365" => "1 año",
+        "set.snapshots.age_none" => "Nunca",
+        "set.snapshots.open" => "Abrir carpeta",
         _ => return None,
     })
 }

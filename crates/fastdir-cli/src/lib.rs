@@ -14,6 +14,7 @@ pub mod diff;
 pub mod mcp;
 pub mod schema;
 mod signal;
+pub mod snapshot;
 
 use args::{
     Command, ConfigCommand, ConfigSource, DiffCommand, DuplicatesCommand, Format, HelpTopic,
@@ -96,6 +97,8 @@ fn run_inline(args: &[OsString]) -> i32 {
                 HelpTopic::Top => args::TOP_HELP,
                 HelpTopic::Duplicates => args::DUPLICATES_HELP,
                 HelpTopic::Diff => args::DIFF_HELP,
+                HelpTopic::Snapshot => args::SNAPSHOT_HELP,
+                HelpTopic::History => args::HISTORY_HELP,
                 HelpTopic::Mcp => args::MCP_HELP,
                 HelpTopic::Config => args::CONFIG_HELP,
             });
@@ -111,6 +114,10 @@ fn run_inline(args: &[OsString]) -> i32 {
             with_config(&mut c.scan).and_then(|()| run_duplicates_command(&c))
         }
         Command::Diff(mut c) => with_config(&mut c.scan).and_then(|()| run_diff_command(&c)),
+        Command::Snapshot(mut c) => {
+            with_config(&mut c.scan).and_then(|()| snapshot::run_snapshot_command(&c))
+        }
+        Command::History(c) => snapshot::run_history_command(&c),
         Command::Mcp(c) => run_mcp_command(&c),
         Command::Config(c) => run_config_command(&c),
     };
@@ -904,6 +911,65 @@ mod tests {
             let _ = std::fs::remove_file(path);
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn snapshot_saves_prunes_and_history_reads_the_series() {
+        let base = std::env::temp_dir().join(format!("fastdir-cli-snap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let data = base.join("data");
+        let snaps = base.join("snaps");
+        std::fs::create_dir_all(data.join("sub")).unwrap();
+        std::fs::write(data.join("sub").join("a.bin"), vec![0u8; 1000]).unwrap();
+        let snapshot = |extra: &[&str]| {
+            let mut argv: Vec<OsString> = vec![
+                "snapshot".into(),
+                data.clone().into_os_string(),
+                "-q".into(),
+                "--dir".into(),
+                snaps.clone().into_os_string(),
+            ];
+            argv.extend(extra.iter().map(OsString::from));
+            run(argv)
+        };
+        assert_eq!(snapshot(&[]), exit::OK);
+        let root = std::path::absolute(&data).unwrap();
+        let first = fastdir_core::history::list(&snaps, &root).unwrap();
+        assert_eq!(first.len(), 1);
+        // Snapshots are ordinary saved scans.
+        assert!(load_saved_scan(&first[0].path).is_ok());
+
+        // Two more a second apart; retention keeps the newest two.
+        std::thread::sleep(Duration::from_millis(1100));
+        std::fs::write(data.join("sub").join("a.bin"), vec![0u8; 3000]).unwrap();
+        assert_eq!(snapshot(&["--no-files"]), exit::OK);
+        std::thread::sleep(Duration::from_millis(1100));
+        assert_eq!(snapshot(&["--keep", "2"]), exit::OK);
+        let listed = fastdir_core::history::list(&snaps, &root).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(!listed.iter().any(|s| s.path == first[0].path));
+
+        let out = base.join("history.json");
+        assert_eq!(
+            run(vec![
+                "history".into(),
+                root.join("sub").into_os_string(),
+                "--dir".into(),
+                snaps.clone().into_os_string(),
+                "-o".into(),
+                out.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+        assert_eq!(doc["schema"], "fastdir.history");
+        let points = doc["points"].as_array().unwrap();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0]["size"], 3000);
+        assert!(points[0]["delta"].is_null());
+        assert_eq!(points[1]["delta"], 0);
+        assert_eq!(doc["change"], 0);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

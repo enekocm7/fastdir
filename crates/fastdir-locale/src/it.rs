@@ -559,6 +559,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Stato",
         "list.removed_tab" => "Rimossi ({n})",
         "list.removed_empty" => "Non è stato rimosso nulla",
+        "list.dups_tab" => "Duplicati",
+        "list.dups_tab_n" => "Duplicati ({n})",
+        "dups.intro" => {
+            "Cerca file con contenuto identico in questa scansione. I file più piccoli di {size} vengono ignorati."
+        }
+        "dups.find" => "Cerca duplicati",
+        "dups.again" => "Cerca di nuovo",
+        "dups.hashing" => "Confronto dei file: {files} elaborati, {bytes} letti",
+        "dups.none" => "Nessun file duplicato trovato",
+        "dups.summary" => "{groups} gruppi · {wasted} recuperabili",
+        "dups.unreadable" => "Impossibile leggere {n} file",
+        "dups.group" => "{n} copie · {wasted} sprecati",
+        "dups.keep" => "Mantieni",
+        "dups.keep_hint" => {
+            "Viene mantenuta la copia selezionata (la prima se è selezionato un gruppo)"
+        }
+        "dups.recycle" => "Altre copie nel {trash}",
+        "dups.link" => "Collega le altre copie",
+        "dups.confirm_recycle_title" => "Spostare {n} copie nel {trash}?",
+        "dups.confirm_recycle" => {
+            "{keep} verrà mantenuto e le altre {n} copie ({size}) verranno spostate nel {trash}."
+        }
+        "dups.confirm_link_title" => "Sostituire {n} copie con collegamenti fisici?",
+        "dups.confirm_link" => {
+            "{keep} verrà mantenuto e le altre {n} copie verranno sostituite da collegamenti fisici a esso, liberando {size}. I file restano dove sono ma condividono un’unica copia dei dati: modificarne uno li modifica tutti."
+        }
+        "dups.ok_link" => "Sostituisci con collegamenti fisici",
+        "dups.op_linking" => "Sostituzione di {n} copie con collegamenti fisici",
+        "dups.done_link" => "{n} copie sostituite con collegamenti fisici, {size} liberati",
+        "dups.link_failed" => "Impossibile sostituire {n} copie",
         "change.new" => "Nuovo",
         "change.grew" => "Cresciuto",
         "change.shrank" => "Ridotto",
@@ -580,6 +610,39 @@ pub fn get(key: &str) -> Option<&'static str> {
         "compare.err_body" => "Impossibile aprire {path}: {error}",
         "status.compare" => "Δ {delta} ({pct}) rispetto alla scansione salvata",
         "status.compare_free" => " · spazio libero {free}",
+        "menu.growth" => "Crescita nel tempo…",
+        "menu.save_snapshot" => "Salva snapshot",
+        "history.title" => "Crescita di {name}",
+        "history.loading" => "Lettura degli snapshot…",
+        "history.saving" => "Salvataggio dello snapshot…",
+        "history.saved_title" => "Snapshot salvato",
+        "history.saved_body" => "Salvato in {path}",
+        "history.pruned" => "Snapshot vecchi rimossi: {n}",
+        "history.err_title" => "Impossibile salvare lo snapshot",
+        "history.read_err" => "Impossibile leggere gli snapshot: {error}",
+        "history.no_dir" => "Impossibile determinare la cartella degli snapshot.",
+        "history.empty" => "Nessuno snapshot contiene ancora questa cartella. Salvane uno con … → Salva snapshot, attiva gli snapshot automatici nelle Impostazioni o pianifica fastdir-cli snapshot.",
+        "history.summary" => "{from} → {to}: {delta} ({pct})",
+        "history.now" => "Ora",
+        "history.missing" => "Assente",
+        "history.col_date" => "Scansionato",
+        "history.col_size" => "Dimensione",
+        "history.col_change" => "Variazione",
+        "history.compare" => "Confronta",
+        "history.open_folder" => "Apri cartella snapshot",
+        "history.save_now" => "Salva snapshot ora",
+        "history.count" => "Snapshot: {n}",
+        "set.snapshots.title" => "Snapshot",
+        "set.snapshots.caption" => "Gli snapshot registrano quanto spazio occupa ogni cartella nel tempo, per … → Crescita nel tempo. Sono conservati in {dir}.",
+        "set.snapshots.auto" => "Salva uno snapshot dopo ogni scansione",
+        "set.snapshots.auto_cap" => "Gli snapshot di un'intera unità possono essere grandi; i limiti qui sotto evitano che la cartella cresca senza fine.",
+        "set.snapshots.keep" => "Snapshot da conservare per cartella",
+        "set.snapshots.keep_none" => "Nessun limite",
+        "set.snapshots.age" => "Rimuovi gli snapshot più vecchi di",
+        "set.snapshots.age_90" => "90 giorni",
+        "set.snapshots.age_365" => "1 anno",
+        "set.snapshots.age_none" => "Mai",
+        "set.snapshots.open" => "Apri cartella",
         _ => return None,
     })
 }

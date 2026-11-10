@@ -362,6 +362,30 @@ pub fn export_json(
     options: &ExportOptions,
     out: impl Write,
 ) -> io::Result<usize> {
+    write_json(tree, root, options, now_unix(), true, out)
+}
+
+/// Like [`export_json`], but compact and stamped with `exported_at` (Unix
+/// seconds) instead of the current time. Scan snapshots use this so the
+/// document records when the scan was taken.
+pub fn export_json_compact(
+    tree: &Tree,
+    root: &[u32],
+    options: &ExportOptions,
+    exported_at: i64,
+    out: impl Write,
+) -> io::Result<usize> {
+    write_json(tree, root, options, exported_at, false, out)
+}
+
+fn write_json(
+    tree: &Tree,
+    root: &[u32],
+    options: &ExportOptions,
+    exported_at: i64,
+    pretty: bool,
+    mut out: impl Write,
+) -> io::Result<usize> {
     if tree.get(root).is_none() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -377,10 +401,16 @@ pub fn export_json(
             .unwrap_or_else(|| tree.root_path.clone())
             .to_string_lossy()
             .into_owned(),
-        exported_at: now_unix(),
+        exported_at,
         root: snapshot,
     };
-    serde_json::to_writer_pretty(out, &doc).map_err(|e| invalid(e.to_string()))?;
+    if pretty {
+        serde_json::to_writer_pretty(&mut out, &doc)
+    } else {
+        serde_json::to_writer(&mut out, &doc)
+    }
+    .map_err(|e| invalid(e.to_string()))?;
+    out.flush()?;
     Ok(count)
 }
 

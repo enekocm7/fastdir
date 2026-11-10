@@ -11,7 +11,9 @@
 //! bytes are counted once.
 //!
 //! Everything here is GUI-free and cancellable, so the CLI, the MCP server
-//! and (later) a UI view can share it.
+//! and the GUI's Duplicates tab share it. The GUI uses [`collect`] and
+//! [`find_candidates`] separately so the tree lock is only held while the
+//! candidates are listed, not while files are hashed.
 
 use crate::model::Tree;
 use crate::scanner::with_threads;
@@ -123,11 +125,56 @@ pub struct DuplicateReport {
     pub cancelled: bool,
 }
 
+impl DuplicateReport {
+    /// Keep only the copies for which `keep` returns true, dropping groups
+    /// left with a single copy and recomputing the totals. Used after files
+    /// were deleted, moved or replaced with hard links, so the report keeps
+    /// describing what is still reclaimable.
+    pub fn retain_files(&mut self, mut keep: impl FnMut(&DuplicateFile) -> bool) {
+        let before: u64 = self.groups.iter().map(DuplicateGroup::wasted).sum();
+        let groups_before = self.groups.len();
+        for group in &mut self.groups {
+            group.files.retain(&mut keep);
+        }
+        self.groups.retain(|group| group.files.len() >= 2);
+        let after: u64 = self.groups.iter().map(DuplicateGroup::wasted).sum();
+        self.total_wasted = self.total_wasted.saturating_sub(before - after);
+        self.total_groups = self
+            .total_groups
+            .saturating_sub(groups_before - self.groups.len());
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Candidate {
     path: PathBuf,
     size: u64,
     modified: i64,
+}
+
+/// Files of a tree that passed the size and extension filters, ready to be
+/// hashed by [`find_candidates`] without the tree.
+#[derive(Clone, Debug, Default)]
+pub struct Candidates(Vec<Candidate>);
+
+impl Candidates {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// List the files under `root` in `tree` that [`find_candidates`] should
+/// look at. Cheap: no file is opened.
+pub fn collect(tree: &Tree, root: &[u32], options: &DuplicateOptions) -> Candidates {
+    if !tree.get(root).is_some_and(|node| node.is_dir()) {
+        return Candidates::default();
+    }
+    let extensions = normalise_extensions(&options.extensions);
+    Candidates(collect_candidates(tree, root, options, &extensions))
 }
 
 /// Find byte-identical files under `root` in `tree`.
@@ -138,18 +185,21 @@ pub fn find(
     progress: Arc<DuplicateProgress>,
 ) -> DuplicateReport {
     let start = Instant::now();
-    let mut report = DuplicateReport::default();
-    let Some(root_node) = tree.get(root) else {
-        report.elapsed = start.elapsed();
-        return report;
-    };
-    if !root_node.is_dir() {
-        report.elapsed = start.elapsed();
-        return report;
-    }
+    let candidates = collect(tree, root, options);
+    let mut report = find_candidates(candidates, options, progress);
+    report.elapsed = start.elapsed();
+    report
+}
 
-    let extensions = normalise_extensions(&options.extensions);
-    let candidates = collect_candidates(tree, root, options, &extensions);
+/// Hash `candidates` (from [`collect`]) and group the identical ones.
+pub fn find_candidates(
+    candidates: Candidates,
+    options: &DuplicateOptions,
+    progress: Arc<DuplicateProgress>,
+) -> DuplicateReport {
+    let start = Instant::now();
+    let mut report = DuplicateReport::default();
+    let candidates = candidates.0;
     report.candidates = candidates.len() as u64;
 
     // Stage 1: size. A file without a twin of the same size cannot match.
@@ -694,6 +744,50 @@ mod tests {
         );
         assert_eq!(report.total_groups, 1);
         assert_eq!(names(&report.groups[0]), ["a.bin", "b.bin"]);
+    }
+
+    #[test]
+    fn collect_then_hash_matches_find() {
+        let dir = TempDir::new("split");
+        dir.write("a.bin", b"split content");
+        dir.write("b.bin", b"split content");
+        dir.write("c.bin", b"other");
+        let tree = scanned(&dir.0);
+        let candidates = collect(&tree, &[], &options());
+        assert_eq!(candidates.len(), 3);
+        drop(tree);
+        let report = find_candidates(
+            candidates,
+            &options(),
+            Arc::new(DuplicateProgress::default()),
+        );
+        assert_eq!(report.total_groups, 1);
+        assert_eq!(names(&report.groups[0]), ["a.bin", "b.bin"]);
+    }
+
+    #[test]
+    fn retain_files_drops_singletons_and_updates_totals() {
+        let dir = TempDir::new("retain");
+        dir.write("a1.bin", &[b'a'; 10]);
+        dir.write("a2.bin", &[b'a'; 10]);
+        dir.write("a3.bin", &[b'a'; 10]);
+        dir.write("b1.bin", &[b'b'; 100]);
+        dir.write("b2.bin", &[b'b'; 100]);
+        let mut report = run(&dir.0, &options());
+        assert_eq!(report.total_groups, 2);
+        assert_eq!(report.total_wasted, 100 + 20);
+
+        // One extra copy of "a" goes away: the group stays, wasting less.
+        report.retain_files(|f| !f.path.ends_with("a3.bin"));
+        assert_eq!(report.total_groups, 2);
+        assert_eq!(report.total_wasted, 100 + 10);
+
+        // "b" is left with a single copy: the group disappears.
+        report.retain_files(|f| !f.path.ends_with("b2.bin"));
+        assert_eq!(report.total_groups, 1);
+        assert_eq!(report.groups.len(), 1);
+        assert_eq!(names(&report.groups[0]), ["a1.bin", "a2.bin"]);
+        assert_eq!(report.total_wasted, 10);
     }
 
     #[test]

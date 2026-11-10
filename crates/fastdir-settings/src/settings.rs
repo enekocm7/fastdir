@@ -656,6 +656,73 @@ impl Default for IntegrationSettings {
     }
 }
 
+/// Saved scan snapshots for the growth-over-time view (`[snapshots]`).
+///
+/// Snapshots are compact JSON scans stored under `dir`, one sub-folder per
+/// scanned root. `fastdir-cli snapshot` writes them (typically from a
+/// scheduled task) and the GUI can save one after every scan. Retention is
+/// applied whenever a snapshot is saved; the newest snapshot of a root is
+/// never removed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnapshotSettings {
+    /// Snapshot folder, or `None` for [`default_snapshot_dir`].
+    pub dir: Option<PathBuf>,
+    /// Save a snapshot after every completed scan in the GUI. Off by default:
+    /// a whole-drive snapshot can be large.
+    pub auto_save: bool,
+    /// Keep at most this many snapshots per root (`0` = no limit).
+    pub keep_count: u32,
+    /// Remove snapshots older than this many days (`0` = no limit).
+    pub max_age_days: u32,
+}
+
+impl Default for SnapshotSettings {
+    fn default() -> Self {
+        Self {
+            dir: None,
+            auto_save: false,
+            keep_count: 30,
+            max_age_days: 365,
+        }
+    }
+}
+
+impl SnapshotSettings {
+    /// The configured folder, falling back to [`default_snapshot_dir`].
+    pub fn effective_dir(&self) -> Option<PathBuf> {
+        self.dir
+            .clone()
+            .filter(|d| !d.as_os_str().is_empty())
+            .or_else(default_snapshot_dir)
+    }
+}
+
+/// `snapshots` next to the config file (`%APPDATA%\FastDir\snapshots` on
+/// Windows).
+pub fn default_snapshot_dir() -> Option<PathBuf> {
+    config_path().and_then(|p| p.parent().map(|d| d.join("snapshots")))
+}
+
+/// Strictly reads only the `[snapshots]` section of a config file, for the
+/// command line (see [`load_scan_settings`]).
+pub fn load_snapshot_settings(path: Option<&std::path::Path>) -> Result<SnapshotSettings, String> {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct OnlySnapshots {
+        snapshots: SnapshotSettings,
+    }
+    let path = match path {
+        Some(p) => p.to_path_buf(),
+        None => config_path().ok_or("cannot locate the default config file")?,
+    };
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read config file {}: {e}", path.display()))?;
+    toml::from_str::<OnlySnapshots>(&text)
+        .map(|c| c.snapshots)
+        .map_err(|e| format!("invalid config file {}: {e}", path.display()))
+}
+
 /// Disabled example actions for fresh configs.
 fn default_actions() -> Vec<ActionDef> {
     ActionDef::presets()
@@ -675,6 +742,8 @@ pub struct Settings {
     pub integration: IntegrationSettings,
     /// Interface language.
     pub locale: LocaleSettings,
+    /// Scan snapshots and their retention.
+    pub snapshots: SnapshotSettings,
     /// User overrides for file-type categories (`[categories]`): category id
     /// (`video`, `images`, ...) to extension names. Overrides both move
     /// built-in extensions and add new ones.
@@ -702,6 +771,7 @@ impl Default for Settings {
             appearance: AppearanceSettings::default(),
             integration: IntegrationSettings::default(),
             locale: LocaleSettings::default(),
+            snapshots: SnapshotSettings::default(),
             categories: BTreeMap::new(),
             actions: default_actions(),
             window: None,
@@ -820,6 +890,7 @@ impl From<LegacySettings> for Settings {
             },
             integration: IntegrationSettings::default(),
             locale: LocaleSettings::default(),
+            snapshots: SnapshotSettings::default(),
             categories: BTreeMap::new(),
             actions: default_actions(),
             window: old.window,
@@ -969,6 +1040,10 @@ mod tests {
             "the list stays on the current item after a delete by default"
         );
         assert_eq!(s.updates.channel, UpdateChannel::Stable);
+        assert!(!s.snapshots.auto_save, "snapshots are opt-in in the GUI");
+        assert_eq!(s.snapshots.keep_count, 30);
+        assert_eq!(s.snapshots.max_age_days, 365);
+        assert!(s.snapshots.dir.is_none());
         assert!(
             fastdir_locale::is_supported(&s.locale.language) || s.locale.language == "system",
             "fresh default follows the OS language or falls back to English"
@@ -1070,6 +1145,12 @@ mod tests {
             },
             locale: LocaleSettings {
                 language: "es".into(),
+            },
+            snapshots: SnapshotSettings {
+                dir: Some(PathBuf::from("D:/Snapshots")),
+                auto_save: true,
+                keep_count: 12,
+                max_age_days: 0,
             },
             categories: BTreeMap::from([
                 (
@@ -1320,6 +1401,45 @@ nope",
                 .contains("invalid")
         );
         assert!(load_scan_settings(Some(&dir.join("missing.toml"))).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_settings_load_is_strict_and_defaulted() {
+        let dir = std::env::temp_dir().join(format!("fastdir-snap-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("ok.toml");
+        std::fs::write(
+            &ok,
+            "[snapshots]
+keep_count = 5
+dir = \"X:/snaps\"
+",
+        )
+        .unwrap();
+        let s = load_snapshot_settings(Some(&ok)).unwrap();
+        assert_eq!(s.keep_count, 5);
+        assert_eq!(s.max_age_days, 365, "missing keys keep their defaults");
+        assert_eq!(s.effective_dir(), Some(PathBuf::from("X:/snaps")));
+        let none = dir.join("none.toml");
+        std::fs::write(
+            &none,
+            "[scan]
+follow_junctions = true
+",
+        )
+        .unwrap();
+        assert_eq!(
+            load_snapshot_settings(Some(&none)).unwrap(),
+            SnapshotSettings::default()
+        );
+        assert!(load_snapshot_settings(Some(&dir.join("missing.toml"))).is_err());
+        // An empty `dir` means the default folder.
+        let empty = SnapshotSettings {
+            dir: Some(PathBuf::new()),
+            ..SnapshotSettings::default()
+        };
+        assert_eq!(empty.effective_dir(), default_snapshot_dir());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

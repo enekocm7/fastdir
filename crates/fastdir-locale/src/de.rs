@@ -559,6 +559,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Status",
         "list.removed_tab" => "Entfernt ({n})",
         "list.removed_empty" => "Nichts wurde entfernt",
+        "list.dups_tab" => "Duplikate",
+        "list.dups_tab_n" => "Duplikate ({n})",
+        "dups.intro" => {
+            "Sucht Dateien mit identischem Inhalt in diesem Scan. Dateien unter {size} werden übersprungen."
+        }
+        "dups.find" => "Duplikate suchen",
+        "dups.again" => "Erneut suchen",
+        "dups.hashing" => "Dateien werden verglichen: {files} gehasht, {bytes} gelesen",
+        "dups.none" => "Keine doppelten Dateien gefunden",
+        "dups.summary" => "{groups} Gruppen · {wasted} freizugeben",
+        "dups.unreadable" => "{n} Dateien konnten nicht gelesen werden",
+        "dups.group" => "{n} Kopien · {wasted} verschwendet",
+        "dups.keep" => "Behalten",
+        "dups.keep_hint" => {
+            "Die ausgewählte Kopie wird behalten (bei einer ausgewählten Gruppe die erste)"
+        }
+        "dups.recycle" => "Andere Kopien in den {trash}",
+        "dups.link" => "Andere Kopien verlinken",
+        "dups.confirm_recycle_title" => "{n} Kopien in den {trash} verschieben?",
+        "dups.confirm_recycle" => {
+            "{keep} wird behalten, die anderen {n} Kopien ({size}) werden in den {trash} verschoben."
+        }
+        "dups.confirm_link_title" => "{n} Kopien durch Hardlinks ersetzen?",
+        "dups.confirm_link" => {
+            "{keep} wird behalten, die anderen {n} Kopien werden durch Hardlinks darauf ersetzt und {size} freigegeben. Die Dateien bleiben an ihrem Ort, teilen sich aber eine Kopie der Daten: Wird eine geändert, ändern sich alle."
+        }
+        "dups.ok_link" => "Durch Hardlinks ersetzen",
+        "dups.op_linking" => "{n} Kopien werden durch Hardlinks ersetzt",
+        "dups.done_link" => "{n} Kopien durch Hardlinks ersetzt, {size} freigegeben",
+        "dups.link_failed" => "{n} Kopien konnten nicht ersetzt werden",
         "change.new" => "Neu",
         "change.grew" => "Gewachsen",
         "change.shrank" => "Geschrumpft",
@@ -580,6 +610,39 @@ pub fn get(key: &str) -> Option<&'static str> {
         "compare.err_body" => "{path} konnte nicht geöffnet werden: {error}",
         "status.compare" => "Δ {delta} ({pct}) zum gespeicherten Scan",
         "status.compare_free" => " · freier Speicher {free}",
+        "menu.growth" => "Wachstum im Zeitverlauf…",
+        "menu.save_snapshot" => "Snapshot speichern",
+        "history.title" => "Wachstum von {name}",
+        "history.loading" => "Snapshots werden gelesen…",
+        "history.saving" => "Snapshot wird gespeichert…",
+        "history.saved_title" => "Snapshot gespeichert",
+        "history.saved_body" => "Gespeichert unter {path}",
+        "history.pruned" => "Alte Snapshots entfernt: {n}",
+        "history.err_title" => "Snapshot konnte nicht gespeichert werden",
+        "history.read_err" => "Snapshots konnten nicht gelesen werden: {error}",
+        "history.no_dir" => "Der Snapshot-Ordner konnte nicht ermittelt werden.",
+        "history.empty" => "Noch kein Snapshot enthält diesen Ordner. Speichern Sie einen über … → Snapshot speichern, aktivieren Sie automatische Snapshots in den Einstellungen oder planen Sie fastdir-cli snapshot.",
+        "history.summary" => "{from} → {to}: {delta} ({pct})",
+        "history.now" => "Jetzt",
+        "history.missing" => "Nicht vorhanden",
+        "history.col_date" => "Gescannt",
+        "history.col_size" => "Größe",
+        "history.col_change" => "Änderung",
+        "history.compare" => "Vergleichen",
+        "history.open_folder" => "Snapshot-Ordner öffnen",
+        "history.save_now" => "Jetzt Snapshot speichern",
+        "history.count" => "Snapshots: {n}",
+        "set.snapshots.title" => "Snapshots",
+        "set.snapshots.caption" => "Snapshots halten fest, wie viel Platz jeder Ordner im Lauf der Zeit belegt, für … → Wachstum im Zeitverlauf. Sie liegen in {dir}.",
+        "set.snapshots.auto" => "Nach jedem Scan einen Snapshot speichern",
+        "set.snapshots.auto_cap" => "Snapshots ganzer Laufwerke können groß sein; die Grenzen unten verhindern, dass der Ordner endlos wächst.",
+        "set.snapshots.keep" => "Snapshots pro Ordner behalten",
+        "set.snapshots.keep_none" => "Unbegrenzt",
+        "set.snapshots.age" => "Snapshots entfernen, die älter sind als",
+        "set.snapshots.age_90" => "90 Tage",
+        "set.snapshots.age_365" => "1 Jahr",
+        "set.snapshots.age_none" => "Nie",
+        "set.snapshots.open" => "Ordner öffnen",
         _ => return None,
     })
 }

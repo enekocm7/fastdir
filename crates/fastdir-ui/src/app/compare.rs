@@ -45,6 +45,19 @@ impl FastDir {
         .detach();
     }
 
+    /// Compare the current tree with the saved scan at `path` (the growth
+    /// dialog's *Compare* button).
+    pub(super) fn compare_with_file(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tree.is_some() {
+            self.start_comparison(path, window, cx);
+        }
+    }
+
     /// Read `path` in the background, then diff it against the current tree.
     fn start_comparison(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         // The picker is modal, but a scan can still have started underneath.

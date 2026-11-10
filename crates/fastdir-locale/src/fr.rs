@@ -559,6 +559,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "État",
         "list.removed_tab" => "Supprimés ({n})",
         "list.removed_empty" => "Rien n'a été supprimé",
+        "list.dups_tab" => "Doublons",
+        "list.dups_tab_n" => "Doublons ({n})",
+        "dups.intro" => {
+            "Recherche les fichiers au contenu identique dans cette analyse. Les fichiers de moins de {size} sont ignorés."
+        }
+        "dups.find" => "Rechercher les doublons",
+        "dups.again" => "Relancer la recherche",
+        "dups.hashing" => "Comparaison : {files} fichiers hachés, {bytes} lus",
+        "dups.none" => "Aucun doublon trouvé",
+        "dups.summary" => "{groups} groupes · {wasted} récupérables",
+        "dups.unreadable" => "{n} fichiers n’ont pas pu être lus",
+        "dups.group" => "{n} copies · {wasted} perdus",
+        "dups.keep" => "Garder",
+        "dups.keep_hint" => {
+            "La copie sélectionnée est conservée (la première si un groupe est sélectionné)"
+        }
+        "dups.recycle" => "Autres copies vers {trash}",
+        "dups.link" => "Lier les autres copies",
+        "dups.confirm_recycle_title" => "Déplacer {n} copies vers {trash} ?",
+        "dups.confirm_recycle" => {
+            "{keep} est conservé et les {n} autres copies ({size}) sont déplacées vers {trash}."
+        }
+        "dups.confirm_link_title" => "Remplacer {n} copies par des liens physiques ?",
+        "dups.confirm_link" => {
+            "{keep} est conservé et les {n} autres copies sont remplacées par des liens physiques vers lui, ce qui libère {size}. Les fichiers restent à leur place mais partagent une seule copie des données : en modifier un les modifie tous."
+        }
+        "dups.ok_link" => "Remplacer par des liens physiques",
+        "dups.op_linking" => "Remplacement de {n} copies par des liens physiques",
+        "dups.done_link" => "{n} copies remplacées par des liens physiques, {size} libérés",
+        "dups.link_failed" => "Impossible de remplacer {n} copies",
         "change.new" => "Nouveau",
         "change.grew" => "A grandi",
         "change.shrank" => "A diminué",
@@ -580,6 +610,39 @@ pub fn get(key: &str) -> Option<&'static str> {
         "compare.err_body" => "Impossible d'ouvrir {path} : {error}",
         "status.compare" => "Δ {delta} ({pct}) par rapport au scan enregistré",
         "status.compare_free" => " · espace libre {free}",
+        "menu.growth" => "Évolution dans le temps…",
+        "menu.save_snapshot" => "Enregistrer un instantané",
+        "history.title" => "Évolution de {name}",
+        "history.loading" => "Lecture des instantanés…",
+        "history.saving" => "Enregistrement de l'instantané…",
+        "history.saved_title" => "Instantané enregistré",
+        "history.saved_body" => "Enregistré dans {path}",
+        "history.pruned" => "Anciens instantanés supprimés : {n}",
+        "history.err_title" => "Impossible d'enregistrer l'instantané",
+        "history.read_err" => "Impossible de lire les instantanés : {error}",
+        "history.no_dir" => "Le dossier des instantanés est introuvable.",
+        "history.empty" => "Aucun instantané ne contient encore ce dossier. Enregistrez-en un avec … → Enregistrer un instantané, activez les instantanés automatiques dans les Paramètres ou planifiez fastdir-cli snapshot.",
+        "history.summary" => "{from} → {to} : {delta} ({pct})",
+        "history.now" => "Maintenant",
+        "history.missing" => "Absent",
+        "history.col_date" => "Analysé",
+        "history.col_size" => "Taille",
+        "history.col_change" => "Variation",
+        "history.compare" => "Comparer",
+        "history.open_folder" => "Ouvrir le dossier des instantanés",
+        "history.save_now" => "Enregistrer un instantané maintenant",
+        "history.count" => "Instantanés : {n}",
+        "set.snapshots.title" => "Instantanés",
+        "set.snapshots.caption" => "Les instantanés mémorisent l'espace occupé par chaque dossier au fil du temps, pour … → Évolution dans le temps. Ils sont conservés dans {dir}.",
+        "set.snapshots.auto" => "Enregistrer un instantané après chaque analyse",
+        "set.snapshots.auto_cap" => "Les instantanés d'un lecteur entier peuvent être volumineux ; les limites ci-dessous empêchent le dossier de grossir sans fin.",
+        "set.snapshots.keep" => "Instantanés à conserver par dossier",
+        "set.snapshots.keep_none" => "Sans limite",
+        "set.snapshots.age" => "Supprimer les instantanés de plus de",
+        "set.snapshots.age_90" => "90 jours",
+        "set.snapshots.age_365" => "1 an",
+        "set.snapshots.age_none" => "Jamais",
+        "set.snapshots.open" => "Ouvrir le dossier",
         _ => return None,
     })
 }

@@ -559,6 +559,36 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.col_status" => "Status",
         "list.removed_tab" => "Verwijderd ({n})",
         "list.removed_empty" => "Er is niets verwijderd",
+        "list.dups_tab" => "Duplicaten",
+        "list.dups_tab_n" => "Duplicaten ({n})",
+        "dups.intro" => {
+            "Zoek bestanden met identieke inhoud in deze scan. Bestanden kleiner dan {size} worden overgeslagen."
+        }
+        "dups.find" => "Duplicaten zoeken",
+        "dups.again" => "Opnieuw zoeken",
+        "dups.hashing" => "Bestanden vergelijken: {files} gehasht, {bytes} gelezen",
+        "dups.none" => "Geen dubbele bestanden gevonden",
+        "dups.summary" => "{groups} groepen · {wasted} vrij te maken",
+        "dups.unreadable" => "{n} bestanden konden niet worden gelezen",
+        "dups.group" => "{n} kopieën · {wasted} verspild",
+        "dups.keep" => "Behouden",
+        "dups.keep_hint" => {
+            "De geselecteerde kopie blijft behouden (de eerste als een groep is geselecteerd)"
+        }
+        "dups.recycle" => "Andere kopieën naar {trash}",
+        "dups.link" => "Andere kopieën hardlinken",
+        "dups.confirm_recycle_title" => "{n} kopieën naar {trash} verplaatsen?",
+        "dups.confirm_recycle" => {
+            "{keep} blijft behouden en de andere {n} kopieën ({size}) gaan naar {trash}."
+        }
+        "dups.confirm_link_title" => "{n} kopieën vervangen door hardlinks?",
+        "dups.confirm_link" => {
+            "{keep} blijft behouden en de andere {n} kopieën worden vervangen door hardlinks ernaar, wat {size} vrijmaakt. De bestanden blijven op hun plek maar delen één kopie van de gegevens: wie er één wijzigt, wijzigt ze allemaal."
+        }
+        "dups.ok_link" => "Vervangen door hardlinks",
+        "dups.op_linking" => "{n} kopieën worden vervangen door hardlinks",
+        "dups.done_link" => "{n} kopieën vervangen door hardlinks, {size} vrijgemaakt",
+        "dups.link_failed" => "{n} kopieën konden niet worden vervangen",
         "change.new" => "Nieuw",
         "change.grew" => "Gegroeid",
         "change.shrank" => "Gekrompen",
@@ -580,6 +610,39 @@ pub fn get(key: &str) -> Option<&'static str> {
         "compare.err_body" => "Kon {path} niet openen: {error}",
         "status.compare" => "Δ {delta} ({pct}) t.o.v. opgeslagen scan",
         "status.compare_free" => " · vrije ruimte {free}",
+        "menu.growth" => "Groei in de tijd…",
+        "menu.save_snapshot" => "Momentopname opslaan",
+        "history.title" => "Groei van {name}",
+        "history.loading" => "Momentopnamen lezen…",
+        "history.saving" => "Momentopname opslaan…",
+        "history.saved_title" => "Momentopname opgeslagen",
+        "history.saved_body" => "Opgeslagen in {path}",
+        "history.pruned" => "Oude momentopnamen verwijderd: {n}",
+        "history.err_title" => "Kon de momentopname niet opslaan",
+        "history.read_err" => "Kon de momentopnamen niet lezen: {error}",
+        "history.no_dir" => "De map voor momentopnamen kon niet worden bepaald.",
+        "history.empty" => "Nog geen momentopname bevat deze map. Sla er een op via … → Momentopname opslaan, zet automatische momentopnamen aan in Instellingen of plan fastdir-cli snapshot.",
+        "history.summary" => "{from} → {to}: {delta} ({pct})",
+        "history.now" => "Nu",
+        "history.missing" => "Niet aanwezig",
+        "history.col_date" => "Gescand",
+        "history.col_size" => "Grootte",
+        "history.col_change" => "Verandering",
+        "history.compare" => "Vergelijken",
+        "history.open_folder" => "Map met momentopnamen openen",
+        "history.save_now" => "Nu momentopname opslaan",
+        "history.count" => "Momentopnamen: {n}",
+        "set.snapshots.title" => "Momentopnamen",
+        "set.snapshots.caption" => "Momentopnamen leggen vast hoeveel ruimte elke map in de loop van de tijd gebruikt, voor … → Groei in de tijd. Ze staan in {dir}.",
+        "set.snapshots.auto" => "Na elke scan een momentopname opslaan",
+        "set.snapshots.auto_cap" => "Momentopnamen van een hele schijf kunnen groot zijn; de limieten hieronder voorkomen dat de map eindeloos groeit.",
+        "set.snapshots.keep" => "Momentopnamen per map bewaren",
+        "set.snapshots.keep_none" => "Geen limiet",
+        "set.snapshots.age" => "Momentopnamen verwijderen ouder dan",
+        "set.snapshots.age_90" => "90 dagen",
+        "set.snapshots.age_365" => "1 jaar",
+        "set.snapshots.age_none" => "Nooit",
+        "set.snapshots.open" => "Map openen",
         _ => return None,
     })
 }
