@@ -244,6 +244,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "Nie będzie już przypomnień o v{version}.",
         "upd.skip_title" => "Pominięto wersję",
         "upd.no_asset" => "To wydanie nie zawiera pliku do pobrania dla Twojego typu instalacji.",
+        "upd.use_package_manager" => "FastDir został zainstalowany przez menedżer pakietów, więc zaktualizuj go w nim (apt, dnf, pacman, nix…).",
+        "upd.manual_download" => "Pobierz nową wersję ze strony wydań: https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "Aktualizacja nie powiodła się",
         "upd.updating_title" => "Aktualizowanie FastDir",
         "upd.cancelled_body" => "Aktualizacja została anulowana.",

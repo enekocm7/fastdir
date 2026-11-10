@@ -176,11 +176,14 @@ impl Release {
         is_newer(CURRENT_VERSION, &self.version.to_string())
     }
 
-    /// The asset to download for this kind of install.
+    /// The asset to download for this kind of install. `None` for installs
+    /// FastDir does not update itself (see [`InstallKind::self_updates`]).
     pub fn asset_for(&self, kind: InstallKind) -> Option<&Asset> {
         let suffix = match kind {
             InstallKind::Installed { .. } => "-setup-x64.exe",
             InstallKind::Portable => "-portable-x64.zip",
+            InstallKind::AppImage => "-x86_64.AppImage",
+            InstallKind::PackageManager | InstallKind::Manual => return None,
         };
         self.assets
             .iter()
@@ -290,12 +293,73 @@ fn pick_newest(raws: &[RawRelease]) -> Option<Release> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstallKind {
-    /// Installed by the Inno Setup installer.
+    /// Installed by the Inno Setup installer (Windows).
     Installed { all_users: bool },
-    /// Loose exe (unzipped portable build).
+    /// Loose exe (unzipped Windows portable build).
     Portable,
+    /// Linux AppImage: the file at `$APPIMAGE` is replaced in place.
+    AppImage,
+    /// Owned by a package manager (deb, rpm, AUR, Nix, Flatpak, Snap,
+    /// Homebrew). FastDir never overwrites these binaries; the user updates
+    /// through the package manager instead.
+    PackageManager,
+    /// Unpacked Linux / macOS tarball: no self-update, the user downloads the
+    /// new release by hand.
+    Manual,
 }
 
+impl InstallKind {
+    /// Whether "Update now" can download and apply the update itself.
+    pub fn self_updates(self) -> bool {
+        !matches!(self, Self::PackageManager | Self::Manual)
+    }
+}
+
+#[cfg(not(windows))]
+pub fn detect_kind() -> InstallKind {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+    let appimage = var("APPIMAGE").map(PathBuf::from);
+    let sandboxed = var("FLATPAK_ID").is_some() || var("SNAP").is_some();
+    let exe = std::env::current_exe()
+        .ok()
+        .map(|exe| fs::canonicalize(&exe).unwrap_or(exe));
+    classify_unix(exe.as_deref(), appimage.as_deref(), sandboxed)
+}
+
+/// Install kind of a non-Windows build from where it runs. `appimage` is the
+/// `$APPIMAGE` variable the AppImage runtime sets; `sandboxed` is true inside
+/// Flatpak or Snap.
+#[cfg_attr(windows, allow(dead_code))]
+fn classify_unix(exe: Option<&Path>, appimage: Option<&Path>, sandboxed: bool) -> InstallKind {
+    if cfg!(target_os = "linux") && appimage.is_some_and(Path::is_absolute) {
+        return InstallKind::AppImage;
+    }
+    if sandboxed {
+        return InstallKind::PackageManager;
+    }
+    let Some(exe) = exe else {
+        return InstallKind::Manual;
+    };
+    // Directories owned by dpkg / rpm / pacman, Nix, Snap and Homebrew.
+    // `/usr/local` (outside Homebrew's Cellar) and `/opt` are where people
+    // unpack tarballs by hand.
+    const MANAGED: [&str; 6] = [
+        "/usr",
+        "/nix/store",
+        "/run/current-system",
+        "/snap",
+        "/opt/homebrew",
+        "/home/linuxbrew/.linuxbrew",
+    ];
+    let by_hand = exe.starts_with("/usr/local") && !exe.starts_with("/usr/local/Cellar");
+    if MANAGED.iter().any(|root| exe.starts_with(root)) && !by_hand {
+        InstallKind::PackageManager
+    } else {
+        InstallKind::Manual
+    }
+}
+
+#[cfg(windows)]
 pub fn detect_kind() -> InstallKind {
     let Ok(exe) = std::env::current_exe() else {
         return InstallKind::Portable;
@@ -479,7 +543,14 @@ fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
         .map(|_| ())
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    // Own process group, so the new FastDir is not tied to this one.
+    cmd.process_group(0).spawn().map(|_| ())
+}
+
+#[cfg(not(any(windows, unix)))]
 fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
     cmd.spawn().map(|_| ())
 }
@@ -509,7 +580,47 @@ pub fn apply(downloaded: &Path, kind: InstallKind) -> Result<(), UpdateError> {
             discard_downloads();
             Ok(())
         }
+        InstallKind::AppImage => {
+            let target = std::env::var_os("APPIMAGE")
+                .map(PathBuf::from)
+                .ok_or_else(|| UpdateError::Other("$APPIMAGE is not set".into()))?;
+            replace_appimage(downloaded, &target)?;
+            discard_downloads();
+            Ok(())
+        }
+        InstallKind::PackageManager | InstallKind::Manual => Err(UpdateError::Other(
+            "this install is not updated by FastDir itself".into(),
+        )),
     }
+}
+
+/// Swaps the AppImage at `target` for the verified download and starts it.
+/// The running AppImage keeps its (now unlinked) file open, so replacing it
+/// with a rename is safe; on failure the old file is left untouched.
+fn replace_appimage(downloaded: &Path, target: &Path) -> Result<(), UpdateError> {
+    // Copy next to the target first: the download sits in the temp dir,
+    // often another file system, and only a same-directory rename is atomic.
+    let new = sibling(target, ".new");
+    let staged = fs::copy(downloaded, &new)
+        .and_then(|_| set_executable(&new))
+        .and_then(|()| fs::rename(&new, target));
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&new);
+        return Err(e.into());
+    }
+    spawn_detached(&mut std::process::Command::new(target))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_executable(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+}
+
+#[cfg(not(unix))]
+fn set_executable(_: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn apply_portable(zip_path: &Path) -> Result<(), UpdateError> {
@@ -576,6 +687,9 @@ mod tests {
                 "assets": [
                     {{"name": "FastDir-0.2.0-setup-x64.exe", "browser_download_url": "https://x/setup.exe"}},
                     {{"name": "FastDir-0.2.0-portable-x64.zip", "browser_download_url": "https://x/p.zip"}},
+                    {{"name": "FastDir-0.2.0-linux-x64.tar.gz", "browser_download_url": "https://x/l.tar.gz"}},
+                    {{"name": "FastDir-0.2.0-amd64.deb", "browser_download_url": "https://x/f.deb"}},
+                    {{"name": "FastDir-0.2.0-x86_64.AppImage", "browser_download_url": "https://x/f.AppImage"}},
                     {{"name": "SHA256SUMS.txt", "browser_download_url": "https://x/sums"}}
                 ]
             }}"#
@@ -613,7 +727,108 @@ mod tests {
             rel.asset_for(InstallKind::Portable).unwrap().name,
             "FastDir-0.2.0-portable-x64.zip"
         );
+        assert_eq!(
+            rel.asset_for(InstallKind::AppImage).unwrap().name,
+            "FastDir-0.2.0-x86_64.AppImage"
+        );
+        // Packaged and hand-unpacked installs never download anything, in
+        // particular not the Windows zip.
+        assert!(rel.asset_for(InstallKind::PackageManager).is_none());
+        assert!(rel.asset_for(InstallKind::Manual).is_none());
         assert_eq!(rel.sums_asset().unwrap().name, "SHA256SUMS.txt");
+    }
+
+    #[test]
+    fn self_update_support() {
+        assert!(InstallKind::Installed { all_users: true }.self_updates());
+        assert!(InstallKind::Portable.self_updates());
+        assert!(InstallKind::AppImage.self_updates());
+        assert!(!InstallKind::PackageManager.self_updates());
+        assert!(!InstallKind::Manual.self_updates());
+    }
+
+    #[test]
+    fn package_managed_installs_are_never_applied() {
+        let path = Path::new("unused");
+        assert!(apply(path, InstallKind::PackageManager).is_err());
+        assert!(apply(path, InstallKind::Manual).is_err());
+    }
+
+    #[test]
+    fn classifies_unix_installs() {
+        let kind = |exe: &str| classify_unix(Some(Path::new(exe)), None, false);
+        // deb / rpm / AUR, Nix, Snap, Homebrew.
+        assert_eq!(kind("/usr/bin/fastdir"), InstallKind::PackageManager);
+        assert_eq!(
+            kind("/usr/lib/fastdir/fastdir"),
+            InstallKind::PackageManager
+        );
+        assert_eq!(
+            kind("/nix/store/abc-fastdir-0.3.2/bin/fastdir"),
+            InstallKind::PackageManager
+        );
+        assert_eq!(
+            kind("/snap/fastdir/12/bin/fastdir"),
+            InstallKind::PackageManager
+        );
+        assert_eq!(
+            kind("/opt/homebrew/bin/fastdir"),
+            InstallKind::PackageManager
+        );
+        assert_eq!(
+            kind("/usr/local/Cellar/fastdir/0.3.2/bin/fastdir"),
+            InstallKind::PackageManager
+        );
+        // Unpacked by hand.
+        assert_eq!(kind("/usr/local/bin/fastdir"), InstallKind::Manual);
+        assert_eq!(kind("/opt/fastdir/FastDir"), InstallKind::Manual);
+        assert_eq!(kind("/home/me/Downloads/FastDir"), InstallKind::Manual);
+        assert_eq!(kind("/usrlocal/FastDir"), InstallKind::Manual);
+        assert_eq!(classify_unix(None, None, false), InstallKind::Manual);
+        // Flatpak / Snap sandboxes are package-managed wherever the exe is.
+        assert_eq!(
+            classify_unix(Some(Path::new("/app/bin/fastdir")), None, true),
+            InstallKind::PackageManager
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn appimage_wins_over_the_mount_path() {
+        // Inside an AppImage the exe lives in the runtime's mount point.
+        let exe = Path::new("/tmp/.mount_FastDiXyz/usr/bin/fastdir");
+        let image = Path::new("/home/me/Apps/FastDir-0.3.2-x86_64.AppImage");
+        assert_eq!(
+            classify_unix(Some(exe), Some(image), false),
+            InstallKind::AppImage
+        );
+        assert_eq!(
+            classify_unix(Some(exe), Some(Path::new("relative")), false),
+            InstallKind::Manual
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaces_appimage_in_place() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir =
+            std::env::temp_dir().join(format!("fastdir-appimage-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        // A tiny script stands in for the AppImage so the relaunch succeeds.
+        let script = "#!/bin/sh\nexit 0\n";
+        let download = dir.join("download.AppImage");
+        fs::write(&download, script).unwrap();
+        let target = dir.join("FastDir.AppImage");
+        fs::write(&target, "old").unwrap();
+        replace_appimage(&download, &target).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), script);
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(!sibling(&target, ".new").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

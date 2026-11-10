@@ -246,6 +246,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "将不再提醒 v{version}。",
         "upd.skip_title" => "已跳过版本",
         "upd.no_asset" => "此版本没有适用于你的安装类型的下载。",
+        "upd.use_package_manager" => "FastDir 是通过软件包管理器安装的，请在那里更新（apt、dnf、pacman、nix 等）。",
+        "upd.manual_download" => "请从发布页面下载新版本：https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "更新失败",
         "upd.updating_title" => "正在更新 FastDir",
         "upd.cancelled_body" => "更新已取消。",

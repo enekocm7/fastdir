@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Headless command line interface and MCP server for FastDir"
 repository.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "fastdir-cli"

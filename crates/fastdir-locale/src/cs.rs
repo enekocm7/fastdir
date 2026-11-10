@@ -244,6 +244,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "Na verzi v{version} už nebudete upozorněni.",
         "upd.skip_title" => "Verze přeskočena",
         "upd.no_asset" => "Toto vydání neobsahuje stažení pro váš typ instalace.",
+        "upd.use_package_manager" => "FastDir byl nainstalován správcem balíčků, aktualizujte ho proto tam (apt, dnf, pacman, nix…).",
+        "upd.manual_download" => "Stáhněte novou verzi ze stránky vydání: https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "Aktualizace se nezdařila",
         "upd.updating_title" => "Aktualizace FastDir",
         "upd.cancelled_body" => "Aktualizace byla zrušena.",

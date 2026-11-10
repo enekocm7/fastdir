@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "GitHub release check, verified download and self-update for FastDir"
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
 ureq.workspace = true

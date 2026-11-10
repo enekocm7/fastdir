@@ -1,0 +1,26 @@
+# Maintainer: enekocm7 <https://github.com/enekocm7>
+#
+# Template for the AUR `fastdir-bin` package. The release workflow fills in
+# pkgver and the checksum and pushes it to the AUR for every stable tag.
+pkgname=fastdir-bin
+pkgver=0.3.2
+pkgrel=1
+pkgdesc="Blazing fast disk usage analyzer with a WinDirStat-style treemap (GUI and CLI)"
+arch=('x86_64')
+url="https://github.com/enekocm7/fastdir"
+license=('GPL-3.0-or-later')
+depends=('glibc' 'gcc-libs' 'fontconfig' 'freetype2' 'libxcb' 'libxkbcommon'
+         'libxkbcommon-x11' 'wayland' 'vulkan-icd-loader')
+optdepends=('vulkan-driver: hardware-accelerated rendering')
+provides=('fastdir')
+conflicts=('fastdir')
+options=('!strip' '!debug')
+source=("FastDir-${pkgver}-amd64.deb::${url}/releases/download/v${pkgver}/FastDir-${pkgver}-amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+    # makepkg has already unpacked the .deb into control.tar.* and data.tar.*.
+    bsdtar -xf data.tar.* -C "$pkgdir"
+    # Debian's copyright file; Arch keeps the license in /usr/share/licenses.
+    rm -f "$pkgdir/usr/share/doc/fastdir/copyright"
+}

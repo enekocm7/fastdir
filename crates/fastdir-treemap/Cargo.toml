@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Squarified cushion treemap layout and rendering for FastDir"
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
 fastdir-core.workspace = true

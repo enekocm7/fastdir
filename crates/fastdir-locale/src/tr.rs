@@ -228,6 +228,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "v{version} hakkında bir daha hatırlatılmayacak.",
         "upd.skip_title" => "Sürüm atlandı",
         "upd.no_asset" => "Bu sürümde kurulum türünüze uygun indirme yok.",
+        "upd.use_package_manager" => "FastDir paket yöneticinizle kuruldu, bu yüzden oradan güncelleyin (apt, dnf, pacman, nix…).",
+        "upd.manual_download" => "Yeni sürümü Sürümler sayfasından indirin: https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "Güncelleme başarısız oldu",
         "upd.updating_title" => "FastDir güncelleniyor",
         "upd.cancelled_body" => "Güncelleme iptal edildi.",
