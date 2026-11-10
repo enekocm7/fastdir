@@ -109,6 +109,7 @@ impl FastDir {
         self.reset_duplicates();
         self.reset_cleanup();
         self.tree = Some(tree.clone());
+        self.sync_basket();
         self.home_drives = true;
         self.last_scan = None;
         self.last_errors = 0;

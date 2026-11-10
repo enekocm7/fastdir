@@ -155,6 +155,12 @@ culprit? Rename, move, recycle or delete it right there.
   the treemap, where every selected cell is outlined). The status bar shows
   the count and total size; move / recycle / delete run on the whole
   selection after one confirmation.
+- **Deletion basket**: press **Ctrl+B** to collect the selection while you
+  browse (across folders, tabs, filters and rescans) — the toolbar button
+  shows the item count and total size. **Ctrl+Shift+B** (or the toolbar
+  button) opens the basket to review the list, take items out, empty it,
+  then recycle or delete everything in one confirmed step. Items inside a
+  collected folder are covered by it and never counted or deleted twice.
 - **Light, dark and system themes, plus deep settings** (`Ctrl+,`). The
   *System* option follows the Windows light / dark setting. Everything is
   remembered between launches: window geometry, panel sizes, sort order, the
@@ -795,6 +801,8 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 | Ctrl+M | Move to… |
 | Del | Move to Recycle Bin |
 | Shift+Del | Delete permanently |
+| Ctrl+B | Add the selection to the deletion basket (or take it out) |
+| Ctrl+Shift+B | Open the deletion basket |
 | F5 | Refresh the selected folder |
 | Ctrl+R | Rescan everything |
 | Ctrl+O | Scan a folder… |
