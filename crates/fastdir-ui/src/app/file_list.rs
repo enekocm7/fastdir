@@ -614,7 +614,13 @@ impl FastDir {
                         let mode = ClickMode::from_modifiers(&ev.modifiers);
                         this.click_row(ix, mode, cx);
                         if ev.click_count == 2 && mode == ClickMode::Plain {
-                            this.set_expanded(ix, None, cx);
+                            // Pseudo-items have no children; double-clicking
+                            // `<Unknown>` explains it, `<Shadow copies>` opens
+                            // System Protection.
+                            let path = this.rows.get(ix).map(|r| r.path.clone());
+                            if !path.is_some_and(|p| this.open_pseudo_item(&p, window, cx)) {
+                                this.set_expanded(ix, None, cx);
+                            }
                         }
                     }),
                 )

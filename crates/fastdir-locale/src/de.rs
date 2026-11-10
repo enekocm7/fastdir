@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "FastDir mit erhöhten Rechten neu starten, um geschützte Ordner zu scannen"
         }
+        "banner.show_unreadable" => "Ordner anzeigen",
+        "unreadable.title" => "Nicht lesbare Ordner",
+        "unreadable.body" => {
+            "{n} Ordner konnten nicht gelesen werden; ihr Inhalt fehlt im Scan und zählt als unbekannter Speicher."
+        }
+        "unreadable.admin_hint" => "Starten Sie FastDir als Administrator, um sie einzubeziehen.",
+        "unreadable.shadow_hint" => {
+            "Wiederherstellungspunkte (Schattenkopien) werden nur gemessen, wenn FastDir als Administrator läuft."
+        }
+        "unreadable.windows_skipped" => {
+            "Der Windows-Ordner wurde laut Scan-Einstellungen übersprungen; seine Größe zählt als unbekannter Speicher."
+        }
         "banner.elev_cancelled_title" => "Erhöhung abgebrochen",
         "banner.elev_cancelled_body" => {
             "Ohne erhöhte Rechte fortfahren — geschützte Ordner werden übersprungen."
@@ -271,6 +283,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Dateien",
         "list.free_space" => "<Freier Speicherplatz>",
         "list.unknown" => "<Unbekannt>",
+        "list.ntfs_metadata" => "<NTFS-Metadaten>",
+        "list.shadow_copies" => "<Schattenkopien>",
         "tree.empty" => "Die Treemap erscheint hier nach einem Scan",
         "tree.rendering" => "Rendere Treemap…",
         "tree.zoom_hint" => "Z Vergrößern · Shift+Z Verkleinern",

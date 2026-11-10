@@ -89,13 +89,33 @@ pub enum NodeKind {
     File = 1,
     /// Pseudo-item for a drive scan: bytes Windows reports as free.
     FreeSpace = 2,
-    /// Pseudo-item for a drive scan: used bytes minus scanned bytes.
+    /// Pseudo-item for a drive scan: used bytes the scan could not attribute
+    /// to a file. Both `<Unknown>` (the unexplained remainder) and the
+    /// measured buckets split out of it (`<NTFS metadata>`) have this kind;
+    /// their names tell them apart.
     Unknown = 3,
 }
 
 /// Display names for the drive pseudo-items (WinDirStat style).
 pub const FREE_SPACE_NAME: &str = "<Free space>";
 pub const UNKNOWN_NAME: &str = "<Unknown>";
+/// Drive pseudo-item (of kind [`NodeKind::Unknown`]) for the NTFS metadata
+/// files (`$MFT` and friends) that a directory listing never returns.
+pub const NTFS_METADATA_NAME: &str = "<NTFS metadata>";
+/// Drive pseudo-item (of kind [`NodeKind::Unknown`]) for the volume shadow
+/// copy storage (restore points) in `System Volume Information`.
+pub const SHADOW_COPIES_NAME: &str = "<Shadow copies>";
+
+/// Used space measured outside the scan, split out of `<Unknown>` into its
+/// own pseudo-items by [`Tree::attach_volume_breakdown`]. `0` means "not
+/// measured" and adds no item.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UnknownBreakdown {
+    /// NTFS metadata files (`$MFT`, ...): `<NTFS metadata>`.
+    pub ntfs_metadata: u64,
+    /// Shadow copy storage on this volume: `<Shadow copies>`.
+    pub shadow_copies: u64,
+}
 
 /// Longest name a node can hold, in UTF-8 bytes. File-system names are at
 /// most 255 UTF-16 units (765 UTF-8 bytes); only an unusually long scan root
@@ -1692,6 +1712,15 @@ impl Tree {
     /// OS at scan time; `total == 0` means "not a drive" and does nothing.
     /// Only positive entries are added. Re-attaching replaces old entries.
     pub fn attach_volume_info(&mut self, total: u64, free: u64) {
+        self.attach_volume_breakdown(total, free, UnknownBreakdown::default());
+    }
+
+    /// [`Self::attach_volume_info`], also splitting the measured buckets of
+    /// `breakdown` (see [`crate::drives::unknown_breakdown`]) out of
+    /// `<Unknown>` into their own items. Buckets are taken in order and each
+    /// is capped at what is still unattributed, so the volume total stays
+    /// exact and `<Unknown>` keeps only the remainder.
+    pub fn attach_volume_breakdown(&mut self, total: u64, free: u64, breakdown: UnknownBreakdown) {
         if total == 0 {
             return;
         }
@@ -1707,10 +1736,20 @@ impl Tree {
         self.finalize(Slot::Root);
         let scanned = self.root().size;
         let used = total.saturating_sub(free);
-        let unknown = used.saturating_sub(scanned);
+        let unattributed = used.saturating_sub(scanned);
+        let mut left = unattributed;
+        let mut take = |bytes: u64| {
+            let taken = bytes.min(left);
+            left -= taken;
+            taken
+        };
+        let metadata = take(breakdown.ntfs_metadata);
+        let shadow = take(breakdown.shadow_copies);
         for (kind, name, size) in [
             (NodeKind::FreeSpace, FREE_SPACE_NAME, free),
-            (NodeKind::Unknown, UNKNOWN_NAME, unknown),
+            (NodeKind::Unknown, NTFS_METADATA_NAME, metadata),
+            (NodeKind::Unknown, SHADOW_COPIES_NAME, shadow),
+            (NodeKind::Unknown, UNKNOWN_NAME, left),
         ] {
             if size > 0 {
                 let mut node = Node::new(kind, size, size, 0);
@@ -1723,6 +1762,47 @@ impl Tree {
             self.finalize(Slot::Root);
             self.generation += 1;
         }
+    }
+
+    /// The pseudo-item of `kind` called `name` under the root, if present.
+    fn special_named(&self, kind: NodeKind, name: &str) -> Option<&Node> {
+        self.children(self.root())
+            .iter()
+            .find(|c| c.kind() == kind && self.name(c) == name)
+    }
+
+    /// Index paths of every folder that could not be read (access denied,
+    /// etc.), in tree order. Their contents are missing from the scan, which
+    /// on a drive scan is a large part of `<Unknown>`.
+    pub fn unreadable_dirs(&self) -> Vec<NodePath> {
+        self.unreadable_dirs_in(&[])
+    }
+
+    /// [`Self::unreadable_dirs`] limited to the subtree at `path` (which is
+    /// included itself when unreadable). Empty when `path` does not exist.
+    pub fn unreadable_dirs_in(&self, path: &[u32]) -> Vec<NodePath> {
+        let mut out = Vec::new();
+        let Some(start) = self.get(path) else {
+            return out;
+        };
+        let mut stack: Vec<(&Node, NodePath)> = vec![(start, path.to_vec())];
+        while let Some((node, p)) = stack.pop() {
+            if !node.is_dir() {
+                continue;
+            }
+            if node.error() {
+                out.push(p.clone());
+            }
+            // Push in reverse so children pop in list order.
+            for (i, child) in self.children(node).iter().enumerate().rev() {
+                if child.is_dir() {
+                    let mut cp = p.clone();
+                    cp.push(i as u32);
+                    stack.push((child, cp));
+                }
+            }
+        }
+        out
     }
 
     fn special(&self, kind: NodeKind) -> Option<&Node> {
@@ -1761,9 +1841,32 @@ impl Tree {
         self.special(NodeKind::FreeSpace).map(|c| c.size)
     }
 
-    /// Bytes in `<Unknown>`, if present.
+    /// Bytes in `<Unknown>` (the unexplained remainder), if present.
     pub fn unknown_bytes(&self) -> Option<u64> {
-        self.special(NodeKind::Unknown).map(|c| c.size)
+        self.special_named(NodeKind::Unknown, UNKNOWN_NAME)
+            .map(|c| c.size)
+    }
+
+    /// Bytes in `<NTFS metadata>`, if present.
+    pub fn ntfs_metadata_bytes(&self) -> Option<u64> {
+        self.special_named(NodeKind::Unknown, NTFS_METADATA_NAME)
+            .map(|c| c.size)
+    }
+
+    /// Bytes in `<Shadow copies>`, if present.
+    pub fn shadow_copy_bytes(&self) -> Option<u64> {
+        self.special_named(NodeKind::Unknown, SHADOW_COPIES_NAME)
+            .map(|c| c.size)
+    }
+
+    /// Used bytes the scan could not attribute to a file: `<Unknown>` plus
+    /// every bucket split out of it.
+    pub fn unattributed_bytes(&self) -> u64 {
+        self.children(self.root())
+            .iter()
+            .filter(|c| c.kind() == NodeKind::Unknown)
+            .map(|c| c.size)
+            .sum()
     }
 
     /// Real scanned bytes (excluding pseudo-items).
@@ -1788,11 +1891,11 @@ impl Tree {
         self.root().disk_size.saturating_sub(pseudo)
     }
 
-    /// Used bytes on the volume (scanned + unknown), or the root size when
-    /// this is not a drive scan.
+    /// Used bytes on the volume (scanned + unattributed), or the root size
+    /// when this is not a drive scan.
     pub fn used_bytes(&self) -> u64 {
         if self.is_drive_scan() {
-            self.scanned_bytes() + self.unknown_bytes().unwrap_or(0)
+            self.scanned_bytes() + self.unattributed_bytes()
         } else {
             self.root().size
         }
@@ -2295,6 +2398,117 @@ mod tests {
         assert_eq!(tree.free_bytes(), Some(100));
         assert_eq!(tree.unknown_bytes(), Some(150));
         assert_eq!(tree.children(tree.root()).len(), 4);
+    }
+
+    #[test]
+    fn ntfs_metadata_is_split_out_of_unknown() {
+        let mut tree = sample_tree(); // scanned = 50
+        tree.attach_volume_breakdown(
+            200,
+            100,
+            UnknownBreakdown {
+                ntfs_metadata: 30,
+                shadow_copies: 0,
+            },
+        );
+        // used = 100, unattributed = 50: 30 metadata + 20 unknown.
+        assert_eq!(tree.ntfs_metadata_bytes(), Some(30));
+        assert_eq!(tree.unknown_bytes(), Some(20));
+        assert_eq!(tree.unattributed_bytes(), 50);
+        assert_eq!(tree.used_bytes(), 100);
+        assert_eq!(tree.root().size, 200);
+        let meta = tree
+            .children(tree.root())
+            .iter()
+            .find(|c| tree.name(c) == NTFS_METADATA_NAME)
+            .unwrap();
+        assert!(meta.is_special());
+        assert_eq!(meta.kind(), NodeKind::Unknown);
+
+        // Metadata never exceeds the unattributed bytes: no `<Unknown>` left.
+        tree.attach_volume_breakdown(
+            200,
+            100,
+            UnknownBreakdown {
+                ntfs_metadata: 500,
+                shadow_copies: 0,
+            },
+        );
+        assert_eq!(tree.ntfs_metadata_bytes(), Some(50));
+        assert_eq!(tree.unknown_bytes(), None);
+        assert_eq!(tree.root().size, 200);
+        assert_eq!(tree.children(tree.root()).len(), 4);
+
+        // Re-attaching without metadata drops the bucket again.
+        tree.attach_volume_info(200, 100);
+        assert_eq!(tree.ntfs_metadata_bytes(), None);
+        assert_eq!(tree.unknown_bytes(), Some(50));
+    }
+
+    #[test]
+    fn shadow_copies_take_what_metadata_leaves() {
+        let mut tree = sample_tree(); // scanned = 50
+        tree.attach_volume_breakdown(
+            200,
+            100,
+            UnknownBreakdown {
+                ntfs_metadata: 10,
+                shadow_copies: 25,
+            },
+        );
+        // unattributed 50 = 10 metadata + 25 shadow + 15 unknown.
+        assert_eq!(tree.ntfs_metadata_bytes(), Some(10));
+        assert_eq!(tree.shadow_copy_bytes(), Some(25));
+        assert_eq!(tree.unknown_bytes(), Some(15));
+        assert_eq!(tree.used_bytes(), 100);
+
+        // Shadow storage is capped by what metadata left over.
+        tree.attach_volume_breakdown(
+            200,
+            100,
+            UnknownBreakdown {
+                ntfs_metadata: 40,
+                shadow_copies: 25,
+            },
+        );
+        assert_eq!(tree.ntfs_metadata_bytes(), Some(40));
+        assert_eq!(tree.shadow_copy_bytes(), Some(10));
+        assert_eq!(tree.unknown_bytes(), None);
+        assert_eq!(tree.root().size, 200);
+    }
+
+    #[test]
+    fn unreadable_dirs_lists_error_folders_in_order() {
+        let mut arena = Arena::default();
+        let mut denied = DirBuilder::new(0);
+        denied.set_error();
+        let denied = denied.commit(&mut arena);
+        let mut inner_denied = DirBuilder::new(0);
+        inner_denied.set_error();
+        let inner_denied = inner_denied.commit(&mut arena);
+        let mut ok = DirBuilder::new(0);
+        ok.add_file("f.txt", 5, 5, 0);
+        ok.add_dir("locked", inner_denied);
+        let ok = ok.commit(&mut arena);
+        let mut root = DirBuilder::new(0);
+        root.add_dir("ok", ok);
+        root.add_dir("denied", denied);
+        let root = root.commit(&mut arena);
+        let mut tree = Tree::new(Subtree::new(arena, "r", root), PathBuf::from("/r"));
+        tree.attach_volume_info(100, 10);
+
+        let paths: Vec<PathBuf> = tree
+            .unreadable_dirs()
+            .iter()
+            .map(|p| tree.fs_path(p).unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![PathBuf::from("/r/ok/locked"), PathBuf::from("/r/denied")]
+        );
+        let ok = tree.find(Path::new("/r/ok")).unwrap();
+        assert_eq!(tree.unreadable_dirs_in(&ok).len(), 1);
+        assert!(tree.unreadable_dirs_in(&[99]).is_empty());
     }
 
     #[test]

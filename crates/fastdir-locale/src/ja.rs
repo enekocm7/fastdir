@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "FastDir を昇格して再起動し、保護されたフォルダーをスキャンできるようにします"
         }
+        "banner.show_unreadable" => "フォルダーを表示",
+        "unreadable.title" => "読み取れないフォルダー",
+        "unreadable.body" => {
+            "{n} 個のフォルダーを読み取れませんでした。その内容はスキャンに含まれず、不明な領域として数えられます。"
+        }
+        "unreadable.admin_hint" => "含めるには FastDir を管理者として実行してください。",
+        "unreadable.shadow_hint" => {
+            "復元ポイント (シャドウ コピー) は FastDir を管理者として実行した場合のみ計測されます。"
+        }
+        "unreadable.windows_skipped" => {
+            "スキャン設定により Windows フォルダーはスキップされたため、そのサイズは不明な領域として数えられます。"
+        }
         "banner.elev_cancelled_title" => "昇格はキャンセルされました",
         "banner.elev_cancelled_body" => {
             "昇格なしで続行します — 保護されたフォルダーは除外されます。"
@@ -273,6 +285,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "ファイル数",
         "list.free_space" => "<空き領域>",
         "list.unknown" => "<不明>",
+        "list.ntfs_metadata" => "<NTFS メタデータ>",
+        "list.shadow_copies" => "<シャドウ コピー>",
         "tree.empty" => "スキャン後にツリーマップがここに表示されます",
         "tree.rendering" => "ツリーマップを描画中…",
         "tree.zoom_hint" => "Z 拡大 · Shift+Z 縮小",

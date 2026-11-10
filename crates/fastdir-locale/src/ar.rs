@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "أعد تشغيل FastDir بصلاحيات مرتفعة حتى يمكن فحص المجلدات المحمية"
         }
+        "banner.show_unreadable" => "إظهار المجلدات",
+        "unreadable.title" => "مجلدات غير قابلة للقراءة",
+        "unreadable.body" => {
+            "تعذّرت قراءة {n} من المجلدات، لذا محتواها غير موجود في الفحص ويُحتسب مساحةً غير معروفة."
+        }
+        "unreadable.admin_hint" => "شغّل FastDir كمسؤول لتضمينها.",
+        "unreadable.shadow_hint" => {
+            "لا تُقاس نقاط الاستعادة (النسخ الظلية) إلا عند تشغيل FastDir كمسؤول."
+        }
+        "unreadable.windows_skipped" => {
+            "تم تخطي مجلد Windows وفق إعدادات الفحص، لذا يُحتسب حجمه مساحةً غير معروفة."
+        }
         "banner.elev_cancelled_title" => "تم إلغاء الرفع",
         "banner.elev_cancelled_body" => {
             "المتابعة دون صلاحيات مرتفعة — سيتم تخطي المجلدات المحمية."
@@ -273,6 +285,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "الملفات",
         "list.free_space" => "<مساحة حرة>",
         "list.unknown" => "<غير معروف>",
+        "list.ntfs_metadata" => "<بيانات NTFS الوصفية>",
+        "list.shadow_copies" => "<النسخ الظلية>",
         "tree.empty" => "تظهر خريطة الشجرة هنا بعد الفحص",
         "tree.rendering" => "جارٍ رسم خريطة الشجرة…",
         "tree.zoom_hint" => "Z للتكبير · Shift+Z للتصغير",

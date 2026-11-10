@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Relancer FastDir avec élévation pour analyser les dossiers protégés"
         }
+        "banner.show_unreadable" => "Afficher les dossiers",
+        "unreadable.title" => "Dossiers illisibles",
+        "unreadable.body" => {
+            "{n} dossiers n'ont pas pu être lus ; leur contenu manque à l'analyse et est compté comme espace inconnu."
+        }
+        "unreadable.admin_hint" => "Lancez FastDir en tant qu'administrateur pour les inclure.",
+        "unreadable.shadow_hint" => {
+            "Les points de restauration (clichés instantanés) ne sont mesurés que si FastDir s'exécute en tant qu'administrateur."
+        }
+        "unreadable.windows_skipped" => {
+            "Le dossier Windows a été ignoré selon les réglages d'analyse ; sa taille est comptée comme espace inconnu."
+        }
         "banner.elev_cancelled_title" => "Élévation annulée",
         "banner.elev_cancelled_body" => {
             "Analyse sans élévation — les dossiers protégés seront ignorés."
@@ -271,6 +283,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Fichiers",
         "list.free_space" => "<Espace libre>",
         "list.unknown" => "<Inconnu>",
+        "list.ntfs_metadata" => "<Métadonnées NTFS>",
+        "list.shadow_copies" => "<Clichés instantanés>",
         "tree.empty" => "Le treemap apparaît ici après une analyse",
         "tree.rendering" => "Rendu du treemap…",
         "tree.zoom_hint" => "Z zoom avant · Shift+Z zoom arrière",

@@ -727,6 +727,27 @@ mod tests {
     }
 
     #[test]
+    fn json_round_trips_ntfs_metadata() {
+        let mut tree = sample_tree(); // scanned 50
+        tree.attach_volume_breakdown(
+            100,
+            40,
+            crate::model::UnknownBreakdown {
+                ntfs_metadata: 4,
+                shadow_copies: 3,
+            },
+        );
+        let mut buf = Vec::new();
+        export_json(&tree, &[], &ExportOptions::default(), &mut buf).unwrap();
+        let back = import_json(buf.as_slice()).unwrap();
+        assert_eq!(back.ntfs_metadata_bytes(), Some(4));
+        assert_eq!(back.shadow_copy_bytes(), Some(3));
+        assert_eq!(back.unknown_bytes(), Some(3));
+        assert_eq!(back.used_bytes(), 60);
+        assert_eq!(back.scanned_bytes(), 50);
+    }
+
+    #[test]
     fn json_round_trips_a_subtree_with_options() {
         let tree = sample_tree();
         let sub = tree.find(Path::new("/root/sub")).unwrap();

@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Reinicie o FastDir com privilégios para verificar pastas protegidas"
         }
+        "banner.show_unreadable" => "Mostrar pastas",
+        "unreadable.title" => "Pastas ilegíveis",
+        "unreadable.body" => {
+            "Não foi possível ler {n} pastas; o conteúdo delas falta na verificação e conta como espaço desconhecido."
+        }
+        "unreadable.admin_hint" => "Execute o FastDir como administrador para incluí-las.",
+        "unreadable.shadow_hint" => {
+            "Os pontos de restauração (cópias de sombra) só são medidos quando o FastDir é executado como administrador."
+        }
+        "unreadable.windows_skipped" => {
+            "A pasta do Windows foi ignorada pelas configurações da verificação, então o tamanho dela conta como espaço desconhecido."
+        }
         "banner.elev_cancelled_title" => "Elevação cancelada",
         "banner.elev_cancelled_body" => {
             "Continuando sem privilégios — as pastas protegidas serão ignoradas."
@@ -271,6 +283,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Arquivos",
         "list.free_space" => "<Espaço livre>",
         "list.unknown" => "<Desconhecido>",
+        "list.ntfs_metadata" => "<Metadados NTFS>",
+        "list.shadow_copies" => "<Cópias de sombra>",
         "tree.empty" => "O treemap aparece aqui após uma verificação",
         "tree.rendering" => "Renderizando o treemap…",
         "tree.zoom_hint" => "Z aproximar · Shift+Z afastar",

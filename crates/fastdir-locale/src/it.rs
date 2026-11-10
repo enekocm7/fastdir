@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Riavvia FastDir con privilegi elevati per analizzare le cartelle protette"
         }
+        "banner.show_unreadable" => "Mostra cartelle",
+        "unreadable.title" => "Cartelle illeggibili",
+        "unreadable.body" => {
+            "Impossibile leggere {n} cartelle: il loro contenuto manca dalla scansione e viene conteggiato come spazio sconosciuto."
+        }
+        "unreadable.admin_hint" => "Esegui FastDir come amministratore per includerle.",
+        "unreadable.shadow_hint" => {
+            "I punti di ripristino (copie shadow) vengono misurati solo se FastDir è eseguito come amministratore."
+        }
+        "unreadable.windows_skipped" => {
+            "La cartella di Windows è stata saltata dalle impostazioni di scansione, quindi la sua dimensione conta come spazio sconosciuto."
+        }
         "banner.elev_cancelled_title" => "Privilegi elevati annullati",
         "banner.elev_cancelled_body" => {
             "Continuo senza privilegi elevati — le cartelle protette verranno ignorate."
@@ -271,6 +283,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "File",
         "list.free_space" => "<Spazio libero>",
         "list.unknown" => "<Sconosciuto>",
+        "list.ntfs_metadata" => "<Metadati NTFS>",
+        "list.shadow_copies" => "<Copie shadow>",
         "tree.empty" => "La mappa appare qui dopo un'analisi",
         "tree.rendering" => "Disegno della mappa…",
         "tree.zoom_hint" => "Z ingrandisci · Shift+Z riduci",

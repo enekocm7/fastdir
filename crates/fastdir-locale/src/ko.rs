@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "보호된 폴더를 검사할 수 있도록 FastDir을 권한 상승하여 다시 시작합니다"
         }
+        "banner.show_unreadable" => "폴더 보기",
+        "unreadable.title" => "읽을 수 없는 폴더",
+        "unreadable.body" => {
+            "폴더 {n}개를 읽을 수 없습니다. 해당 내용은 검사에서 빠져 알 수 없는 공간으로 계산됩니다."
+        }
+        "unreadable.admin_hint" => "포함하려면 FastDir을 관리자 권한으로 실행하세요.",
+        "unreadable.shadow_hint" => {
+            "복원 지점(섀도 복사본)은 FastDir을 관리자 권한으로 실행할 때만 측정됩니다."
+        }
+        "unreadable.windows_skipped" => {
+            "검사 설정에 따라 Windows 폴더를 건너뛰었으므로 그 크기는 알 수 없는 공간으로 계산됩니다."
+        }
         "banner.elev_cancelled_title" => "권한 상승 취소됨",
         "banner.elev_cancelled_body" => {
             "권한 상승 없이 계속합니다 — 보호된 폴더는 제외됩니다."
@@ -273,6 +285,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "파일 수",
         "list.free_space" => "<여유 공간>",
         "list.unknown" => "<알 수 없음>",
+        "list.ntfs_metadata" => "<NTFS 메타데이터>",
+        "list.shadow_copies" => "<섀도 복사본>",
         "tree.empty" => "검사 후 트리맵이 여기에 표시됩니다",
         "tree.rendering" => "트리맵 렌더링 중…",
         "tree.zoom_hint" => "Z 확대 · Shift+Z 축소",

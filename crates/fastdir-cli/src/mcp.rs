@@ -19,6 +19,7 @@ use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
 use fastdir_core::filter::{Filter, parse_modified, parse_size};
 use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
 use fastdir_core::scanner::{self, Progress, ScanOptions};
+use fastdir_core::windows_apps;
 use serde_json::{Value, json};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -841,7 +842,8 @@ fn scan_folder(path: &Path, options: &ScanOptions) -> Result<Scanned, ToolError>
     let root = resolve_root(path)?;
     let progress = Arc::new(Progress::default());
     let scanned_at = schema::now_iso();
-    let result = scanner::scan(root.clone(), progress.clone(), options);
+    let mut result = scanner::scan(root.clone(), progress.clone(), options);
+    windows_apps::recover_packages(&mut result.tree, options, &progress);
     Ok(Scanned {
         tree: result.tree,
         meta: ScanMeta {

@@ -76,13 +76,22 @@ impl FastDir {
         let p = progress.clone();
         let scan_tree = tree.clone();
         let options = self.scan_options();
-        let job = cx
-            .background_executor()
-            .spawn(async move { scanner::scan_live(root, p, scan_tree, &options) });
+        let job = cx.background_executor().spawn(async move {
+            let result = scanner::scan_live(root.clone(), p.clone(), scan_tree.clone(), &options);
+            // Store packages hidden in an unreadable `WindowsApps` folder, and
+            // the parts of `<Unknown>` that can be measured, are worked out
+            // here so the UI thread does not wait on them.
+            let mut breakdown = UnknownBreakdown::default();
+            if !result.cancelled {
+                windows_apps::recover_packages_live(&scan_tree, &options, &p);
+                breakdown = drives::unknown_breakdown(&root);
+            }
+            (result, breakdown)
+        });
         self._scan_task = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = job.await;
+            let (result, breakdown) = job.await;
             this.update_in(cx, |this, window, cx| {
-                this.finish_scan(result, tree, window, cx)
+                this.finish_scan(result, breakdown, tree, window, cx)
             })
             .ok();
         }));
@@ -152,6 +161,7 @@ impl FastDir {
     pub(super) fn finish_scan(
         &mut self,
         result: LiveScanResult,
+        breakdown: UnknownBreakdown,
         tree: Arc<RwLock<Tree>>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -162,12 +172,13 @@ impl FastDir {
         }
         let LiveScanResult { elapsed, cancelled } = result;
         // Drive scans get `<Free space>` and `<Unknown>` pseudo-items so the
-        // picture is complete (scanned vs used). Volume figures are from the
-        // drive list taken when the scan started.
+        // picture is complete (scanned vs used), with what could be measured
+        // (NTFS metadata, shadow copies) split out of `<Unknown>`. Volume
+        // figures are from the drive list taken when the scan started.
         let (root_path, files, size) = {
             let mut tree = tree.write();
             if let Some(drive) = self.drives.iter().find(|d| d.path == tree.root_path) {
-                tree.attach_volume_info(drive.total, drive.free);
+                tree.attach_volume_breakdown(drive.total, drive.free, breakdown);
             }
             (
                 tree.root_path.clone(),

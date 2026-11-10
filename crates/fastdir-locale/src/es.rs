@@ -149,6 +149,18 @@ pub fn get(key: &str) -> Option<&'static str> {
         "banner.restart_tip" => {
             "Reiniciar FastDir con privilegios para analizar las carpetas protegidas"
         }
+        "banner.show_unreadable" => "Mostrar carpetas",
+        "unreadable.title" => "Carpetas no legibles",
+        "unreadable.body" => {
+            "No se pudieron leer {n} carpetas; su contenido falta en el análisis y cuenta como espacio desconocido."
+        }
+        "unreadable.admin_hint" => "Ejecuta FastDir como administrador para incluirlas.",
+        "unreadable.shadow_hint" => {
+            "Los puntos de restauración (instantáneas) solo se miden si FastDir se ejecuta como administrador."
+        }
+        "unreadable.windows_skipped" => {
+            "La carpeta de Windows se omitió por la configuración del análisis, así que su tamaño cuenta como espacio desconocido."
+        }
         "banner.elev_cancelled_title" => "Privilegios cancelados",
         "banner.elev_cancelled_body" => {
             "Se continúa sin privilegios — se omitirán las carpetas protegidas."
@@ -273,6 +285,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "list.files_col" => "Archivos",
         "list.free_space" => "<Espacio libre>",
         "list.unknown" => "<Desconocido>",
+        "list.ntfs_metadata" => "<Metadatos NTFS>",
+        "list.shadow_copies" => "<Instantáneas>",
         "tree.empty" => "El treemap aparece aquí tras el análisis",
         "tree.rendering" => "Dibujando el treemap…",
         "tree.zoom_hint" => "Z acercar · Mayús+Z alejar",

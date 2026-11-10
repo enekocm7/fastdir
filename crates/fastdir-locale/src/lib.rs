@@ -372,12 +372,15 @@ pub fn format_relative(unix: i64, lang: &str) -> String {
 }
 
 /// Localized display name for a canonical pseudo-item id, or `None` for
-/// real names. The canonical ids mirror `FREE_SPACE_NAME` / `UNKNOWN_NAME` in
+/// real names. The canonical ids mirror `FREE_SPACE_NAME` / `UNKNOWN_NAME` /
+/// `NTFS_METADATA_NAME` / `SHADOW_COPIES_NAME` in
 /// `fastdir_core::model` (the tree's identity); this only affects display.
 pub fn special_display(canonical: &str, lang: &str) -> Option<&'static str> {
     match canonical {
         "<Free space>" => Some(lookup_static(lang, "list.free_space")),
         "<Unknown>" => Some(lookup_static(lang, "list.unknown")),
+        "<NTFS metadata>" => Some(lookup_static(lang, "list.ntfs_metadata")),
+        "<Shadow copies>" => Some(lookup_static(lang, "list.shadow_copies")),
         _ => None,
     }
 }
