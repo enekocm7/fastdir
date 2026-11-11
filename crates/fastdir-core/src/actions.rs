@@ -342,9 +342,19 @@ pub fn split_args(text: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// A Windows-style sample path in this platform's form, so the tests
+    /// also pass on Unix (`C:\a\b` becomes `/a/b`).
+    fn native(path: &str) -> String {
+        if cfg!(windows) {
+            path.to_string()
+        } else {
+            path.replace(r"C:\", "/").replace('\\', "/")
+        }
+    }
+
     fn ctx() -> ActionContext {
         ActionContext::new(
-            Path::new(r"C:\Users\Eneko\My Project\notes file.txt"),
+            Path::new(&native(r"C:\Users\Eneko\My Project\notes file.txt")),
             false,
         )
     }
@@ -354,18 +364,20 @@ mod tests {
         let ctx = ctx();
         assert_eq!(
             expand("{path}|{parent}|{name}|{ext}", &ctx),
-            r"C:\Users\Eneko\My Project\notes file.txt|C:\Users\Eneko\My Project|notes file.txt|txt"
+            native(
+                r"C:\Users\Eneko\My Project\notes file.txt|C:\Users\Eneko\My Project|notes file.txt|txt"
+            )
         );
         // Unknown placeholders stay as written.
         assert_eq!(
             expand("{path} {foo}", &ctx),
-            r"C:\Users\Eneko\My Project\notes file.txt {foo}"
+            native(r"C:\Users\Eneko\My Project\notes file.txt {foo}")
         );
         // A folder has no extension and is its own parent for `{parent}`.
-        let dir = ActionContext::new(Path::new(r"C:\Users\Eneko\My Project"), true);
+        let dir = ActionContext::new(Path::new(&native(r"C:\Users\Eneko\My Project")), true);
         assert_eq!(expand("{ext}", &dir), "");
         assert_eq!(expand("{name}", &dir), "My Project");
-        assert_eq!(expand("{parent}", &dir), r"C:\Users\Eneko");
+        assert_eq!(expand("{parent}", &dir), native(r"C:\Users\Eneko"));
     }
 
     #[test]
@@ -377,31 +389,33 @@ mod tests {
             false,
             &ctx(),
         );
-        assert_eq!(line.args[1], r"C:\Users\Eneko\My Project\notes file.txt");
+        let path = native(r"C:\Users\Eneko\My Project\notes file.txt");
+        assert_eq!(line.args[1], path);
         assert_eq!(
             line.cwd.as_deref(),
-            Some(Path::new(r"C:\Users\Eneko\My Project"))
+            Some(Path::new(&native(r"C:\Users\Eneko\My Project")))
         );
-        assert!(
-            line.display()
-                .contains("\"C:\\Users\\Eneko\\My Project\\notes file.txt\"")
-        );
+        assert!(line.display().contains(&format!("\"{path}\"")));
     }
 
     #[test]
     fn folder_targets_are_their_own_working_folder() {
-        let dir = ActionContext::new(Path::new(r"C:\code\thing"), true);
+        let thing = native(r"C:\code\thing");
+        let dir = ActionContext::new(Path::new(&thing), true);
         let line = CommandLine::expand("cargo", &["clean".to_string()], "", false, &dir);
-        assert_eq!(line.cwd.as_deref(), Some(Path::new(r"C:\code\thing")));
+        assert_eq!(line.cwd.as_deref(), Some(Path::new(&thing)));
         let explicit = CommandLine::expand("ls", &[], "{parent}", false, &dir);
-        assert_eq!(explicit.cwd.as_deref(), Some(Path::new(r"C:\code")));
+        assert_eq!(
+            explicit.cwd.as_deref(),
+            Some(Path::new(&native(r"C:\code")))
+        );
     }
 
     #[test]
     fn shell_placeholders_are_quoted() {
         let line = CommandLine::expand("echo", &["{path}".to_string()], "{path}", true, &ctx());
         assert!(line.shell);
-        let path = r"C:\Users\Eneko\My Project\notes file.txt";
+        let path = native(r"C:\Users\Eneko\My Project\notes file.txt");
         #[cfg(windows)]
         assert_eq!(line.args[0], format!("\"{path}\""));
         #[cfg(not(windows))]

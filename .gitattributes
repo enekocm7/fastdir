@@ -5,3 +5,6 @@ PKGBUILD text eol=lf
 flake.lock text eol=lf
 *.desktop text eol=lf
 *.metainfo.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+APKBUILD text eol=lf

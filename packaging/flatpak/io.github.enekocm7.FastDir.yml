@@ -1,0 +1,60 @@
+# Flatpak manifest. CI builds it from this checkout (the `dir` source below);
+# the copy submitted to Flathub (flathub/io.github.enekocm7.FastDir) uses the
+# release tag instead, see packaging/README.md.
+#
+# cargo-sources.json is generated from Cargo.lock by flatpak-cargo-generator
+# (packaging/flatpak/generate-sources.sh), so the build runs offline.
+id: io.github.enekocm7.FastDir
+runtime: org.freedesktop.Platform
+runtime-version: "26.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: fastdir
+finish-args:
+  # A disk usage analyzer has to see (and delete from) the whole disk. The
+  # sandbox here is a convenience for installing and updating, not a security
+  # boundary: see packaging/README.md.
+  - --filesystem=host
+  # Mounted drives under /run/media and friends; /usr etc. stay the runtime's.
+  - --filesystem=/run/media
+  - --filesystem=/media
+  - --filesystem=/mnt
+  # GPUI renders through Vulkan.
+  - --device=dri
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # Update check against GitHub Releases (the updater only notifies inside
+  # Flatpak; Flathub installs the update).
+  - --share=network
+modules:
+  - name: fastdir
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/fastdir/cargo
+        CARGO_NET_OFFLINE: "true"
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --locked -p fastdir -p fastdir-cli
+      # `fastdir` is a launcher script (fastdir-launcher.sh); the GUI binary
+      # itself lives in libexec.
+      - install -Dm755 target/release/fastdir ${FLATPAK_DEST}/libexec/fastdir
+      - install -Dm755 packaging/flatpak/fastdir-launcher.sh ${FLATPAK_DEST}/bin/fastdir
+      - install -Dm755 target/release/fastdir-cli ${FLATPAK_DEST}/bin/fastdir-cli
+      - install -Dm644 packaging/linux/${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 packaging/linux/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+      - install -Dm644 assets/logo.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      - install -Dm644 LICENSE ${FLATPAK_DEST}/share/licenses/${FLATPAK_ID}/LICENSE
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - .git
+          - .flatpak-builder
+          - build-dir
+          - repo
+      - cargo-sources.json

@@ -31,6 +31,17 @@
   <launchable type="desktop-id">io.github.enekocm7.FastDir.desktop</launchable>
   <icon type="stock">io.github.enekocm7.FastDir</icon>
 
+  <screenshots>
+    <screenshot type="default">
+      <caption>A scanned folder: directory tree, file types and treemap</caption>
+      <image type="source" width="1440" height="900">https://raw.githubusercontent.com/enekocm7/fastdir/main/packaging/linux/screenshots/main-light.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The same view in the dark theme</caption>
+      <image type="source" width="1440" height="900">https://raw.githubusercontent.com/enekocm7/fastdir/main/packaging/linux/screenshots/main-dark.png</image>
+    </screenshot>
+  </screenshots>
+
   <url type="homepage">https://github.com/enekocm7/fastdir</url>
   <url type="bugtracker">https://github.com/enekocm7/fastdir/issues</url>
   <url type="vcs-browser">https://github.com/enekocm7/fastdir</url>
@@ -61,6 +72,11 @@
   <requires>
     <display_length compare="ge">768</display_length>
   </requires>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#93c5fd</color>
+    <color type="primary" scheme_preference="dark">#1e3a8a</color>
+  </branding>
 
   <content_rating type="oars-1.1"/>
 

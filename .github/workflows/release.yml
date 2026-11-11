@@ -307,6 +307,171 @@ jobs:
           ./result/bin/fastdir-cli scan / --max-depth 1 > /dev/null
           nix flake check --no-build
 
+  # Flatpak (Flathub): cargo-sources.json is generated from Cargo.lock, then
+  # flatpak-builder builds the manifest from this checkout.
+  flatpak-sources:
+    name: Flatpak cargo sources
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate cargo-sources.json
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install aiohttp tomlkit
+          PATH="$RUNNER_TEMP/venv/bin:$PATH" packaging/flatpak/generate-sources.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-cargo-sources
+          path: packaging/flatpak/cargo-sources.json
+
+  flatpak:
+    name: Flatpak
+    needs: flatpak-sources
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: flatpak-cargo-sources
+          path: packaging/flatpak
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/io.github.enekocm7.FastDir.yml
+          bundle: FastDir-x86_64.flatpak
+          artifact-name: FastDir-flatpak
+          cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+
+  # Snap (classic confinement): build, install on the runner and run both
+  # commands. Publishing is the separate `snap-publish` job.
+  snap:
+    name: Snap
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Put snapcraft.yaml where snapcraft looks
+        run: mkdir -p snap && cp packaging/snap/snapcraft.yaml snap/snapcraft.yaml
+
+      - uses: snapcore/action-build@v1
+        id: build
+
+      - name: Install and run
+        run: |
+          set -x
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1 libvulkan1 libwayland-client0 \
+            libxkbcommon0 libxkbcommon-x11-0
+          sudo snap install --classic --dangerous "${{ steps.build.outputs.snap }}"
+          fastdir scan /usr --max-depth 1 > /dev/null
+          fastdir.cli scan / --max-depth 1 | head -c 400; echo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FastDir-snap
+          path: ${{ steps.build.outputs.snap }}
+
+  # Alpine (musl): builds packaging/alpine/APKBUILD from this checkout on
+  # Alpine edge, installs the .apk and runs both binaries.
+  alpine:
+    name: Alpine (musl)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in alpine:edge
+        run: docker run --rm -v "$PWD:/src" alpine:edge /src/packaging/alpine/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpine-apk
+          path: dist-alpine/*.apk
+
+  # Signed apt and dnf/zypper repositories (packaging/linux/build-repos.sh).
+  # Signed with the REPO_GPG_PRIVATE_KEY secret on stable tags, otherwise
+  # with a throwaway key, so every run still tests the repositories.
+  repos:
+    name: Package repositories
+    needs: linux
+    runs-on: ubuntu-24.04
+    env:
+      REPO_GPG_PRIVATE_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+      PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: FastDir-${{ needs.linux.outputs.version }}-linux-x64
+          path: dist
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils createrepo-c rpm gnupg
+
+      - name: Import the signing key
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ -n "$REPO_GPG_PRIVATE_KEY" ]; then
+            printf '%s\n' "$REPO_GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            echo "Using a throwaway key (not a release, or no REPO_GPG_PRIVATE_KEY)."
+            gpg --batch --passphrase "" --quick-gen-key \
+              "FastDir test repository <test@invalid>" ed25519 sign never
+          fi
+
+      - name: Build the repositories
+        run: packaging/linux/build-repos.sh dist site "$PAGES_URL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-repos
+          path: site
+          include-hidden-files: true
+
+  # Installs FastDir from the repositories built above through apt and dnf,
+  # with signature checks on, from a local copy of the site.
+  repos-test:
+    name: Repository test (${{ matrix.image }})
+    needs: repos
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "fedora:latest"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-repos
+          path: /srv/repo
+
+      - name: Install from the repository
+        shell: bash
+        run: |
+          set -euxo pipefail
+          base=file:///srv/repo
+          case "${{ matrix.image }}" in
+            debian*)
+              cp /srv/repo/fastdir.gpg /usr/share/keyrings/fastdir.gpg
+              sed "s|^URIs: .*|URIs: $base/apt|" /srv/repo/fastdir.sources \
+                > /etc/apt/sources.list.d/fastdir.sources
+              apt-get update
+              apt-get install -y fastdir ;;
+            fedora*)
+              sed -e "s|^baseurl=.*|baseurl=$base/rpm|" -e "s|^gpgkey=.*|gpgkey=$base/fastdir.asc|" \
+                /srv/repo/fastdir.repo > /etc/yum.repos.d/fastdir.repo
+              dnf install -y fastdir ;;
+          esac
+          fastdir-cli scan / --max-depth 1 | head -c 400; echo
+          fastdir scan /usr --max-depth 1 > /dev/null
+
   # One release with every platform's files and a single SHA256SUMS.txt (the
   # in-app updater looks its download up in that file).
   publish:
@@ -373,3 +538,63 @@ jobs:
           commit_email: ${{ vars.AUR_COMMIT_EMAIL || 'enekocm7@users.noreply.github.com' }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: Update to ${{ needs.linux.outputs.version }}
+
+  # Publishes the repositories built by `repos` to GitHub Pages on stable
+  # tags. Needs the REPO_GPG_PRIVATE_KEY secret and Pages set to deploy from
+  # GitHub Actions (packaging/README.md).
+  pages:
+    name: Package repositories (GitHub Pages)
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [repos, repos-test, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      REPO_GPG_PRIVATE_KEY: ${{ secrets.REPO_GPG_PRIVATE_KEY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        if: env.REPO_GPG_PRIVATE_KEY != ''
+        with:
+          name: package-repos
+          path: site
+
+      - uses: actions/upload-pages-artifact@v4
+        if: env.REPO_GPG_PRIVATE_KEY != ''
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v4
+        id: deploy
+        if: env.REPO_GPG_PRIVATE_KEY != ''
+
+  # Uploads the snap to the Snap Store's stable channel. Needs the
+  # SNAPCRAFT_STORE_CREDENTIALS secret (`snapcraft export-login`) and, once,
+  # the Store's approval for classic confinement.
+  snap-publish:
+    name: Snap Store
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [snap, publish]
+    runs-on: ubuntu-24.04
+    env:
+      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+    steps:
+      - uses: actions/download-artifact@v4
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        with:
+          name: FastDir-snap
+          path: snap-dist
+
+      - name: Find the snap
+        id: find
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        run: echo "snap=$(ls snap-dist/*.snap | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - uses: snapcore/action-publish@v1
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        with:
+          snap: ${{ steps.find.outputs.snap }}
+          release: stable

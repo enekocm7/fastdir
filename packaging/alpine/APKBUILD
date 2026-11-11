@@ -1,0 +1,71 @@
+# Contributor: enekocm7 <enekocm7@users.noreply.github.com>
+# Maintainer: enekocm7 <enekocm7@users.noreply.github.com>
+#
+# Template for Alpine's aports (testing/fastdir). The release workflow's
+# `alpine` job builds it on Alpine edge; packaging/README.md has the
+# submission steps.
+pkgname=fastdir
+pkgver=0.3.2
+pkgrel=0
+pkgdesc="Fast disk usage analyzer with a treemap (GUI and CLI)"
+url="https://github.com/enekocm7/fastdir"
+# Only x86_64 is tested upstream so far.
+arch="x86_64"
+license="GPL-3.0-or-later"
+# Loaded with dlopen at run time, so abuild's scan of the binaries misses them.
+depends="
+	fontconfig
+	libxkbcommon
+	libxkbcommon-x11
+	vulkan-loader
+	wayland-libs-client
+	"
+makedepends="
+	cargo
+	cargo-auditable
+	clang-dev
+	fontconfig-dev
+	freetype-dev
+	libx11-dev
+	libxcb-dev
+	libxkbcommon-dev
+	openssl-dev
+	wayland-dev
+	zstd-dev
+	"
+subpackages="$pkgname-doc"
+options="net" # cargo fetch
+source="$pkgname-$pkgver.tar.gz::https://github.com/enekocm7/fastdir/archive/v$pkgver/fastdir-$pkgver.tar.gz"
+
+prepare() {
+	default_prepare
+	cargo fetch --target="$CTARGET" --locked
+}
+
+build() {
+	cargo auditable build --release --frozen -p fastdir -p fastdir-cli
+}
+
+check() {
+	# The GUI-free crates; the GUI needs a display.
+	cargo test --frozen \
+		-p fastdir-core -p fastdir-treemap -p fastdir-updater \
+		-p fastdir-settings -p fastdir-cli -p fastdir-locale
+}
+
+package() {
+	local app_id=io.github.enekocm7.FastDir
+	install -Dm755 target/release/fastdir target/release/fastdir-cli \
+		-t "$pkgdir"/usr/bin/
+	install -Dm644 packaging/linux/$app_id.desktop \
+		-t "$pkgdir"/usr/share/applications/
+	install -Dm644 packaging/linux/$app_id.metainfo.xml \
+		-t "$pkgdir"/usr/share/metainfo/
+	install -Dm644 assets/logo.svg \
+		"$pkgdir"/usr/share/icons/hicolor/scalable/apps/$app_id.svg
+	install -Dm644 README.md -t "$pkgdir"/usr/share/doc/$pkgname/
+}
+
+sha512sums="
+6f898b3bc7a7f2f72921cc65ccd077fbe5aa456cb6f517e9460e12b5e07fb4a1f9ec3a308f7cb86dc7ad29e449e8f7fcf597461b42a7158ba979a84fb4aaaf3  fastdir-0.3.2.tar.gz
+"

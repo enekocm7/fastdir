@@ -716,9 +716,16 @@ mod tests {
         // The root fallback guarantees a non-empty list on Unix.
         let drives = list();
         assert!(!drives.is_empty());
-        assert!(drives.iter().any(|d| d.path == PathBuf::from("/")));
-        // `/` sorts first.
-        assert_eq!(drives[0].path, PathBuf::from("/"));
+        // Inside a container `/` is an overlay, which the picker hides on
+        // purpose (its bind mounts are listed instead).
+        let root_hidden = mounts()
+            .iter()
+            .any(|m| m.mount == Path::new("/") && is_pseudo_fstype(&m.fstype));
+        if !root_hidden {
+            assert!(drives.iter().any(|d| d.path == PathBuf::from("/")));
+            // `/` sorts first.
+            assert_eq!(drives[0].path, PathBuf::from("/"));
+        }
     }
 
     #[cfg(not(windows))]

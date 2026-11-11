@@ -232,23 +232,26 @@ application menu entry, an icon and AppStream metadata. x86_64 only for now.
 
 | Distribution | Install | Updates |
 |---|---|---|
-| Debian, Ubuntu, Mint, Pop!_OS | `sudo apt install ./FastDir-<version>-amd64.deb` | install the next `.deb` the same way |
-| Fedora, RHEL / Alma / Rocky, openSUSE | `sudo dnf install ./FastDir-<version>-x86_64.rpm` (`sudo zypper install …` on openSUSE) | install the next `.rpm` the same way |
+| Debian, Ubuntu, Mint, Pop!_OS | add the [FastDir apt repository](https://enekocm7.github.io/fastdir/), then `sudo apt install fastdir`; or `sudo apt install ./FastDir-<version>-amd64.deb` | `apt upgrade` with the repository; otherwise install the next `.deb` the same way |
+| Fedora, RHEL / Alma / Rocky, openSUSE | add the [FastDir dnf/zypper repository](https://enekocm7.github.io/fastdir/), then `sudo dnf install fastdir`; or `sudo dnf install ./FastDir-<version>-x86_64.rpm` (`sudo zypper install …` on openSUSE) | `dnf upgrade` with the repository; otherwise install the next `.rpm` the same way |
+| Any distribution (Flatpak) | `flatpak install flathub io.github.enekocm7.FastDir` | your software center / `flatpak update` |
+| Any distribution (Snap) | `sudo snap install fastdir --classic` (CLI: `fastdir.cli`) | automatic |
+| Alpine (edge, `testing`) | `apk add fastdir` | `apk upgrade` |
 | Arch, Manjaro, EndeavourOS | `paru -S fastdir-bin` (or any AUR helper) | your AUR helper |
-| NixOS / Nix | `nix run github:enekocm7/fastdir` (CLI: `nix run github:enekocm7/fastdir#fastdir-cli -- scan /`) | `nix profile upgrade` / your flake inputs |
+| NixOS / Nix | `nix run github:enekocm7/fastdir` (CLI: `nix run github:enekocm7/fastdir#fastdir-cli -- scan /`), or `pkgs.fastdir` from nixpkgs | `nix profile upgrade` / your flake inputs / your channel |
 | Any distribution | `chmod +x FastDir-<version>-x86_64.AppImage && ./FastDir-<version>-x86_64.AppImage` | in the app (**Update now** replaces the AppImage file) |
 | Any distribution | unpack `FastDir-<version>-linux-x64.tar.gz` | download the next release by hand |
 
 FastDir never replaces a binary that a package manager installed: for
-`.deb`, `.rpm`, AUR and Nix installs the update notification tells you to
-update from your package manager instead. It renders through Vulkan, so a
+`.deb`, `.rpm`, AUR, Nix, Flatpak, Snap and Alpine installs the update
+notification tells you to update from your package manager instead. It renders through Vulkan, so a
 Vulkan driver is needed (Mesa's `mesa-vulkan-drivers` on most distributions).
-Flathub ([#114](https://github.com/enekocm7/fastdir/issues/114)), Snap
-([#115](https://github.com/enekocm7/fastdir/issues/115)), Alpine
-([#116](https://github.com/enekocm7/fastdir/issues/116)), nixpkgs
-([#117](https://github.com/enekocm7/fastdir/issues/117)) and the Debian
-archive ([#118](https://github.com/enekocm7/fastdir/issues/118)) are planned. Release and packaging
-details for contributors are in [`packaging/README.md`](packaging/README.md).
+The apt/dnf repository, Flathub, the Snap Store, Alpine and nixpkgs each
+list FastDir once its first submission is accepted; the Flatpak shares your
+whole file system with the app, since a disk analyzer needs it. Getting into
+the Debian and Ubuntu archives themselves is a longer process. Release and
+packaging details for contributors are in
+[`packaging/README.md`](packaging/README.md).
 
 ### Updates
 

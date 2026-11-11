@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FastDir package repositories</title>
+<style>
+  :root { color-scheme: light dark; --bg: #ffffff; --fg: #1d1f23; --muted: #5b6270; --code: #f2f4f7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181c; --fg: #e6e8eb; --muted: #9aa1ad; --code: #23262c; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-serif;
+         max-width: 46rem; margin: 2.5rem auto; padding: 0 16px; }
+  h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  pre { background: var(--code); padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; font-size: .9rem; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<h1>FastDir package repositories</h1>
+<p class="lead">Signed apt and dnf/zypper repositories for
+<a href="https://github.com/enekocm7/fastdir">FastDir</a> (currently @VERSION@, x86_64).
+Once added, FastDir updates with the rest of the system.</p>
+
+<h2>Debian, Ubuntu and derivatives</h2>
+<pre>sudo curl -fsSLo /usr/share/keyrings/fastdir.gpg @BASE@/fastdir.gpg
+sudo curl -fsSLo /etc/apt/sources.list.d/fastdir.sources @BASE@/fastdir.sources
+sudo apt update
+sudo apt install fastdir</pre>
+
+<h2>Fedora, RHEL, Alma, Rocky</h2>
+<pre>sudo curl -fsSLo /etc/yum.repos.d/fastdir.repo @BASE@/fastdir.repo
+sudo dnf install fastdir</pre>
+
+<h2>openSUSE</h2>
+<pre>sudo zypper addrepo @BASE@/fastdir.repo
+sudo zypper install fastdir</pre>
+
+<p>Signing key: <a href="fastdir.asc">fastdir.asc</a>.
+Other platforms and formats: <a href="https://github.com/enekocm7/fastdir#install">install instructions</a>.</p>
+</body>
+</html>

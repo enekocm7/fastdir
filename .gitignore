@@ -1,3 +1,6 @@
 /target
 /dist
 /staging
+/packaging/flatpak/cargo-sources.json
+/.flatpak-builder
+/flatpak-build

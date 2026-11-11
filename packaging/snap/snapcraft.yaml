@@ -1,0 +1,80 @@
+# Snap package. Built by the release workflow's `snap` job, which copies this
+# file to snap/snapcraft.yaml at the repository root first (snapcraft only
+# sees the project directory inside its build container).
+#
+# Classic confinement: a disk usage analyzer has to read, and delete from,
+# the whole file system, which strict confinement does not allow (its
+# removable-media / system-files interfaces still leave most of / hidden).
+# Classic snaps need a manual review by the Snap Store team before the first
+# release; see packaging/README.md.
+name: fastdir
+title: FastDir
+base: core22
+adopt-info: fastdir
+summary: Blazing fast disk usage analyzer with a treemap
+description: |
+  FastDir scans a drive or folder on every CPU core and shows where the space
+  went: a sortable directory tree, a per-extension and per-category
+  breakdown, and a cushion-shaded treemap where every square is a file.
+
+  - Rename, move, trash or delete files without rescanning
+  - Duplicate finder, saved scans, scan comparison and growth over time
+  - `fastdir.cli` (alias `fastdir-cli`): a headless scanner with JSON/CSV
+    output and an MCP server
+license: GPL-3.0-or-later
+website: https://github.com/enekocm7/fastdir
+source-code: https://github.com/enekocm7/fastdir
+issues: https://github.com/enekocm7/fastdir/issues
+icon: assets/logo.svg
+grade: stable
+confinement: classic
+architectures:
+  - build-on: amd64
+
+apps:
+  fastdir:
+    command: bin/fastdir
+    common-id: io.github.enekocm7.FastDir
+    desktop: usr/share/applications/io.github.enekocm7.FastDir.desktop
+  cli:
+    command: bin/fastdir-cli
+
+parts:
+  fastdir:
+    plugin: rust
+    source: .
+    rust-channel: stable
+    # Both binaries: the GUI (workspace root) and the console CLI.
+    rust-path:
+      - .
+      - crates/fastdir-cli
+    # Same as the .deb build. A classic snap runs against the host's
+    # libraries (fontconfig, xkbcommon, Wayland and the Vulkan loader, which
+    # every desktop has), like the .deb, so it needs glibc 2.35 or newer.
+    build-packages:
+      - gcc
+      - g++
+      - clang
+      - pkg-config
+      - libfontconfig-dev
+      - libwayland-dev
+      - libxkbcommon-x11-dev
+      - libx11-xcb-dev
+      - libssl-dev
+      - libzstd-dev
+      - libasound2-dev
+    override-pull: |
+      craftctl default
+      craftctl set version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+    override-build: |
+      craftctl default
+      app_id=io.github.enekocm7.FastDir
+      install -Dm644 packaging/linux/$app_id.metainfo.xml \
+        "$CRAFT_PART_INSTALL/usr/share/metainfo/$app_id.metainfo.xml"
+      install -Dm644 assets/logo.svg \
+        "$CRAFT_PART_INSTALL/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
+      # snapd needs the icon as a path inside the snap.
+      install -Dm644 packaging/linux/$app_id.desktop \
+        "$CRAFT_PART_INSTALL/usr/share/applications/$app_id.desktop"
+      sed -i "s|^Icon=.*|Icon=\${SNAP}/usr/share/icons/hicolor/scalable/apps/$app_id.svg|" \
+        "$CRAFT_PART_INSTALL/usr/share/applications/$app_id.desktop"
