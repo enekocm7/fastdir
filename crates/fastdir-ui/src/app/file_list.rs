@@ -670,6 +670,14 @@ impl FastDir {
                                     .text_color(muted)
                                     .child(self.tr("list.hard_link")),
                             )
+                        })
+                        .when(node.cloud(), |d| {
+                            d.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_color(muted)
+                                    .child(self.tr("list.cloud")),
+                            )
                         }),
                 )
                 .child(
@@ -2370,12 +2378,7 @@ impl FastDir {
                                 .text_right()
                                 .child(self.tr("list.bytes_col")),
                         )
-                        .child(
-                            div()
-                                .w(sp(48.))
-                                .text_right()
-                                .child(self.tr("list.col_pct")),
-                        )
+                        .child(div().w(sp(48.)).text_right().child(self.tr("list.col_pct")))
                         .child(
                             div()
                                 .w(sp(64.))

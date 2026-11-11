@@ -48,6 +48,7 @@ struct EntryRecord<'a> {
     modified: Option<String>,
     error: bool,
     hard_link: bool,
+    cloud: bool,
     /// Files only (`null` when the name has none); absent for folders.
     #[serde(skip_serializing_if = "Option::is_none")]
     extension: Option<Option<String>>,
@@ -79,6 +80,7 @@ fn push_entry(
         modified: iso_time(node.modified()),
         error: node.error(),
         hard_link: node.hard_link(),
+        cloud: node.cloud(),
         extension: (node.kind() == NodeKind::File).then(|| extension_of(name)),
         owner,
     };
@@ -419,6 +421,7 @@ mod tests {
         assert_eq!(
             keys(file),
             [
+                "cloud",
                 "depth",
                 "disk_size",
                 "error",

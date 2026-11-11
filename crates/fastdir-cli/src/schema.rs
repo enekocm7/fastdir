@@ -99,7 +99,7 @@ impl Serialize for EntryView<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let node = self.node;
         let is_dir = node.is_dir();
-        let mut st = s.serialize_struct("Entry", if is_dir { 13 } else { 11 })?;
+        let mut st = s.serialize_struct("Entry", if is_dir { 14 } else { 12 })?;
         st.serialize_field("name", self.tree.name(node))?;
         st.serialize_field("path", &self.path.to_string_lossy())?;
         st.serialize_field("type", kind_label(node.kind()))?;
@@ -111,6 +111,7 @@ impl Serialize for EntryView<'_> {
         st.serialize_field("modified", &iso_time(node.modified()))?;
         st.serialize_field("error", &node.error())?;
         st.serialize_field("hard_link", &node.hard_link())?;
+        st.serialize_field("cloud", &node.cloud())?;
         if let Some(owner) = self.tree.owner_name(self.owner) {
             st.serialize_field("owner", owner)?;
         }
@@ -245,6 +246,7 @@ pub fn entry_summary(tree: &Tree, node: &Node, path: &Path, owner: u16) -> Value
         "modified": iso_time(node.modified()),
         "error": node.error(),
         "hard_link": node.hard_link(),
+        "cloud": node.cloud(),
     });
     if let Some(ext) = tree
         .ext_name(node)
@@ -465,6 +467,7 @@ pub(crate) mod tests {
             keys(tree),
             [
                 "children",
+                "cloud",
                 "disk_size",
                 "error",
                 "files",
@@ -489,6 +492,7 @@ pub(crate) mod tests {
         assert_eq!(
             keys(file),
             [
+                "cloud",
                 "disk_size",
                 "error",
                 "files",

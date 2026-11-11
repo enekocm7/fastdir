@@ -36,6 +36,13 @@ culprit? Rename, move, recycle or delete it right there.
   in their folder as `<Alternate streams>` instead of being left in
   `<Unknown>`. Free with the fast NTFS scan; the normal scan has to open every
   file, so it is noticeably slower. Non-NTFS volumes are unaffected.
+- **Cloud placeholders** - online-only OneDrive Files On-Demand files (and
+  other cloud-sync placeholders) report their full size but occupy almost no
+  disk space. They are tagged *online-only* in the list and the treemap
+  tooltip (`"cloud": true` in the JSON output), and their size on disk is the
+  tiny local footprint. The scan reads only directory metadata (attributes
+  and sizes), never file contents, so it does not download (hydrate) them;
+  the duplicate finder skips them for the same reason.
 - **Size on disk** - every row shows the allocated size next to the logical
   size, so compressed, sparse and tiny cluster-slack files are counted the way
   the volume sees them. The treemap can use either metric (`. menu` →
@@ -642,6 +649,7 @@ changes.
     "modified": "2026-11-02T18:30:00Z",
     "error": false,                   // this folder could not be read
     "hard_link": false,               // extra hard link, bytes counted elsewhere
+    "cloud": false,                   // online-only cloud placeholder (OneDrive Files On-Demand)
     "owner": "DOMAIN\\user",          // only with --owners; omitted otherwise
     "truncated": false,               // dirs only: children cut off by --max-depth
     "children": [ /* entries, largest first; dirs only */ ]
@@ -684,7 +692,7 @@ every 100 ms. Closing the pipe
  "root": "C:\Users", "scanned_at": "2026-11-03T12:00:00Z"}
 {"record": "entry", "name": "notes.txt", "path": "C:\Users\me\notes.txt", "type": "file",
  "depth": 2, "size": 1200, "disk_size": 4096, "items": 1, "files": 1, "folders": 0,
- "modified": "2026-11-02T18:30:00Z", "error": false, "hard_link": false,
+ "modified": "2026-11-02T18:30:00Z", "error": false, "hard_link": false, "cloud": false,
  "extension": ".txt"}                // files only; null when the name has none
 {"record": "entry", "name": "me", "path": "C:\Users\me", "type": "dir", "depth": 1, ...}
 {"record": "entry", "name": "C:\Users", "path": "C:\Users", "type": "dir", "depth": 0, ...}

@@ -1074,6 +1074,7 @@ fn list_one(
             modified,
             file_id,
             hidden,
+            cloud,
             uid,
         } => {
             if hidden && options.skip_hidden_system {
@@ -1085,7 +1086,7 @@ fn list_one(
             files += 1;
             bytes += size;
             let owner = owner_of(&name, uid);
-            let own_streams = if count_streams {
+            let own_streams = if count_streams && !cloud {
                 named_streams(&path.join(&*name))
             } else {
                 Streams::default()
@@ -1096,7 +1097,11 @@ fn list_one(
                 node.add_hard_link_owned(&name, modified, owner);
             } else {
                 streams.add(own_streams);
-                node.add_file_owned(&name, size, disk_size, modified, owner);
+                if cloud {
+                    node.add_cloud_file_owned(&name, size, disk_size, modified, owner);
+                } else {
+                    node.add_file_owned(&name, size, disk_size, modified, owner);
+                }
             }
         }
         Entry::Dir {
@@ -1241,6 +1246,8 @@ enum Entry {
         file_id: u128,
         /// Hidden or system (Windows attributes, dot-file on Unix).
         hidden: bool,
+        /// Online-only cloud placeholder (Windows recall attributes).
+        cloud: bool,
         /// Owning uid on Unix (`u32::MAX` when unknown); unused on Windows,
         /// where the owner is queried from the path.
         uid: u32,
@@ -1599,6 +1606,13 @@ fn list_dir_by_id(path: &Path, cluster: u64, f: &mut impl FnMut(Entry)) -> ById 
     result
 }
 
+/// `FILE_ATTRIBUTE_OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS`: the
+/// attributes of an online-only cloud placeholder (OneDrive Files On-Demand).
+/// Reading the data of such a file would download it, so the scanner only ever
+/// looks at these directory-listing attributes.
+#[cfg(windows)]
+const CLOUD_RECALL_ATTRIBUTES: u32 = 0x1000 | 0x40000 | 0x400000;
+
 #[cfg(windows)]
 fn read_by_id(
     handle: windows_sys::Win32::Foundation::HANDLE,
@@ -1699,7 +1713,12 @@ fn read_by_id(
                             | FILE_ATTRIBUTE_REPARSE_POINT)
                         != 0
                         || (alloc == 0 && size > 0);
-                    let disk_size = if special {
+                    let cloud = attrs & CLOUD_RECALL_ATTRIBUTES != 0;
+                    // A placeholder's allocation is read from the listing
+                    // alone: never open the file, which could hydrate it.
+                    let disk_size = if cloud {
+                        alloc
+                    } else if special {
                         if alloc > 0 {
                             alloc
                         } else if size == 0 {
@@ -1724,6 +1743,7 @@ fn read_by_id(
                         modified,
                         file_id,
                         hidden,
+                        cloud,
                         uid: 0,
                     });
                 }
@@ -1803,7 +1823,10 @@ fn list_dir_find(path: &Path, cluster: u64, mut f: impl FnMut(Entry)) -> bool {
                     }
                 } else {
                     let size = ((data.nFileSizeHigh as u64) << 32) | data.nFileSizeLow as u64;
-                    let disk_size = if attrs
+                    let cloud = attrs & CLOUD_RECALL_ATTRIBUTES != 0;
+                    let disk_size = if cloud {
+                        0
+                    } else if attrs
                         & (FILE_ATTRIBUTE_COMPRESSED
                             | FILE_ATTRIBUTE_SPARSE_FILE
                             | FILE_ATTRIBUTE_REPARSE_POINT)
@@ -1821,6 +1844,7 @@ fn list_dir_find(path: &Path, cluster: u64, mut f: impl FnMut(Entry)) -> bool {
                         modified,
                         file_id: 0,
                         hidden,
+                        cloud,
                         uid: 0,
                     });
                 }
@@ -1896,6 +1920,7 @@ fn list_dir(path: &Path, _volume: &Volume, mut f: impl FnMut(Entry)) -> bool {
                 modified,
                 file_id,
                 hidden,
+                cloud: false,
                 uid,
             });
         }
