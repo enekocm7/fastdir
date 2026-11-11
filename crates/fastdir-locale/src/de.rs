@@ -339,6 +339,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Dateiformat",
         "exp.csv" => "CSV (Tabellenkalkulation)",
         "exp.json" => "JSON (wieder importierbar)",
+        "exp.html" => "HTML-Bericht",
+        "exp.html_hint" => {
+            "Eine eigenständige Datei zum Teilen: Zusammenfassung, Treemap, größte Dateien und Ordnerbaum."
+        }
         "exp.include_files" => "Dateien einschließen",
         "exp.files_hint" => "Aus exportiert nur Ordner.",
         "exp.max_depth" => "Max. Tiefe (Ebenen unter dem exportierten Ordner)",

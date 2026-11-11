@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 fastdir-core.workspace = true
 rayon.workspace = true
+# PNG encoding for the treemap embedded in HTML reports.
+image = { workspace = true, features = ["png"] }
 
 [dev-dependencies]
 criterion.workspace = true

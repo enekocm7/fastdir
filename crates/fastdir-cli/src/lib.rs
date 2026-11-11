@@ -28,6 +28,7 @@ use fastdir_core::model::Tree;
 use fastdir_core::scanfile;
 use fastdir_core::scanner::{self, Progress, ScanOptions};
 use fastdir_core::windows_apps;
+use fastdir_treemap::{ReportOptions, export_html};
 use schema::{ScanDoc, ScanMeta, TreeShape};
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -62,6 +63,16 @@ impl CliError {
             message: message.into(),
         }
     }
+}
+
+/// The error for `--format html` on the commands that do not write a report.
+/// The parser only accepts `html` for `scan`, so this is a safety net rather
+/// than a reachable user path.
+pub(crate) fn html_not_supported() -> CliError {
+    CliError::new(
+        exit::USAGE,
+        "--format html is only available for `fastdir scan`",
+    )
 }
 
 /// Run the command line with `args` (without the program name) and return
@@ -338,6 +349,13 @@ fn write_json(out: &OutputArgs, value: &impl serde::Serialize) -> Result<(), Cli
 }
 
 fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
+    if c.out.format == Format::Html && c.filter.is_active() {
+        // The report shows the whole scan; refuse before scanning.
+        return Err(CliError::new(
+            exit::USAGE,
+            "filters (--name, --ext, --min-size, ...) are not supported with --format html",
+        ));
+    }
     let scanned = scan_with_progress(&c.scan)?;
     let filter = c.filter.is_active().then_some(&c.filter);
     let view = filter.map(|filter| FilterView::new(&scanned.tree, filter));
@@ -362,6 +380,16 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
                 include_files: c.include_files,
             };
             export_csv_filtered(&scanned.tree, &[], &options, filter, &mut w).map_err(io_error)?;
+            w.flush().map_err(io_error)
+        }
+        Format::Html => {
+            let mut w = open_output(&c.out)?;
+            let options = ReportOptions {
+                max_depth: c.max_depth,
+                include_files: c.include_files,
+                ..Default::default()
+            };
+            export_html(&scanned.tree, &[], &options, &mut w).map_err(io_error)?;
             w.flush().map_err(io_error)
         }
         Format::Binary => {
@@ -403,6 +431,7 @@ fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        Format::Html => Err(html_not_supported()),
         // The parser only accepts `bin` for `scan`.
         Format::Binary => Err(binary_output_unsupported()),
     }
@@ -471,6 +500,7 @@ fn run_duplicates_command(c: &DuplicatesCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        Format::Html => Err(html_not_supported()),
         // The parser only accepts `bin` for `scan`.
         Format::Binary => Err(binary_output_unsupported()),
     }
@@ -594,6 +624,7 @@ fn run_diff_command(c: &DiffCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        Format::Html => Err(html_not_supported()),
         // The parser only accepts `bin` for `scan`.
         Format::Binary => Err(binary_output_unsupported()),
     }
@@ -756,6 +787,49 @@ mod tests {
         assert_eq!(doc["tree"]["files"], 2);
         assert_eq!(doc["tree"]["folders"], 1);
         assert_eq!(doc["tree"]["children"][0]["name"], "sub");
+        let _ = std::fs::remove_file(&out);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn scan_writes_a_self_contained_html_report() {
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-html-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("big.bin"), vec![0u8; 3000]).unwrap();
+        std::fs::write(dir.join("b.txt"), b"hi").unwrap();
+        let out =
+            std::env::temp_dir().join(format!("fastdir-cli-html-{}.html", std::process::id()));
+        let code = run(vec![
+            "scan".into(),
+            dir.clone().into_os_string(),
+            "-q".into(),
+            "--format".into(),
+            "html".into(),
+            "-o".into(),
+            out.clone().into_os_string(),
+        ]);
+        assert_eq!(code, exit::OK);
+        let html = std::fs::read_to_string(&out).unwrap();
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(html.contains("src=\"data:image/png;base64,"));
+        assert!(html.contains("big.bin"));
+        assert!(!html.contains("http://") && !html.contains("https://"));
+        let _ = std::fs::remove_file(&out);
+
+        // Filters only shape JSON and CSV output.
+        let code = run(vec![
+            "scan".into(),
+            dir.clone().into_os_string(),
+            "-q".into(),
+            "--format".into(),
+            "html".into(),
+            "--ext".into(),
+            "bin".into(),
+            "-o".into(),
+            out.clone().into_os_string(),
+        ]);
+        assert_eq!(code, exit::USAGE);
         let _ = std::fs::remove_file(&out);
         std::fs::remove_dir_all(&dir).unwrap();
     }

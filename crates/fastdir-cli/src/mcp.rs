@@ -21,6 +21,7 @@ use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
 use fastdir_core::scanfile;
 use fastdir_core::scanner::{self, Progress, ScanOptions};
 use fastdir_core::windows_apps;
+use fastdir_treemap::{ReportOptions, export_html};
 use serde_json::{Value, json};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -307,13 +308,13 @@ impl Server {
             }),
             json!({
                 "name": "export_scan",
-                "description": "Write a scanned folder (or a subfolder) to a JSON (fastdir.scan schema), CSV or compact binary (.fdscan) file. The binary format keeps hard-link markers and loads faster.",
+                "description": "Write a scanned folder (or a subfolder) to a JSON (fastdir.scan schema), CSV or compact binary (.fdscan) file, or to one self-contained HTML report with a summary, treemap, largest files and folder tree. The binary format keeps hard-link markers and loads faster.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "path": path,
                         "output": { "type": "string", "description": "File to write" },
-                        "format": { "type": "string", "enum": ["json", "csv", "bin"], "default": "json" },
+                        "format": { "type": "string", "enum": ["json", "csv", "bin", "html"], "default": "json" },
                         "max_depth": { "type": "integer", "minimum": 0 },
                         "include_files": { "type": "boolean", "default": true },
                     },
@@ -751,6 +752,17 @@ impl Server {
                 &mut w,
             )
             .map(|_| ()),
+            "html" => export_html(
+                &s.tree,
+                &node,
+                &ReportOptions {
+                    max_depth,
+                    include_files,
+                    ..Default::default()
+                },
+                &mut w,
+            )
+            .map(|_| ()),
             "bin" | "binary" | "fdscan" => scanfile::export_binary(
                 &s.tree,
                 &node,
@@ -763,7 +775,9 @@ impl Server {
             )
             .map(|_| ()),
             other => {
-                return tool_err(format!("format must be json, csv or bin, got {other}"));
+                return tool_err(format!(
+                    "format must be json, csv, bin or html, got {other}"
+                ));
             }
         };
         written
@@ -1341,6 +1355,18 @@ mod tests {
         assert_eq!(doc["schema"], "fastdir.scan");
         assert_eq!(doc["tree"]["name"], "docs");
         assert_eq!(doc["tree"]["size"], 150);
+
+        let report = dir.0.join("report.html");
+        let v = ok(
+            &mut s,
+            "export_scan",
+            json!({ "path": docs, "output": report.to_string_lossy(), "format": "html" }),
+        );
+        assert_eq!(v["format"], "html");
+        let html = std::fs::read_to_string(&report).unwrap();
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(html.contains("a.txt"));
+        assert!(html.contains("src=\"data:image/png;base64,"));
     }
 
     #[test]

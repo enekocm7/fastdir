@@ -341,6 +341,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "파일 형식",
         "exp.csv" => "CSV(스프레드시트)",
         "exp.json" => "JSON(다시 가져오기 가능)",
+        "exp.html" => "HTML 보고서",
+        "exp.html_hint" => "공유용 단일 파일: 요약, 트리맵, 가장 큰 파일, 폴더 트리.",
         "exp.include_files" => "파일 포함",
         "exp.files_hint" => "끄면 폴더만 내보냅니다",
         "exp.max_depth" => "최대 깊이(내보내는 폴더 아래 수준)",

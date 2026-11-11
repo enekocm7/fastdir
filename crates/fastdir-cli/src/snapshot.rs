@@ -205,6 +205,7 @@ pub fn run_history_command(c: &HistoryCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        Format::Html => Err(crate::html_not_supported()),
         // The parser only accepts `bin` for `scan`.
         Format::Binary => Err(crate::binary_output_unsupported()),
     }

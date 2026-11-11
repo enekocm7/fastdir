@@ -341,6 +341,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "ファイル形式",
         "exp.csv" => "CSV（スプレッドシート）",
         "exp.json" => "JSON（再インポート可能）",
+        "exp.html" => "HTMLレポート",
+        "exp.html_hint" => {
+            "共有用の単一ファイル: 概要、ツリーマップ、最大のファイル、フォルダーツリー。"
+        }
         "exp.include_files" => "ファイルを含める",
         "exp.files_hint" => "オフの場合はフォルダーのみ",
         "exp.max_depth" => "最大深度（エクスポート対象フォルダー以下の階層）",

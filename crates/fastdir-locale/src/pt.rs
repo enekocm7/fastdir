@@ -339,6 +339,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Formato de ficheiro",
         "exp.csv" => "CSV (folha de cálculo)",
         "exp.json" => "JSON (reimportável)",
+        "exp.html" => "Relatório HTML",
+        "exp.html_hint" => {
+            "Um único ficheiro autónomo para partilhar: resumo, treemap, maiores ficheiros e árvore de pastas."
+        }
         "exp.include_files" => "Incluir ficheiros",
         "exp.files_hint" => "Desligado exporta só pastas.",
         "exp.max_depth" => "Profundidade máx. (níveis abaixo da pasta exportada)",

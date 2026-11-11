@@ -317,6 +317,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Dosya biçimi",
         "exp.csv" => "CSV (e-tablo)",
         "exp.json" => "JSON (yeniden içe aktarılabilir)",
+        "exp.html" => "HTML raporu",
+        "exp.html_hint" => {
+            "Paylaşmak için tek dosya: özet, treemap, en büyük dosyalar ve klasör ağacı."
+        }
         "exp.include_files" => "Dosyaları dahil et",
         "exp.files_hint" => "Kapalı yalnızca klasörleri dışa aktarır.",
         "exp.max_depth" => "Maks. derinlik (dışa aktarılan klasörün altındaki düzeyler)",

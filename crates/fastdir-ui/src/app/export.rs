@@ -3,6 +3,7 @@
 
 use super::*;
 use fastdir_core::export::{self, ExportFormat, ExportOptions};
+use fastdir_treemap::{ReportOptions, export_html_to_file};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
 
@@ -20,13 +21,27 @@ pub(super) enum ExportFileFormat {
     #[default]
     Csv,
     Json,
+    /// One self-contained HTML file: summary, treemap, largest files and
+    /// folder tree, for sharing with someone who has no FastDir.
+    Html,
 }
 
 impl ExportFileFormat {
-    fn core(self) -> ExportFormat {
+    /// The CSV/JSON serializers in `fastdir-core`. HTML reports come from
+    /// `fastdir-treemap` instead (they embed its rendered treemap).
+    fn core(self) -> Option<ExportFormat> {
         match self {
-            Self::Csv => ExportFormat::Csv,
-            Self::Json => ExportFormat::Json,
+            Self::Csv => Some(ExportFormat::Csv),
+            Self::Json => Some(ExportFormat::Json),
+            Self::Html => None,
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Csv => "csv",
+            Self::Json => "json",
+            Self::Html => "html",
         }
     }
 }
@@ -154,6 +169,7 @@ impl FastDir {
                                 .selected_index(Some(match form.format {
                                     ExportFileFormat::Csv => 0,
                                     ExportFileFormat::Json => 1,
+                                    ExportFileFormat::Html => 2,
                                 }))
                                 .child(
                                     Radio::new("export-format-csv")
@@ -163,18 +179,29 @@ impl FastDir {
                                     Radio::new("export-format-json")
                                         .label(fastdir_locale::t(&lang, "exp.json")),
                                 )
+                                .child(
+                                    Radio::new("export-format-html")
+                                        .label(fastdir_locale::t(&lang, "exp.html")),
+                                )
                                 .on_change(move |ix: &usize, _window, cx| {
                                     format_entity
                                         .update(cx, |this, _| {
-                                            this.export_form.format = if *ix == 1 {
-                                                ExportFileFormat::Json
-                                            } else {
-                                                ExportFileFormat::Csv
+                                            this.export_form.format = match *ix {
+                                                1 => ExportFileFormat::Json,
+                                                2 => ExportFileFormat::Html,
+                                                _ => ExportFileFormat::Csv,
                                             };
                                         })
                                         .ok();
                                 }),
                         )
+                        .child(div().text_xs().text_color(theme.muted_foreground).child(
+                            if form.format == ExportFileFormat::Html {
+                                fastdir_locale::t(&lang, "exp.html_hint")
+                            } else {
+                                ""
+                            },
+                        ))
                         .child(
                             h_flex()
                                 .justify_between()
@@ -318,10 +345,15 @@ fn do_export(
         };
         (tree, scope_path, base_name)
     };
-    let file_format = form.format.core();
+    let file_format = form.format;
     let options = ExportOptions {
         max_depth,
         include_files: form.include_files,
+    };
+    let report_options = ReportOptions {
+        max_depth,
+        include_files: form.include_files,
+        ..ReportOptions::default()
     };
     let rx = cx.prompt_for_paths(PathPromptOptions {
         files: false,
@@ -337,12 +369,16 @@ fn do_export(
             let Some(dir) = paths.into_iter().next() else {
                 return;
             };
-            let dest = dir.join(export_filename(&base_name, file_format));
+            let dest = dir.join(export_filename(&base_name, file_format.extension()));
             let job = cx.background_executor().spawn(async move {
                 let t = tree.read();
-                export::export_to_file(&t, &scope_path, file_format, &options, &dest)
-                    .map(|rows| (rows, dest))
-                    .map_err(|e| e.to_string())
+                let written = match file_format.core() {
+                    Some(format) => {
+                        export::export_to_file(&t, &scope_path, format, &options, &dest)
+                    }
+                    None => export_html_to_file(&t, &scope_path, &report_options, &dest),
+                };
+                written.map(|rows| (rows, dest)).map_err(|e| e.to_string())
             });
             let result = job.await;
             this.update_in(cx, |this, window, cx| match result {
@@ -373,8 +409,8 @@ fn do_export(
     true
 }
 
-/// `fastdir-<folder>-<unix>.csv`, safe for file systems.
-fn export_filename(base_name: &str, format: ExportFormat) -> String {
+/// `fastdir-<folder>-<unix>.<extension>`, safe for file systems.
+fn export_filename(base_name: &str, extension: &str) -> String {
     let mut stem: String = base_name
         .chars()
         .map(|c| {
@@ -393,5 +429,5 @@ fn export_filename(base_name: &str, format: ExportFormat) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    format!("fastdir-{stem}-{now}.{}", format.extension())
+    format!("fastdir-{stem}-{now}.{extension}")
 }

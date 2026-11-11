@@ -44,6 +44,8 @@ pub fn is_cli_invocation(args: &[OsString]) -> bool {
 pub enum Format {
     Json,
     Csv,
+    /// One self-contained HTML report (scan only).
+    Html,
     /// Versioned binary scan (`.fdscan`), written by `scan` and read by
     /// `diff` and the GUI's "Open scan…".
     Binary,
@@ -313,16 +315,20 @@ fn parse_format(raw: &str) -> Result<Format, UsageError> {
         "json" => Ok(Format::Json),
         "csv" => Ok(Format::Csv),
         "bin" | "binary" | "fdscan" => Ok(Format::Binary),
-        _ => err(format!("--format expects json, csv or bin, got \"{raw}\"")),
+        "html" => Ok(Format::Html),
+        _ => err(format!(
+            "--format expects json, csv, bin or html, got \"{raw}\""
+        )),
     }
 }
 
 /// Commands whose output is not a saved tree (`top`, `duplicates`, `diff`,
-/// `history`) do not accept the binary scan format.
+/// `history`) accept neither the binary scan format nor the HTML report.
 fn parse_non_binary_format(raw: &str) -> Result<Format, UsageError> {
     match raw.to_ascii_lowercase().as_str() {
         "json" => Ok(Format::Json),
         "csv" => Ok(Format::Csv),
+        "html" => err("--format html is only available for `fastdir scan`"),
         _ => err(format!("--format expects json or csv, got \"{raw}\"")),
     }
 }
@@ -1030,14 +1036,18 @@ Scans <path> and writes the tree to stdout (JSON by default). Progress and a
 summary go to stderr.
 
 Output:
-  --format json|csv|bin   output format (default: json); bin writes the compact
+  --format json|csv|bin|html
+                          output format (default: json); bin writes the compact
                           binary .fdscan form (slower to read for humans,
-                          faster to reopen for very large scans)
+                          faster to reopen for very large scans); html writes
+                          one self-contained report file with the summary
+                          totals, a treemap image, the largest files and a
+                          folder tree
   -o, --output <file|->   write to a file instead of stdout
   --pretty                indent the JSON
   --max-depth <n>         only include entries up to <n> levels below <path>
                           (0 = just <path>); sizes still count everything
-  --no-files              only include folders
+  --no-files              only include folders (also limits the html report)
 
 Filtering:
   --name <text|glob>      only entries whose name matches; a glob when it
@@ -1673,12 +1683,17 @@ mod tests {
     fn usage_errors() {
         assert!(parse_err(&["scan"]).contains("missing <path>"));
         assert!(parse_err(&["scan", "a", "b"]).contains("extra argument"));
-        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json, csv or bin"));
+        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json, csv, bin or html"));
         // Only `scan` writes a saved tree, so only it accepts the binary form.
         assert!(parse_err(&["top", "a", "--format", "bin"]).contains("json or csv"));
         assert!(parse_err(&["duplicates", "a", "--format", "bin"]).contains("json or csv"));
         assert!(parse_err(&["diff", "a", "b", "--format", "bin"]).contains("json or csv"));
         assert!(parse_err(&["history", "--format", "bin"]).contains("json or csv"));
+        // Likewise for the HTML report.
+        assert!(parse_err(&["top", "a", "--format", "html"]).contains("only available"));
+        assert!(parse_err(&["duplicates", "a", "--format", "html"]).contains("only available"));
+        assert!(parse_err(&["diff", "a", "b", "--format", "html"]).contains("only available"));
+        assert!(parse_err(&["history", "a", "--format", "html"]).contains("only available"));
         assert!(parse_err(&["scan", "a", "--threads", "0"]).contains("at least 1"));
         assert!(parse_err(&["scan", "a", "--threads", "65"]).contains("between 1 and 64"));
         assert!(parse_err(&["scan", "a", "--threads"]).contains("needs a value"));

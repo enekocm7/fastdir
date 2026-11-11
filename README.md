@@ -71,6 +71,12 @@ culprit? Rename, move, recycle or delete it right there.
   time…* charts the selected folder's size across every snapshot that
   contains it, with the change between snapshots and a one-click comparison.
   Retention settings keep the snapshot folder from growing without limit.
+- **Standalone HTML report** – *Export* → *HTML report* (or `fastdir-cli scan
+  <path> --format html -o report.html`) writes one self-contained `.html`
+  file with the summary totals, a treemap image, the largest files and a
+  collapsible folder tree. Everything is inlined, so it opens in any browser
+  with no network access and without FastDir installed. The export dialog's
+  depth and *include files* options also bound the report.
 - **Drive overview** – every mounted volume with its label, file system and
   how full it is. Click one to scan it, or pick any folder.
 - **`<Free space>` and an explained `<Unknown>`** – a whole-drive scan adds
@@ -441,10 +447,10 @@ skipped and only locations inside the scan take part.
 
 ### Command line (for scripts and agents)
 
-FastDir also runs headless: it scans, prints JSON or CSV and exits without
-opening a window. Use **`fastdir-cli`** (shipped next to `fastdir.exe`) from
-a terminal. `fastdir.exe` accepts the same commands, but it is a GUI program
-on Windows, so `cmd.exe` does not wait for it; it is fine when its output is
+FastDir also runs headless: it scans, prints JSON or CSV (or writes an HTML
+report) and exits without opening a window. Use **`fastdir-cli`** (shipped
+next to `fastdir.exe`) from a terminal. `fastdir.exe` accepts the same
+commands, but it is a GUI program on Windows, so `cmd.exe` does not wait for it; it is fine when its output is
 piped or redirected.
 
 ```text
@@ -470,6 +476,9 @@ fastdir-cli scan C:\Users --max-depth 1 --no-files |
 
 # Fifty largest files on D:, as CSV
 fastdir-cli top D:\ --limit 50 --format csv -o big-files.csv
+
+# A self-contained HTML report of D:\Projects to share
+fastdir-cli scan D:\Projects --format html -o projects-report.html
 
 # Duplicate videos over 100 MB under D:, largest waste first
 fastdir-cli duplicates D:\ --min-size 100MB --ext .mp4 --pretty
@@ -506,7 +515,7 @@ row has its own sizes.
 
 | Option | Commands | |
 |---|---|---|
-| `--format json\|csv\|bin` | scan | Output format (default `json`; `bin` writes the compact `.fdscan` scan) |
+| `--format json\|csv\|bin\|html` | scan | Output format (default `json`; `bin` writes the compact `.fdscan` scan; `html` writes one self-contained report with the summary, a treemap image, the largest files and a folder tree, honouring `--max-depth` and `--no-files` but not filters) |
 | `--format json\|csv` | top, duplicates, diff | Output format (default `json`; CSV uses the export dialog's columns) |
 | `-o, --output <file\|->` | scan, top, duplicates, diff | Write to a file instead of stdout |
 | `--pretty` | scan, top, duplicates, diff | Indent the JSON |
@@ -776,7 +785,7 @@ rescan. A tool given a folder outside every cached scan scans it first.
 | `path_info` | One entry's sizes and counts, and its share of its parent and of the scan |
 | `find_duplicates` | Groups of identical files under a folder and the space they waste; reuses the cached scan |
 | `compare_scans` | What changed since a cached scan or a saved scan (JSON or `.fdscan`), as `fastdir.diff` |
-| `export_scan` | Write a folder to a JSON (`fastdir.scan`), CSV or binary `.fdscan` file |
+| `export_scan` | Write a folder to a JSON (`fastdir.scan`), CSV or binary `.fdscan` file, or a standalone HTML report (`format: "html"`) |
 
 `largest_files` and `search` take the same optional filter fields as the
 command line: `query` (or `name`), `min_size`, `extension` (a string or a

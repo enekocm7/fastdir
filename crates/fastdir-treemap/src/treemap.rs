@@ -140,7 +140,7 @@ fn normalize(r: &mut f64, g: &mut f64, b: &mut f64) {
 }
 
 /// Equalise a colour to the palette brightness (so all hues look equally bright).
-fn bright_color((r, g, b): (u8, u8, u8)) -> [f64; 3] {
+pub(crate) fn bright_color((r, g, b): (u8, u8, u8)) -> [f64; 3] {
     let (mut r, mut g, mut b) = (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
     let sum = r + g + b;
     if sum > 0.0 {
