@@ -13,7 +13,7 @@ members = [
 default-members = [".", "crates/fastdir-cli"]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 repository = "https://github.com/enekocm7/fastdir"
 license = "GPL-3.0-or-later"

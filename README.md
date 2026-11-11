@@ -688,7 +688,7 @@ every 100 ms. Closing the pipe
 (`... | head`) stops the scan.
 
 ```jsonc
-{"record": "start", "schema": "fastdir.scan.ndjson", "version": 1, "fastdir_version": "0.3.2",
+{"record": "start", "schema": "fastdir.scan.ndjson", "version": 1, "fastdir_version": "0.4.0",
  "root": "C:\Users", "scanned_at": "2026-11-03T12:00:00Z"}
 {"record": "entry", "name": "notes.txt", "path": "C:\Users\me\notes.txt", "type": "file",
  "depth": 2, "size": 1200, "disk_size": 4096, "items": 1, "files": 1, "folders": 0,
@@ -814,7 +814,7 @@ reclaimable bytes) and `hash`.
 
 ```jsonc
 {
-  "schema": "fastdir.snapshot", "version": 1, "fastdir_version": "0.3.2",
+  "schema": "fastdir.snapshot", "version": 1, "fastdir_version": "0.4.0",
   "root": "D:\\", "scanned_at": "2026-11-10T03:00:00Z",
   "elapsed_ms": 15400, "errors": 3,
   "file": "C:\\Users\\me\\AppData\\Roaming\\FastDir\\snapshots\\D-…\\20261110T030000Z.json",
@@ -831,7 +831,7 @@ snapshot that contains it, oldest first:
 
 ```jsonc
 {
-  "schema": "fastdir.history", "version": 1, "fastdir_version": "0.3.2",
+  "schema": "fastdir.history", "version": 1, "fastdir_version": "0.4.0",
   "path": "D:\\Projects", "snapshots_dir": "…",
   "change": 2147483648,              // last size - first size, or null
   "points": [
@@ -1042,7 +1042,7 @@ Install [Inno Setup 6](https://jrsoftware.org/isinfo.php), then:
 
 ```powershell
 cargo build --release
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.2 installer\fastdir.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.4.0 installer\fastdir.iss
 ```
 
 The installer is written to `dist\`.
