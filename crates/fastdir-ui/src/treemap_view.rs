@@ -1,11 +1,17 @@
 //! The treemap panel: shows the cushion image rendered off the main thread
 //! and turns clicks into selections. It can be zoomed into any folder; a
 //! breadcrumb above the image leads back up.
+//!
+//! The same panel draws the sunburst ([`Layout::Sunburst`]): only the layout
+//! calls differ, so selection, hover, zoom, highlights and colour modes work
+//! the same in both views.
 
 use fastdir_core::diff::ScanDiff;
 use fastdir_core::format;
 use fastdir_core::model::{Node, NodePath, Tree};
-use fastdir_treemap::{self as treemap, AgeBucket, ColorMode, Palette, RenderOptions};
+use fastdir_treemap::{
+    self as treemap, AgeBucket, ColorMode, Layout, Palette, RenderOptions, sunburst,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
@@ -66,6 +72,7 @@ struct Key {
     cushion_strength: u32,
     borders: bool,
     min_cell: u32,
+    layout: Layout,
 }
 
 impl Key {
@@ -82,6 +89,7 @@ impl Key {
         zoom: u64,
         change: u64,
         opts: RenderOptions,
+        layout: Layout,
     ) -> Self {
         Self {
             generation,
@@ -102,6 +110,7 @@ impl Key {
             cushion_strength: opts.cushion_strength.to_bits(),
             borders: opts.borders,
             min_cell: opts.min_cell.to_bits(),
+            layout,
         }
     }
 
@@ -165,6 +174,8 @@ pub struct TreemapView {
     cushion_strength: f32,
     borders: bool,
     min_cell: f32,
+    /// Treemap or sunburst.
+    layout: Layout,
     /// Format hover sizes with decimal (SI) units instead of binary ones.
     decimal_sizes: bool,
     /// Resolved UI language code for hover labels and hints.
@@ -209,6 +220,7 @@ impl TreemapView {
             cushion_strength: 1.0,
             borders: false,
             min_cell: 1.0,
+            layout: Layout::Treemap,
             decimal_sizes: false,
             lang: "en".to_string(),
             partial: false,
@@ -223,10 +235,16 @@ impl TreemapView {
     pub fn set_render(
         &mut self,
         opts: &RenderOptions,
+        layout: Layout,
         decimal_sizes: bool,
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
+        if set_if_diff(&mut self.layout, layout) {
+            // The cell under the pointer is a different one in the other view.
+            self.hover = None;
+            changed = true;
+        }
         changed |= set_if_diff(&mut self.show_free, opts.show_free);
         changed |= set_if_diff(&mut self.show_unknown, opts.show_unknown);
         changed |= set_if_diff(&mut self.use_disk_size, opts.use_disk);
@@ -360,7 +378,10 @@ impl TreemapView {
             .and_then(|sel| sel.strip_prefix(self.zoom.as_slice()))
             .map(<[u32]>::to_vec)
             .unwrap_or_default();
-        let rel = treemap::neighbor(&tree, root, w, h, &from, dir, &opts)?;
+        let rel = match self.layout {
+            Layout::Treemap => treemap::neighbor(&tree, root, w, h, &from, dir, &opts)?,
+            Layout::Sunburst => sunburst::neighbor(&tree, root, w, h, &from, dir, &opts)?,
+        };
         let mut path = self.zoom.clone();
         path.extend(rel);
         Some(path)
@@ -532,15 +553,26 @@ impl TreemapView {
                     let t = tree.read();
                     let root = t.get(&zoom).unwrap_or(t.root());
                     opts.root_owner = t.owner_at(&zoom);
-                    let buf = treemap::render_with_change(
-                        &t,
-                        root,
-                        key.w,
-                        key.h,
-                        background,
-                        &opts,
-                        change.as_deref(),
-                    );
+                    let buf = match key.layout {
+                        Layout::Treemap => treemap::render_with_change(
+                            &t,
+                            root,
+                            key.w,
+                            key.h,
+                            background,
+                            &opts,
+                            change.as_deref(),
+                        ),
+                        Layout::Sunburst => sunburst::render(
+                            &t,
+                            root,
+                            key.w,
+                            key.h,
+                            background,
+                            &opts,
+                            change.as_deref(),
+                        ),
+                    };
                     let totals = (opts.color_mode == ColorMode::Age)
                         .then(|| treemap::age_bucket_totals(&t, root, opts.now, opts.use_disk));
                     (buf, totals)
@@ -581,7 +613,11 @@ impl TreemapView {
         let tree = self.tree.as_ref()?.read();
         let (w, h, x, y) = self.device_point(position);
         let root = tree.get(&self.zoom)?;
-        let rel = treemap::hit_test(&tree, root, w, h, x, y, &self.render_opts())?;
+        let opts = self.render_opts();
+        let rel = match self.layout {
+            Layout::Treemap => treemap::hit_test(&tree, root, w, h, x, y, &opts)?,
+            Layout::Sunburst => sunburst::hit_test(&tree, root, w, h, x, y, &opts)?,
+        };
         let mut path = self.zoom.clone();
         path.extend(rel);
         Some(path)
@@ -658,6 +694,15 @@ impl TreemapView {
     }
 }
 
+/// Stroke one closed polygon (the outline of a sunburst segment).
+fn stroke_loop(window: &mut Window, points: &[Point<Pixels>], width: f32, color: Hsla) {
+    let mut builder = PathBuilder::stroke(px(width));
+    builder.add_polygon(points, true);
+    if let Ok(path) = builder.build() {
+        window.paint_path(path, color);
+    }
+}
+
 /// Assign when different; reports whether anything changed.
 fn set_if_diff<T: PartialEq>(slot: &mut T, value: T) -> bool {
     if *slot == value {
@@ -706,6 +751,8 @@ impl Render for TreemapView {
         let accent = theme.primary;
         let render_opts = self.render_opts();
         let paint_opts = render_opts;
+        let layout = self.layout;
+        let centre_label = self.sunburst_centre_label();
         let _ = window;
 
         let canvas = canvas(
@@ -727,6 +774,7 @@ impl Render for TreemapView {
                         zoom,
                         change_gen,
                         render_opts,
+                        layout,
                     );
                     if image_key != Some(key) && pending != Some(key) {
                         cx.defer(move |cx| {
@@ -757,10 +805,33 @@ impl Render for TreemapView {
                     let Some(rel) = sel.strip_prefix(zoom_path.as_slice()) else {
                         continue;
                     };
+                    let origin = bounds.origin;
+                    if layout == Layout::Sunburst {
+                        let Some(seg) = sunburst::segment_of(&t, root, w, h, rel, &paint_opts)
+                        else {
+                            continue;
+                        };
+                        for outline in seg.outline() {
+                            let points: Vec<Point<Pixels>> = outline
+                                .iter()
+                                .map(|&(x, y)| {
+                                    point(
+                                        origin.x + px((x / scale) as f32),
+                                        origin.y + px((y / scale) as f32),
+                                    )
+                                })
+                                .collect();
+                            if focused {
+                                // Keyboard focus ring: accent colour, behind.
+                                stroke_loop(window, &points, 6., accent);
+                            }
+                            stroke_loop(window, &points, 2., if dark { white() } else { black() });
+                        }
+                        continue;
+                    }
                     let Some(r) = treemap::rect_of(&t, root, w, h, rel, &paint_opts) else {
                         continue;
                     };
-                    let origin = bounds.origin;
                     let rb = Bounds::new(
                         point(
                             origin.x + px((r.x0 / scale) as f32),
@@ -824,13 +895,18 @@ impl Render for TreemapView {
         let muted = theme.muted_foreground;
         let popover = theme.popover;
         let fg = theme.popover_foreground;
+        let foreground = theme.foreground;
         let breadcrumb = has_tree.then(|| self.render_breadcrumb(cx));
         let legend = self
             .render_age_legend(cx)
             .or_else(|| self.render_change_legend(cx))
             .or_else(|| self.render_highlight_legend(cx));
-        let a11y_label = fastdir_locale::t(&self.lang, "a11y.treemap");
-        let a11y_hint = fastdir_locale::t(&self.lang, "a11y.treemap_hint");
+        let (a11y_label, a11y_hint) = match layout {
+            Layout::Treemap => ("a11y.treemap", "a11y.treemap_hint"),
+            Layout::Sunburst => ("a11y.sunburst", "a11y.sunburst_hint"),
+        };
+        let a11y_label = fastdir_locale::t(&self.lang, a11y_label);
+        let a11y_hint = fastdir_locale::t(&self.lang, a11y_hint);
 
         let body = div()
             .id("treemap")
@@ -876,6 +952,31 @@ impl Render for TreemapView {
                         .child(fastdir_locale::t(&self.lang, "tree.rendering")),
                 )
             })
+            .when_some(centre_label, |this, (name, size, width)| {
+                // The folder the rings belong to, inside the centre disc.
+                this.child(
+                    v_flex()
+                        .absolute()
+                        .inset_0()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            v_flex()
+                                .w(px(width))
+                                .items_center()
+                                .text_xs()
+                                .text_color(foreground)
+                                .child(
+                                    div()
+                                        .max_w_full()
+                                        .truncate()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(name),
+                                )
+                                .child(div().text_color(muted).child(size)),
+                        ),
+                )
+            })
             .when_some(self.hover.as_ref(), |this, (_, label)| {
                 this.child(
                     h_flex()
@@ -906,6 +1007,45 @@ impl Render for TreemapView {
 }
 
 impl TreemapView {
+    /// Name and size of the zoomed folder plus the width (logical px) they
+    /// may take inside the sunburst's centre disc. `None` in the treemap, or
+    /// when the disc is too small for text.
+    fn sunburst_centre_label(&self) -> Option<(SharedString, SharedString, f32)> {
+        if self.layout != Layout::Sunburst {
+            return None;
+        }
+        let tree = self.tree.as_ref()?.read();
+        let root = tree.get(&self.zoom)?;
+        let b = self.bounds.get();
+        let scale = self.scale.get() as f64;
+        let w = (f32::from(b.size.width) as f64 * scale).round();
+        let h = (f32::from(b.size.height) as f64 * scale).round();
+        let hole = sunburst::geometry(&tree, root, w, h, &self.render_opts())?.hole / scale;
+        if hole < 26.0 {
+            return None;
+        }
+        let name = if self.zoom.is_empty() {
+            let path = &tree.root_path;
+            path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string())
+        } else {
+            fastdir_locale::special_display(tree.name(root), &self.lang)
+                .unwrap_or_else(|| tree.name(root))
+                .to_string()
+        };
+        let size = if self.use_disk_size {
+            root.disk_size
+        } else {
+            root.size
+        };
+        Some((
+            name.into(),
+            format::bytes_with(size, self.decimal_sizes).into(),
+            (hole * 1.7) as f32,
+        ))
+    }
+
     /// Text legend for the extension / category highlight, so the dimming of
     /// the other cells is not the only cue.
     fn render_highlight_legend(&self, cx: &mut Context<Self>) -> Option<AnyElement> {

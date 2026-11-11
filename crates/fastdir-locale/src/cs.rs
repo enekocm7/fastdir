@@ -699,6 +699,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 rok",
         "set.snapshots.age_none" => "Nikdy",
         "set.snapshots.open" => "Otevřít složku",
+        "tb.menu_sunburst" => "Zobrazit jako paprskový graf",
+        "set.tree.layout" => "Zobrazení",
+        "set.tree.layout_treemap" => "Stromová mapa",
+        "set.tree.layout_sunburst" => "Paprskový graf",
+        "set.tree.layout_cap" => "Paprskový graf má složku uprostřed a jeden prstenec pro každou úroveň.",
+        "a11y.sunburst" => "Paprskový graf",
+        "a11y.sunburst_hint" => "Stiskněte F8: šipky vlevo a vpravo procházejí prstenec, dolů o úroveň ven, nahoru zpět ke středu",
         _ => return None,
     })
 }

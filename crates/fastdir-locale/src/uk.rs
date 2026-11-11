@@ -679,6 +679,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 рік",
         "set.snapshots.age_none" => "Ніколи",
         "set.snapshots.open" => "Відкрити теку",
+        "tb.menu_sunburst" => "Показувати у вигляді сонячних променів",
+        "set.tree.layout" => "Вигляд",
+        "set.tree.layout_treemap" => "Деревоподібна карта",
+        "set.tree.layout_sunburst" => "Сонячні промені",
+        "set.tree.layout_cap" => "«Сонячні промені»: папка в центрі й одне кільце на кожен рівень.",
+        "a11y.sunburst" => "Діаграма «сонячні промені»",
+        "a11y.sunburst_hint" => "Натисніть F8: стрілки ліворуч і праворуч переміщують по кільцю, вниз — на рівень назовні, вгору — назад до центру",
         _ => return None,
     })
 }

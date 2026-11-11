@@ -86,6 +86,17 @@ pub enum TreemapPalette {
     Mono,
 }
 
+/// Which picture the map panel draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TreemapLayout {
+    /// Squarified cushion treemap.
+    #[default]
+    Treemap,
+    /// Radial sunburst: the folder in the middle, one ring per level.
+    Sunburst,
+}
+
 /// What decides a treemap leaf's colour.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -431,6 +442,9 @@ pub struct TreemapSettings {
     /// Show the treemap at all (off gives a list-only layout for small
     /// screens or very large scans).
     pub show: bool,
+    /// Draw the tree as a treemap or as a sunburst. Everything else in this
+    /// section applies to both.
+    pub layout: TreemapLayout,
 }
 
 impl Default for TreemapSettings {
@@ -446,6 +460,7 @@ impl Default for TreemapSettings {
             borders: false,
             min_cell: 1.0,
             show: true,
+            layout: TreemapLayout::Treemap,
         }
     }
 }
@@ -1101,6 +1116,7 @@ mod tests {
                 borders: true,
                 min_cell: 2.0,
                 show: false,
+                layout: TreemapLayout::Sunburst,
             },
             list: ListSettings {
                 size_unit: SizeUnit::Decimal,
@@ -1447,5 +1463,28 @@ follow_junctions = true
         };
         assert_eq!(empty.effective_dir(), default_snapshot_dir());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn treemap_layout_defaults_to_treemap_and_round_trips() {
+        // A config written before the sunburst existed has no `layout`.
+        let old: Settings = toml::from_str(
+            "[treemap]
+show = true
+",
+        )
+        .unwrap();
+        assert_eq!(old.treemap.layout, TreemapLayout::Treemap);
+
+        let new: Settings = toml::from_str(
+            "[treemap]
+layout = \"sunburst\"
+",
+        )
+        .unwrap();
+        assert_eq!(new.treemap.layout, TreemapLayout::Sunburst);
+        assert!(new.treemap.show, "the other fields keep their defaults");
+        let text = toml::to_string_pretty(&new).unwrap();
+        assert!(text.contains("layout = \"sunburst\""));
     }
 }

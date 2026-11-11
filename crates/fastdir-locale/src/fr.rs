@@ -697,6 +697,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 an",
         "set.snapshots.age_none" => "Jamais",
         "set.snapshots.open" => "Ouvrir le dossier",
+        "tb.menu_sunburst" => "Afficher en rayons de soleil",
+        "set.tree.layout" => "Vue",
+        "set.tree.layout_treemap" => "Treemap",
+        "set.tree.layout_sunburst" => "Rayons de soleil",
+        "set.tree.layout_cap" => "Les rayons de soleil placent le dossier au centre, avec un anneau par niveau.",
+        "a11y.sunburst" => "Rayons de soleil",
+        "a11y.sunburst_hint" => "Appuyez sur F8 : gauche et droite parcourent un anneau, bas avance d'un niveau vers l'extérieur, haut revient vers le centre",
         _ => return None,
     })
 }

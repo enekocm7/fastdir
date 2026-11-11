@@ -697,6 +697,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 ano",
         "set.snapshots.age_none" => "Nunca",
         "set.snapshots.open" => "Abrir pasta",
+        "tb.menu_sunburst" => "Mostrar como explosão solar",
+        "set.tree.layout" => "Vista",
+        "set.tree.layout_treemap" => "Treemap",
+        "set.tree.layout_sunburst" => "Explosão solar",
+        "set.tree.layout_cap" => "A explosão solar coloca a pasta no centro, com um anel por nível.",
+        "a11y.sunburst" => "Gráfico de explosão solar",
+        "a11y.sunburst_hint" => "Prima F8: esquerda e direita percorrem um anel, baixo avança um nível para fora e cima volta para o centro",
         _ => return None,
     })
 }

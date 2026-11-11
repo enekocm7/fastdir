@@ -697,6 +697,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 jaar",
         "set.snapshots.age_none" => "Nooit",
         "set.snapshots.open" => "Map openen",
+        "tb.menu_sunburst" => "Als zonnestraaldiagram tonen",
+        "set.tree.layout" => "Weergave",
+        "set.tree.layout_treemap" => "Treemap",
+        "set.tree.layout_sunburst" => "Zonnestraal",
+        "set.tree.layout_cap" => "Zonnestraal zet de map in het midden, met één ring per niveau.",
+        "a11y.sunburst" => "Zonnestraaldiagram",
+        "a11y.sunburst_hint" => "Druk op F8: links en rechts bewegen langs een ring, omlaag gaat een niveau naar buiten, omhoog terug naar binnen",
         _ => return None,
     })
 }

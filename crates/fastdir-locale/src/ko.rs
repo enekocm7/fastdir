@@ -695,6 +695,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1년",
         "set.snapshots.age_none" => "제거 안 함",
         "set.snapshots.open" => "폴더 열기",
+        "tb.menu_sunburst" => "선버스트 차트로 표시",
+        "set.tree.layout" => "보기",
+        "set.tree.layout_treemap" => "트리맵",
+        "set.tree.layout_sunburst" => "선버스트",
+        "set.tree.layout_cap" => "선버스트는 폴더를 가운데에 두고 단계마다 고리를 하나씩 그립니다.",
+        "a11y.sunburst" => "선버스트 차트",
+        "a11y.sunburst_hint" => "F8을 누른 뒤 왼쪽/오른쪽 키로 고리를 따라 이동하고, 아래쪽 키로 바깥 단계로, 위쪽 키로 안쪽으로 돌아갑니다",
         _ => return None,
     })
 }

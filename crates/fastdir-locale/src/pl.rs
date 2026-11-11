@@ -703,6 +703,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 rok",
         "set.snapshots.age_none" => "Nigdy",
         "set.snapshots.open" => "Otwórz folder",
+        "tb.menu_sunburst" => "Pokaż jako wykres pierścieniowy",
+        "set.tree.layout" => "Widok",
+        "set.tree.layout_treemap" => "Mapa drzewa",
+        "set.tree.layout_sunburst" => "Wykres pierścieniowy",
+        "set.tree.layout_cap" => "Wykres pierścieniowy umieszcza folder pośrodku, z jednym pierścieniem na poziom.",
+        "a11y.sunburst" => "Wykres pierścieniowy",
+        "a11y.sunburst_hint" => "Naciśnij F8: strzałki w lewo i w prawo przesuwają po pierścieniu, w dół o poziom na zewnątrz, w górę z powrotem do środka",
         _ => return None,
     })
 }
