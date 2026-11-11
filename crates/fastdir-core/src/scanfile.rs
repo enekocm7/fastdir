@@ -14,15 +14,16 @@
 //! ```text
 //! header:
 //!   magic       6 bytes   "FDSCAN"
-//!   version     u16 LE    BINARY_VERSION
+//!   version     u16 LE    BINARY_VERSION (1 is still read)
 //!   flags       u16 LE    bit 0: an owner table follows
 //!   root_path   varint length + UTF-8 bytes
 //!   scanned_at  varint    Unix seconds
 //!   owners      varint count, then count * (varint length + UTF-8 bytes)
 //!
 //! records (pre-order, one per node):
-//!   flags       u8        bits 0-1 kind, bit 2 error, bit 3 hard link,
-//!                         bit 4 owner present
+//!   flags       u8        bits 0-2 kind, bit 3 error, bit 4 hard link,
+//!                         bit 5 owner present (version 1: bits 0-1 kind,
+//!                         bits 2, 3, 4 the same flags)
 //!   name        varint length + UTF-8 bytes
 //!   size        varint    logical bytes
 //!   disk_size   varint    allocated bytes
@@ -53,7 +54,12 @@ use std::path::PathBuf;
 pub const MAGIC: &[u8; 6] = b"FDSCAN";
 
 /// Current format version. Bump only on an incompatible change.
-pub const VERSION: u16 = 1;
+///
+/// Version 2 widened the kind field to three bits for the `<Alternate
+/// streams>` pseudo-item; version 1 documents are still read.
+pub const VERSION: u16 = 2;
+/// Oldest format version the reader understands.
+const MIN_VERSION: u16 = 1;
 
 /// File extension (without the dot) used for binary scans.
 pub const EXTENSION: &str = "fdscan";
@@ -61,10 +67,15 @@ pub const EXTENSION: &str = "fdscan";
 /// Header flag: the document carries an owner table.
 const FLAG_OWNERS: u16 = 1 << 0;
 
-const FLAG_ERROR: u8 = 1 << 2;
-const FLAG_HARD_LINK: u8 = 1 << 3;
-const FLAG_OWNER: u8 = 1 << 4;
-const KIND_MASK: u8 = 0b11;
+const FLAG_ERROR: u8 = 1 << 3;
+const FLAG_HARD_LINK: u8 = 1 << 4;
+const FLAG_OWNER: u8 = 1 << 5;
+const KIND_MASK: u8 = 0b111;
+/// Version-1 layout: two kind bits, then the same flags one bit lower.
+const V1_FLAG_ERROR: u8 = 1 << 2;
+const V1_FLAG_HARD_LINK: u8 = 1 << 3;
+const V1_FLAG_OWNER: u8 = 1 << 4;
+const V1_KIND_MASK: u8 = 0b11;
 
 /// Upper bound on a stored root path, to stop a corrupt file from asking for
 /// an unbounded allocation.
@@ -218,7 +229,7 @@ pub fn import_binary(source: impl Read) -> io::Result<ImportedScan> {
         return Err(invalid("not a FastDir binary scan"));
     }
     let version = input.u16_le()?;
-    if version != VERSION {
+    if !(MIN_VERSION..=VERSION).contains(&version) {
         return Err(invalid(format!(
             "unsupported binary scan version {version}"
         )));
@@ -240,7 +251,7 @@ pub fn import_binary(source: impl Read) -> io::Result<ImportedScan> {
         owner_map.push(owners.intern(&name));
     }
 
-    let first = read_record(&mut input, &owner_map)?;
+    let first = read_record(&mut input, &owner_map, version)?;
     if first.kind != NodeKind::Dir {
         return Err(invalid("binary scan root must be a folder"));
     }
@@ -265,7 +276,7 @@ pub fn import_binary(source: impl Read) -> io::Result<ImportedScan> {
             }
             continue;
         }
-        let record = read_record(&mut input, &owner_map)?;
+        let record = read_record(&mut input, &owner_map, version)?;
         if record.kind == NodeKind::Dir {
             frames.push(Frame::new(&record));
         } else {
@@ -373,17 +384,36 @@ struct Record {
     child_count: u32,
 }
 
-fn read_record<R: Read>(input: &mut Decoder<R>, owner_map: &[u16]) -> io::Result<Record> {
+fn read_record<R: Read>(
+    input: &mut Decoder<R>,
+    owner_map: &[u16],
+    version: u16,
+) -> io::Result<Record> {
     let flags = input.u8()?;
-    let kind = match flags & KIND_MASK {
-        0 => NodeKind::Dir,
-        1 => NodeKind::File,
-        2 => NodeKind::FreeSpace,
-        _ => NodeKind::Unknown,
+    // Version 1 packed the kind into two bits; version 2 needs three for the
+    // `<Alternate streams>` item, so the other flags moved up one bit.
+    let (kind, error_bit, hard_link_bit, owner_bit) = if version == 1 {
+        let kind = match flags & V1_KIND_MASK {
+            0 => NodeKind::Dir,
+            1 => NodeKind::File,
+            2 => NodeKind::FreeSpace,
+            _ => NodeKind::Unknown,
+        };
+        (kind, V1_FLAG_ERROR, V1_FLAG_HARD_LINK, V1_FLAG_OWNER)
+    } else {
+        let kind = match flags & KIND_MASK {
+            0 => NodeKind::Dir,
+            1 => NodeKind::File,
+            2 => NodeKind::FreeSpace,
+            3 => NodeKind::Unknown,
+            4 => NodeKind::Streams,
+            _ => return Err(invalid("unknown node kind in binary scan")),
+        };
+        (kind, FLAG_ERROR, FLAG_HARD_LINK, FLAG_OWNER)
     };
-    let error = flags & FLAG_ERROR != 0;
-    let hard_link = flags & FLAG_HARD_LINK != 0;
-    let has_owner = flags & FLAG_OWNER != 0;
+    let error = flags & error_bit != 0;
+    let hard_link = flags & hard_link_bit != 0;
+    let has_owner = flags & owner_bit != 0;
     let name = input.string(MAX_NAME_LEN)?;
     if name.is_empty() {
         return Err(invalid("node without a name"));
@@ -566,6 +596,63 @@ mod tests {
         // The marker did not change the aggregates.
         assert_eq!(back.root().size, tree.root().size);
         assert_eq!(back.root().files, tree.root().files);
+    }
+
+    #[test]
+    fn round_trips_alternate_streams() {
+        let mut arena = Arena::default();
+        let mut sub = DirBuilder::new(0);
+        sub.add_file("a.txt", 5, 5, 0);
+        sub.add_streams(7, 8);
+        let sub = sub.commit(&mut arena);
+        let mut root = DirBuilder::new(0);
+        root.add_dir("sub", sub);
+        let root = root.commit(&mut arena);
+        let tree = Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"));
+
+        let (back, _) = round_trip(&tree);
+        let path = back
+            .find(Path::new("/root/sub/<Alternate streams>"))
+            .unwrap();
+        let node = back.get(&path).unwrap();
+        assert_eq!(node.kind(), NodeKind::Streams);
+        assert_eq!((node.size, node.disk_size), (7, 8));
+        assert_eq!(back.root().size, 12);
+        assert_eq!(back.root().files, 1);
+    }
+
+    /// Version 1 packed kinds into two bits; a document written then still
+    /// opens after the three-bit layout of version 2.
+    #[test]
+    fn reads_version_1_documents() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes()); // no owner table
+        push_string(&mut buf, "/root");
+        push_varint(&mut buf, 1_700_000_000); // scanned at
+        push_varint(&mut buf, 0); // owner count
+        // Root directory with one file child.
+        buf.push(0); // kind: dir, no flags
+        push_string(&mut buf, "root");
+        push_varint(&mut buf, 15);
+        push_varint(&mut buf, 15);
+        push_varint(&mut buf, 1); // files
+        push_varint(&mut buf, 0); // dirs
+        buf.extend_from_slice(&1_700_000_000u32.to_le_bytes());
+        push_varint(&mut buf, 1); // child count
+        // File "a.txt", 15 bytes.
+        buf.push(1); // kind: file
+        push_string(&mut buf, "a.txt");
+        push_varint(&mut buf, 15);
+        push_varint(&mut buf, 15);
+        buf.extend_from_slice(&1_700_000_000u32.to_le_bytes());
+
+        let back = import_binary(buf.as_slice()).unwrap().tree;
+        assert_eq!(back.root().files, 1);
+        assert_eq!(back.root().size, 15);
+        let a = back.find(Path::new("/root/a.txt")).unwrap();
+        assert_eq!(back.get(&a).unwrap().size, 15);
     }
 
     #[test]

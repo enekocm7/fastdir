@@ -30,6 +30,12 @@ culprit? Rename, move, recycle or delete it right there.
   hard links and `<Unknown>` follow the same rules as the normal scan. On
   other file systems, without administrator rights, or when following
   junctions or collecting owners, the normal scan runs instead.
+- **NTFS alternate data streams (opt-in)** - with *Settings → Count alternate
+  data streams* (or `--streams` on the command line), named streams such as
+  the `Zone.Identifier` a downloaded file carries are measured too and shown
+  in their folder as `<Alternate streams>` instead of being left in
+  `<Unknown>`. Free with the fast NTFS scan; the normal scan has to open every
+  file, so it is noticeably slower. Non-NTFS volumes are unaffected.
 - **Size on disk** - every row shows the allocated size next to the logical
   size, so compressed, sparse and tiny cluster-slack files are counted the way
   the volume sees them. The treemap can use either metric (`. menu` →
@@ -82,6 +88,9 @@ culprit? Rename, move, recycle or delete it right there.
   - `<Shadow copies>`: restore-point storage in `System Volume Information`,
     measured when running as administrator. Double-click it to open the
     System Protection settings (nothing is deleted).
+  - `<Alternate streams>`: NTFS named data streams (for example
+    `Zone.Identifier`), shown inside the folder that holds them when
+    *Count alternate data streams* / `--streams` is on.
   - Store apps: `C:\Program Files\WindowsApps` cannot be listed without
     elevation, but each registered package folder is read on its own and
     shown under it, so those GBs are no longer unknown.
@@ -275,10 +284,11 @@ Both formats keep hard-link markers: an extra link is listed without its
 bytes, which are counted once at the entry that owns them. JSON documents
 written by older versions have no markers, so those entries come back as
 plain files (the bytes are still kept). Drive pseudo-items (`<Free space>`,
-`<Unknown>`) keep their kind, which is what lets a later comparison report
-the change in free space. Owner names, when the document has them, are kept
-and shown again. Opening a truncated document (`--max-depth` or `--no-files`)
-also means totals only reflect the entries that were written.
+`<Unknown>`) and the per-folder `<Alternate streams>` item keep their kind,
+which is what lets a later comparison report the change in free space. Owner
+names, when the document has them, are kept and shown again. Opening a
+truncated document (`--max-depth` or `--no-files`) also means totals only
+reflect the entries that were written.
 
 ### Custom actions
 
@@ -530,6 +540,7 @@ row has its own sizes.
 | `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff, snapshot | Skip hidden and system entries |
 | `--skip-windows` | scan, top, duplicates, diff, snapshot | Skip the Windows folder (`%SystemRoot%`, usually `C:\Windows`) for a much faster system-drive scan; its bytes count as `<Unknown>` |
 | `--mft` | scan, top, duplicates, diff, snapshot | Read the NTFS Master File Table directly (much faster on large volumes). Needs administrator rights; otherwise a normal scan runs and the summary on stderr says so |
+| `--streams` | scan, top, duplicates, diff, snapshot | Measure NTFS alternate data streams and show them in each folder as `<Alternate streams>`. Free with `--mft`; the normal scan opens every file, so it is slower. Off by default |
 | `--owners` | scan, top, diff, snapshot | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top, duplicates, diff, snapshot | Nothing on stderr except errors |
 | `--dir <folder>` | snapshot, history | Snapshot folder (default `%APPDATA%\FastDir\snapshots`, or `[snapshots] dir` with `--config`) |
@@ -554,7 +565,8 @@ Add `--config` to opt in: the `[scan]` section of
 `%APPDATA%\FastDir\config.toml` (or `--config=<file>`; a bare `--config
 <file>` also works when the file ends in `.toml`) becomes the base for the
 scan. It covers excluded names, hidden/system skipping, Windows-folder
-skipping (`skip_windows_dir`), MFT scanning (`use_mft`), junction following,
+skipping (`skip_windows_dir`), MFT scanning (`use_mft`), alternate stream
+counting (`count_streams`), junction following,
 cross-volume and thread
 count. Explicit flags win over it: `--threads`
 replaces the configured count, `--exclude` adds to the configured exclusions,
@@ -586,7 +598,8 @@ version, fields may be added but are never renamed or removed. Sizes are
 bytes, and timestamps are ISO 8601 UTC (`null` when unknown).
 
 `fastdir scan --format bin` does not write JSON: it writes a separate compact
-binary document (a `.fdscan` file, magic `FDSCAN`, format version `1`). It
+binary document (a `.fdscan` file, magic `FDSCAN`, format version `2`;
+version `1` files still load). It
 carries the same facts as the JSON tree, keeps hard-link markers, and loads
 much faster for very large scans. It is read back by `diff`, the GUI's *Open
 scan…* / *Compare with…* and MCP `compare_scans`; use JSON when another
@@ -621,7 +634,9 @@ changes.
 }
 ```
 
-`type` is `dir` or `file`. Files have the same fields without `truncated` and
+`type` is `dir` or `file`. Automatic items use their own type: `free_space`,
+`unknown` and `streams` (the `<Alternate streams>` item of a folder). Files
+have the same fields without `truncated` and
 `children` (`files` is `1` and `items` is `1` for a file).
 
 `fastdir top` (`schema: "fastdir.top"`) has the same `schema`, `version`,

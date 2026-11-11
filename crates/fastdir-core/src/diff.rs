@@ -228,7 +228,7 @@ impl ScanDiff {
         relative: &mut Vec<String>,
     ) {
         // Drive pseudo-items are bookkeeping, not data the user compares.
-        if old_node.is_special() || new_node.is_special() {
+        if old_node.is_volume_item() || new_node.is_volume_item() {
             return;
         }
         let delta = new_node.size as i64 - old_node.size as i64;
@@ -262,7 +262,7 @@ impl ScanDiff {
             .collect();
         let mut matched = vec![false; old_children.len()];
         for child in new.children(new_node) {
-            if child.is_special() {
+            if child.is_volume_item() {
                 continue;
             }
             let name = new.name(child);
@@ -284,7 +284,7 @@ impl ScanDiff {
             }
         }
         for (ix, child) in old_children.iter().enumerate() {
-            if matched[ix] || child.is_special() {
+            if matched[ix] || child.is_volume_item() {
                 continue;
             }
             relative.push(old.name(child).to_string());

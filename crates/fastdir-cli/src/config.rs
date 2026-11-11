@@ -29,6 +29,7 @@ pub fn options_from(s: &ScanSettings) -> ScanOptions {
         collect_owners: s.collect_owners,
         skip_windows_dir: s.skip_windows_dir,
         use_mft: s.use_mft,
+        count_streams: s.count_streams,
     }
 }
 
@@ -50,6 +51,7 @@ pub fn layer(base: &ScanOptions, over: &ScanOptions) -> ScanOptions {
         collect_owners: base.collect_owners || over.collect_owners,
         skip_windows_dir: base.skip_windows_dir || over.skip_windows_dir,
         use_mft: base.use_mft || over.use_mft,
+        count_streams: base.count_streams || over.count_streams,
     }
 }
 
@@ -67,6 +69,7 @@ pub fn apply(args: &mut ScanArgs) -> Result<(), String> {
     args.collect_owners = merged.collect_owners;
     args.skip_windows_dir = merged.skip_windows_dir;
     args.use_mft = merged.use_mft;
+    args.count_streams = merged.count_streams;
     Ok(())
 }
 
@@ -85,6 +88,7 @@ pub fn describe(opts: &ScanOptions, source: &str) -> serde_json::Value {
             "collect_owners": opts.collect_owners,
             "skip_windows_dir": opts.skip_windows_dir,
             "use_mft": opts.use_mft,
+            "count_streams": opts.count_streams,
         }
     })
 }
@@ -112,6 +116,7 @@ mod tests {
             skip_windows_dir: false,
             collect_owners: false,
             use_mft: false,
+            count_streams: false,
             quiet: true,
             config,
         }

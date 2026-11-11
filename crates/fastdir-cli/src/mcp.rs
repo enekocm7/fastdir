@@ -207,6 +207,7 @@ impl Server {
                         "skip_hidden": { "type": "boolean", "default": false, "description": "Skip hidden and system entries" },
                         "skip_windows": { "type": "boolean", "default": false, "description": "Skip the Windows folder (%SystemRoot%) for a faster system-drive scan" },
                         "mft": { "type": "boolean", "default": false, "description": "Read the NTFS Master File Table directly (much faster; needs administrator rights, otherwise a normal scan runs)" },
+                        "streams": { "type": "boolean", "default": false, "description": "Measure NTFS alternate data streams, reported per folder as an <Alternate streams> item of kind streams (free with mft, slower otherwise)" },
                         "threads": { "type": "integer", "minimum": 1, "maximum": 64 },
                     },
                     "required": ["path"],
@@ -441,6 +442,7 @@ impl Server {
             collect_owners: false,
             skip_windows_dir: arg_bool(args, "skip_windows", false)?,
             use_mft: arg_bool(args, "mft", false)?,
+            count_streams: arg_bool(args, "streams", false)?,
         };
         let options = crate::config::layer(&self.scan_defaults, &explicit);
         let i = self.scan(&path, &options)?;

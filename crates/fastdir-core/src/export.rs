@@ -72,6 +72,7 @@ fn kind_label(kind: NodeKind) -> &'static str {
         NodeKind::File => "file",
         NodeKind::FreeSpace => "free_space",
         NodeKind::Unknown => "unknown",
+        NodeKind::Streams => "streams",
     }
 }
 
@@ -81,6 +82,7 @@ fn parse_kind(raw: &str) -> Option<NodeKind> {
         "file" => NodeKind::File,
         "free_space" => NodeKind::FreeSpace,
         "unknown" => NodeKind::Unknown,
+        "streams" => NodeKind::Streams,
         _ => return None,
     })
 }
@@ -488,7 +490,7 @@ fn build_dir(
                 child.modified,
                 owner,
             ),
-            kind @ (NodeKind::FreeSpace | NodeKind::Unknown) => {
+            kind @ (NodeKind::FreeSpace | NodeKind::Unknown | NodeKind::Streams) => {
                 builder.add_special(
                     kind,
                     &child.name,
@@ -767,12 +769,44 @@ mod tests {
         let mut buf = Vec::new();
         export_json(&tree, &[], &ExportOptions::default(), &mut buf).unwrap();
         let back = import_json(buf.as_slice()).unwrap();
-        assert!(back.is_drive_scan(), "free space and unknown kept their kind");
+        assert!(
+            back.is_drive_scan(),
+            "free space and unknown kept their kind"
+        );
         assert_eq!(back.free_bytes(), Some(40));
         assert_eq!(back.unknown_bytes(), Some(10));
         assert_eq!(back.scanned_bytes(), 50);
         // They are still not real files for the item count.
         assert_eq!(back.children(back.root()).len(), 4); // free, unknown, c.txt, sub
+    }
+
+    #[test]
+    fn json_round_trips_alternate_streams() {
+        let mut arena = crate::model::Arena::default();
+        let mut sub = DirBuilder::new(0);
+        sub.add_file("a.txt", 5, 5, 0);
+        sub.add_streams(7, 8);
+        let sub = sub.commit(&mut arena);
+        let mut root = DirBuilder::new(0);
+        root.add_dir("sub", sub);
+        let root = root.commit(&mut arena);
+        let tree = Tree::new(
+            crate::model::Subtree::new(arena, "root", root),
+            PathBuf::from("/root"),
+        );
+        let mut buf = Vec::new();
+        export_json(&tree, &[], &ExportOptions::default(), &mut buf).unwrap();
+        let text = String::from_utf8(buf.clone()).unwrap();
+        assert!(text.contains(r#""kind":"streams""#) || text.contains(r#""kind": "streams""#));
+        let back = import_json(buf.as_slice()).unwrap();
+        let path = back
+            .find(Path::new("/root/sub/<Alternate streams>"))
+            .unwrap();
+        let node = back.get(&path).unwrap();
+        assert_eq!(node.kind(), NodeKind::Streams);
+        assert_eq!((node.size, node.disk_size), (7, 8));
+        assert_eq!(back.root().size, 12);
+        assert_eq!(back.root().files, 1);
     }
 
     #[test]
