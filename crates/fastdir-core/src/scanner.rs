@@ -11,6 +11,10 @@
 //!
 //! Anything that is constant for a volume (cluster size, whether the file-ID
 //! class works) is looked up once per scan and passed down, never per folder.
+//!
+//! A listing does not report NTFS alternate data streams. When the scan
+//! counts them ([`ScanOptions::count_streams`]) every file is opened once to
+//! ask for its streams, and each folder gets an `<Alternate streams>` item.
 
 use crate::model::{Arena, DirBuilder, NO_OWNER, Node, OwnerTable, Subtree, Tree};
 use parking_lot::{Mutex, RwLock};
@@ -338,6 +342,13 @@ pub struct ScanOptions {
     /// be read (or the scan follows junctions or collects owners) the scan
     /// silently falls back to the directory walk. Off by default.
     pub use_mft: bool,
+    /// Measure NTFS alternate data streams (ADS) and show them per folder as
+    /// an `<Alternate streams>` pseudo-item, instead of leaving their bytes in
+    /// `<Unknown>`. Free when the tree comes from the MFT; the directory walk
+    /// has to open every file to ask, which makes it noticeably slower. Off
+    /// by default; no effect on volumes without named streams or on other
+    /// platforms.
+    pub count_streams: bool,
 }
 
 impl ScanOptions {
@@ -478,6 +489,9 @@ struct Volume {
     /// `FindFirstFileExW` fallback instead of failing twice per folder.
     #[cfg_attr(not(windows), allow(dead_code))]
     by_id: AtomicBool,
+    /// The file system supports named streams (NTFS), so asking each file
+    /// for its alternate data streams can find any.
+    streams: bool,
 }
 
 impl Volume {
@@ -486,6 +500,7 @@ impl Volume {
         Self {
             cluster: cluster_size(path),
             by_id: AtomicBool::new(true),
+            streams: has_named_streams(path),
         }
     }
 
@@ -494,6 +509,7 @@ impl Volume {
         Self {
             cluster: 0,
             by_id: AtomicBool::new(false),
+            streams: false,
         }
     }
 }
@@ -879,6 +895,14 @@ fn list_one(
     let mut subdirs: Vec<Subdir> = Vec::new();
     let mut files: u64 = 0;
     let mut bytes: u64 = 0;
+    // Alternate data streams of the listed files and of the folder itself,
+    // only asked for when the scan counts them on a volume that has them.
+    let count_streams = options.count_streams && volume.streams;
+    let mut streams = if count_streams {
+        named_streams(path)
+    } else {
+        Streams::default()
+    };
     // One owner query per listed entry, and only when the scan asked for it.
     let owner_of = |name: &str, uid: u32| match &ctx.owners {
         Some(collector) if options.collect_owners => {
@@ -915,11 +939,17 @@ fn list_one(
             files += 1;
             bytes += size;
             let owner = owner_of(&name, uid);
-            // A zero-length file shares no blocks, so its link count is
+            let own_streams = if count_streams {
+                named_streams(&path.join(&*name))
+            } else {
+                Streams::default()
+            };
+            // A file without any bytes shares no blocks, so its link count is
             // irrelevant; skip it to keep the tracker small.
-            if size > 0 && links.is_duplicate(file_id) {
+            if (size > 0 || !own_streams.is_empty()) && links.is_duplicate(file_id) {
                 node.add_hard_link_owned(&name, modified, owner);
             } else {
+                streams.add(own_streams);
                 node.add_file_owned(&name, size, disk_size, modified, owner);
             }
         }
@@ -988,8 +1018,11 @@ fn list_one(
         node.set_error();
         progress.errors.fetch_add(1, Ordering::Relaxed);
     }
+    node.add_streams(streams.size, streams.disk_size);
     progress.files.fetch_add(files, Ordering::Relaxed);
-    progress.bytes.fetch_add(bytes, Ordering::Relaxed);
+    progress
+        .bytes
+        .fetch_add(bytes + streams.size, Ordering::Relaxed);
     progress
         .dirs
         .fetch_add(subdirs.len() as u64, Ordering::Relaxed);
@@ -1159,6 +1192,153 @@ pub(crate) fn round_up(n: u64, cluster: u64) -> u64 {
     } else {
         n.div_ceil(cluster) * cluster
     }
+}
+
+/// Total size of the alternate data streams of one file or folder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Streams {
+    /// Logical bytes.
+    pub size: u64,
+    /// Allocated bytes, as the file system reports each stream's allocation.
+    pub disk_size: u64,
+}
+
+impl Streams {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.size == 0 && self.disk_size == 0
+    }
+
+    pub(crate) fn add(&mut self, other: Streams) {
+        self.size += other.size;
+        self.disk_size += other.disk_size;
+    }
+}
+
+/// `true` for a named data stream that is the file's real content rather
+/// than extra data attached to it: the `WofCompressedData` stream of a
+/// CompactOS file is already counted as the file's size on disk.
+pub(crate) fn is_content_stream(name: &str) -> bool {
+    name.eq_ignore_ascii_case("WofCompressedData")
+}
+
+/// Whether the volume `path` lives on supports named streams (NTFS does,
+/// FAT and most network shares do not).
+#[cfg(windows)]
+fn has_named_streams(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationW;
+    const FILE_NAMED_STREAMS: u32 = 0x0004_0000;
+
+    let root = volume_root(path);
+    let mut wide: Vec<u16> = std::ffi::OsStr::new(&root).encode_wide().collect();
+    wide.push(0);
+    let mut flags = 0u32;
+    let ok = unsafe {
+        GetVolumeInformationW(
+            wide.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut flags,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    ok != 0 && flags & FILE_NAMED_STREAMS != 0
+}
+
+/// The alternate data streams of the file or folder at `path`: every named
+/// `$DATA` stream except the ones that hold the file's own content (see
+/// [`is_content_stream`]). Empty when the file cannot be opened.
+#[cfg(windows)]
+pub(crate) fn named_streams(path: &Path) -> Streams {
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_STREAM_INFO, FileStreamInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
+    };
+
+    let wide = wide_z(path);
+    // Attribute access never conflicts with how other processes opened the
+    // file, so locked files can still be asked.
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Streams::default();
+    }
+    // 1 KiB holds the usual one or two streams; grow only for long lists.
+    let mut buf = vec![0u64; 128];
+    let ok = loop {
+        let bytes = std::mem::size_of_val(buf.as_slice());
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileStreamInfo,
+                buf.as_mut_ptr().cast(),
+                bytes as u32,
+            )
+        };
+        if ok != 0 {
+            break true;
+        }
+        let code = std::io::Error::last_os_error().raw_os_error().unwrap_or(0) as u32;
+        // A folder without any stream reports `ERROR_HANDLE_EOF`.
+        if code != ERROR_MORE_DATA || bytes >= 4 << 20 {
+            break false;
+        }
+        buf.resize(buf.len() * 4, 0);
+    };
+    unsafe { CloseHandle(handle) };
+    let mut out = Streams::default();
+    if !ok {
+        return out;
+    }
+    let base = buf.as_ptr() as *const u8;
+    let buf_bytes = std::mem::size_of_val(buf.as_slice());
+    let name_at = std::mem::offset_of!(FILE_STREAM_INFO, StreamName);
+    let mut offset = 0usize;
+    while offset + name_at <= buf_bytes {
+        let info = unsafe { &*(base.add(offset) as *const FILE_STREAM_INFO) };
+        let len = (info.StreamNameLength as usize / 2).min((buf_bytes - offset - name_at) / 2);
+        let name_w = unsafe { std::slice::from_raw_parts(info.StreamName.as_ptr(), len) };
+        let name = String::from_utf16_lossy(name_w);
+        // Names look like `:Zone.Identifier:$DATA`; the unnamed stream is
+        // `::$DATA`.
+        if let Some(stream) = name
+            .strip_prefix(':')
+            .and_then(|n| n.strip_suffix(":$DATA"))
+            && !stream.is_empty()
+            && !is_content_stream(stream)
+        {
+            out.add(Streams {
+                size: info.StreamSize.max(0) as u64,
+                disk_size: info.StreamAllocationSize.max(0) as u64,
+            });
+        }
+        let next = info.NextEntryOffset as usize;
+        if next == 0 {
+            break;
+        }
+        offset += next;
+    }
+    out
+}
+
+/// No named streams outside Windows.
+#[cfg(not(windows))]
+pub(crate) fn named_streams(_path: &Path) -> Streams {
+    Streams::default()
 }
 
 /// Actual allocated size of a compressed or sparse file.
@@ -1866,6 +2046,68 @@ mod tests {
             collect_owners: true,
             ..ScanOptions::default()
         }));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn alternate_data_streams_are_counted_only_when_asked() {
+        let dir = temp_dir();
+        std::fs::write(dir.join("a.txt"), b"hello").unwrap();
+        std::fs::create_dir(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.bin"), vec![0u8; 10]).unwrap();
+        let volume = Volume::for_path(&dir);
+        if !volume.streams {
+            // The temp folder is not on NTFS: nothing to measure.
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+        std::fs::write(dir.join("a.txt:Zone.Identifier"), vec![1u8; 26]).unwrap();
+        std::fs::write(dir.join("sub/b.bin:big"), vec![2u8; 9000]).unwrap();
+        std::fs::write(dir.join("sub:tag"), vec![3u8; 7]).unwrap();
+        assert_eq!(named_streams(&dir.join("a.txt")).size, 26);
+        assert_eq!(named_streams(&dir.join("sub")).size, 7);
+        assert!(named_streams(&dir.join("missing")).is_empty());
+
+        let plain = scan(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+        );
+        let options = ScanOptions {
+            count_streams: true,
+            ..ScanOptions::default()
+        };
+        let counted = scan(dir.clone(), Arc::new(Progress::default()), &options);
+        use crate::model::{NodeKind, STREAMS_NAME};
+        let item = |tree: &Tree, path: &[&str]| -> Option<Node> {
+            let mut node = tree.root();
+            for part in path {
+                node = tree.children(node).iter().find(|c| tree.name(c) == *part)?;
+            }
+            Some(*node)
+        };
+        assert!(item(&plain.tree, &[STREAMS_NAME]).is_none());
+        assert_eq!(plain.tree.root().size, 15);
+
+        let top = item(&counted.tree, &[STREAMS_NAME]).unwrap();
+        assert_eq!(top.kind(), NodeKind::Streams);
+        assert_eq!(top.size, 26);
+        assert!(top.disk_size >= 26);
+        let sub = item(&counted.tree, &["sub", STREAMS_NAME]).unwrap();
+        assert_eq!(sub.size, 9000 + 7);
+        assert!(sub.disk_size >= 9000);
+        let root = counted.tree.root();
+        assert_eq!((root.files, root.dirs), (2, 1));
+        assert_eq!(root.size, 15 + 26 + 9000 + 7);
+        // The scan root stays a folder scan, with every byte scanned.
+        assert!(!counted.tree.is_drive_scan());
+        assert_eq!(counted.tree.scanned_bytes(), root.size);
+
+        // A rescan of one folder (after a move) counts them too.
+        let sub_tree = scan_subtree(&dir.join("sub"), &options);
+        assert_eq!(sub_tree.root().size, 10 + 9000 + 7);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

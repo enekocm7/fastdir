@@ -113,11 +113,8 @@ actions!(
 );
 
 mod actions_ui;
-<<<<<<< HEAD
 mod basket_ui;
-=======
 mod cleanup_ui;
->>>>>>> origin/main
 mod compare;
 mod compress_ui;
 mod context_menu;
@@ -858,6 +855,7 @@ impl FastDir {
             collect_owners: s.collect_owners,
             skip_windows_dir: s.skip_windows_dir,
             use_mft: s.use_mft,
+            count_streams: s.count_streams,
         }
     }
 

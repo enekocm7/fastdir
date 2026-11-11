@@ -163,6 +163,7 @@ impl Render for SettingsView {
         let skip_hidden_owner = self.owner.clone();
         let skip_windows_owner = self.owner.clone();
         let mft_owner = self.owner.clone();
+        let streams_owner = self.owner.clone();
         let junctions_owner = self.owner.clone();
         let cross_owner = self.owner.clone();
         let threads_owner = self.owner.clone();
@@ -496,6 +497,39 @@ impl Render for SettingsView {
                                                 move |_, checked: &bool, _window, cx| {
                                                     mft_owner.update(cx, |this, cx| {
                                                         this.settings.scan.use_mft =
+                                                            *checked;
+                                                        this.settings.save();
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .w_full()
+                                    .gap_4()
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .child(tr("set.scan.streams")),
+                                            )
+                                            .child(caption(
+                                                tr("set.scan.streams_cap").to_string(),
+                                            )),
+                                    )
+                                    .child(
+                                        Switch::new("settings-count-streams")
+                                            .checked(scan.count_streams)
+                                            .on_change(cx.listener(
+                                                move |_, checked: &bool, _window, cx| {
+                                                    streams_owner.update(cx, |this, cx| {
+                                                        this.settings.scan.count_streams =
                                                             *checked;
                                                         this.settings.save();
                                                         cx.notify();

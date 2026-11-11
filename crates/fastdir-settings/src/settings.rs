@@ -383,6 +383,10 @@ pub struct ScanSettings {
     /// (much faster). Needs administrator rights; scans fall back to the
     /// normal walk when the MFT cannot be read. Off by default.
     pub use_mft: bool,
+    /// Measure NTFS alternate data streams and show them per folder as an
+    /// `<Alternate streams>` item. Free with the MFT scan, slower with the
+    /// normal walk (every file is opened). Off by default.
+    pub count_streams: bool,
 }
 
 impl Default for ScanSettings {
@@ -397,6 +401,7 @@ impl Default for ScanSettings {
             collect_owners: false,
             skip_windows_dir: false,
             use_mft: false,
+            count_streams: false,
         }
     }
 }
@@ -1083,6 +1088,7 @@ mod tests {
                 collect_owners: true,
                 skip_windows_dir: true,
                 use_mft: true,
+                count_streams: true,
             },
             treemap: TreemapSettings {
                 show_free_space: true,

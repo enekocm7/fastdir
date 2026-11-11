@@ -22,7 +22,10 @@
 //! the volume is Windows-specific.
 
 use crate::model::{Arena, DirBuilder, Node, Subtree};
-use crate::scanner::{ExcludedDir, LinkTracker, Progress, ScanOptions, excluded_dirs, round_up};
+use crate::scanner::{
+    ExcludedDir, LinkTracker, Progress, ScanOptions, Streams, excluded_dirs, is_content_stream,
+    round_up,
+};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::path::Path;
@@ -133,6 +136,8 @@ pub(crate) struct Record {
     alloc: u64,
     /// Allocated size of the `WofCompressedData` stream (CompactOS).
     wof: u64,
+    /// Alternate data streams: every other named `$DATA` stream.
+    streams: Streams,
     /// Last write time, Unix seconds.
     modified: i64,
     /// Windows file attributes from `$STANDARD_INFORMATION`.
@@ -204,6 +209,8 @@ pub(crate) struct Parsed {
     data: Option<(u64, u64)>,
     /// Allocated size of the `WofCompressedData` stream.
     wof: Option<u64>,
+    /// Alternate data streams found in this record (their first segments).
+    streams: Streams,
 }
 
 /// Every record of one volume, indexed by record number, and the children
@@ -307,6 +314,9 @@ fn merge_extensions(records: &mut [Record], extensions: Vec<Parsed>) {
         if let Some(wof) = ext.wof {
             base.wof = wof;
         }
+        // A stream lives in exactly one record (only its later segments can
+        // spill over, and those are never counted), so the records add up.
+        base.streams.add(ext.streams);
         if let Some((modified, attrs)) = ext.info {
             base.modified = modified;
             base.attrs = attrs;
@@ -326,6 +336,7 @@ pub(crate) fn into_record(parsed: Parsed) -> Result<Record, Parsed> {
         size,
         alloc,
         wof: parsed.wof.unwrap_or(0),
+        streams: parsed.streams,
         modified,
         attrs,
         seq: parsed.seq,
@@ -408,6 +419,18 @@ impl<'a> Attr<'a> {
                 .iter()
                 .map(|c| u16::from_le_bytes(*c))
                 .eq(expected.encode_utf16())
+    }
+
+    /// The attribute's name (for a data stream: the stream name).
+    fn name_string(&self) -> String {
+        let wide: Vec<u16> = self
+            .name
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
+            .collect();
+        String::from_utf16_lossy(&wide)
     }
 
     /// `(size, as-listed allocation)` of a data stream, or `None` for a
@@ -544,12 +567,21 @@ pub(crate) fn parse_record(rec: &mut [u8]) -> Option<Parsed> {
                     if let Some(sizes) = attr.stream_sizes() {
                         parsed.data = Some(sizes);
                     }
-                } else if attr.name_is(WOF_STREAM)
-                    && let Some((size, alloc)) = attr.stream_sizes()
+                } else if attr.name_is(WOF_STREAM) {
+                    if let Some((size, alloc)) = attr.stream_sizes() {
+                        // A resident WOF stream lives inside the record: it
+                        // costs no clusters of its own.
+                        parsed.wof = Some(if attr.resident { size } else { alloc });
+                    }
+                } else if let Some((size, alloc)) = attr.stream_sizes()
+                    && !is_content_stream(&attr.name_string())
                 {
-                    // A resident WOF stream lives inside the record: it
-                    // costs no clusters of its own.
-                    parsed.wof = Some(if attr.resident { size } else { alloc });
+                    // An alternate data stream, with the sizes a stream
+                    // query on the open file reports.
+                    parsed.streams.add(Streams {
+                        size,
+                        disk_size: alloc,
+                    });
                 }
             }
             _ => {}
@@ -742,6 +774,12 @@ fn build_dir(
     let records = &ctx.index.records;
     let mut subdirs: Vec<(&str, u64, i64)> = Vec::new();
     let (mut files, mut bytes) = (0u64, 0u64);
+    // The folder's own alternate data streams, then its files'.
+    let count_streams = options.count_streams;
+    let mut streams = match records.get(record as usize) {
+        Some(r) if count_streams => r.streams,
+        _ => Streams::default(),
+    };
     for &(child, which) in ctx.index.children(record) {
         let r = &records[child as usize];
         let name = &*r.names[which as usize].name;
@@ -768,17 +806,29 @@ fn build_dir(
         }
         files += 1;
         bytes += r.size;
-        // Only files with several names can be hard links; a zero-length
-        // file shares no blocks, so it is never tracked.
-        if r.size > 0 && r.names.len() > 1 && ctx.links.is_duplicate(child as u128 + 1) {
+        let own_streams = if count_streams {
+            r.streams
+        } else {
+            Streams::default()
+        };
+        // Only files with several names can be hard links; a file without
+        // any bytes shares no blocks, so it is never tracked.
+        if (r.size > 0 || !own_streams.is_empty())
+            && r.names.len() > 1
+            && ctx.links.is_duplicate(child as u128 + 1)
+        {
             node.add_hard_link(name, r.modified);
         } else {
+            streams.add(own_streams);
             node.add_file(name, r.size, r.disk_size(ctx.cluster), r.modified);
         }
     }
+    node.add_streams(streams.size, streams.disk_size);
     let progress = ctx.progress;
     progress.files.fetch_add(files, Ordering::Relaxed);
-    progress.bytes.fetch_add(bytes, Ordering::Relaxed);
+    progress
+        .bytes
+        .fetch_add(bytes + streams.size, Ordering::Relaxed);
     progress
         .dirs
         .fetch_add(subdirs.len() as u64, Ordering::Relaxed);
@@ -1312,6 +1362,14 @@ pub mod synthetic {
             self
         }
 
+        /// A resident named data stream (an alternate data stream) of `len`
+        /// bytes.
+        pub fn resident_stream(mut self, name: &str, len: usize) -> Self {
+            self.attrs
+                .push(attr_header(ATTR_DATA, name, true, 0, &vec![0xCD; len]));
+            self
+        }
+
         /// A non-resident data stream.
         #[allow(clippy::too_many_arguments)]
         pub fn data(
@@ -1459,6 +1517,7 @@ pub mod synthetic {
 mod tests {
     use super::synthetic::*;
     use super::*;
+    use crate::model::{NodeKind, STREAMS_NAME};
     use std::path::PathBuf;
 
     fn build(index: &MftIndex, options: &ScanOptions) -> crate::model::Tree {
@@ -1698,6 +1757,90 @@ mod tests {
             .filter(|n| n.hard_link())
             .count();
         assert_eq!(links, 1);
+    }
+
+    #[test]
+    fn alternate_data_streams_are_counted_per_folder_when_asked() {
+        let root = fref(ROOT_RECORD, 5);
+        let img = image(vec![
+            (ROOT_RECORD, root_record()),
+            (
+                20,
+                RecordBuilder::new(true)
+                    .info(0, 0)
+                    .name(root, "sub", 3)
+                    // A folder can carry streams of its own.
+                    .resident_stream("folder.tag", 5)
+                    .build(),
+            ),
+            (
+                21,
+                RecordBuilder::new(false)
+                    .info(0, 0)
+                    .name(root, "setup.exe", 3)
+                    .resident_data(100)
+                    .resident_stream("Zone.Identifier", 26)
+                    .data("big", 10_000, 12_288, 0, 0, 0, &[0x11, 0x03, 0x20, 0x00])
+                    .build(),
+            ),
+            (
+                22,
+                RecordBuilder::new(false)
+                    .info(0, 0)
+                    .name(fref(20, 1), "a.txt", 3)
+                    .name(fref(20, 1), "b.txt", 0)
+                    .resident_stream("tag", 12)
+                    .build(),
+            ),
+            (
+                23,
+                RecordBuilder::new(false)
+                    .info(0, FILE_ATTRIBUTE_REPARSE_POINT)
+                    .name(root, "compact.exe", 3)
+                    .data(
+                        "",
+                        50_000,
+                        53_248,
+                        0,
+                        ATTR_FLAG_SPARSE,
+                        0,
+                        &[0x01, 0x0D, 0x00],
+                    )
+                    .data(
+                        WOF_STREAM,
+                        20_000,
+                        20_480,
+                        20_480,
+                        0,
+                        0,
+                        &[0x11, 0x05, 0x20, 0x00],
+                    )
+                    .build(),
+            ),
+        ]);
+        let index = index_of(img);
+
+        // Off by default: the tree has no stream items at all.
+        let plain = build(&index, &ScanOptions::default());
+        assert!(child(&plain, &[STREAMS_NAME]).is_none());
+        assert!(child(&plain, &["sub", STREAMS_NAME]).is_none());
+
+        let options = ScanOptions {
+            count_streams: true,
+            ..ScanOptions::default()
+        };
+        let tree = build(&index, &options);
+        // Resident streams report the 8-byte aligned allocation, like the
+        // stream query on an open file; the WOF stream is file content.
+        let top = child(&tree, &[STREAMS_NAME]).unwrap();
+        assert_eq!(top.kind(), NodeKind::Streams);
+        assert_eq!((top.size, top.disk_size), (26 + 10_000, 32 + 12_288));
+        assert_eq!((top.files, top.dirs), (0, 0));
+        // The folder's own stream plus its hard-linked file's, once.
+        let sub = child(&tree, &["sub", STREAMS_NAME]).unwrap();
+        assert_eq!((sub.size, sub.disk_size), (5 + 12, 8 + 16));
+        assert_eq!(tree.root().files, plain.root().files);
+        assert_eq!(tree.root().size, plain.root().size + 26 + 10_000 + 5 + 12);
     }
 
     #[test]

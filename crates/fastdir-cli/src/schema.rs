@@ -50,6 +50,7 @@ pub fn kind_label(kind: NodeKind) -> &'static str {
         NodeKind::File => "file",
         NodeKind::FreeSpace => "free_space",
         NodeKind::Unknown => "unknown",
+        NodeKind::Streams => "streams",
     }
 }
 
