@@ -20,10 +20,10 @@ use fastdir_core::scanner::{self, LiveScanResult, Progress};
 use fastdir_core::windows_apps;
 use fastdir_settings::{
     DateFormat, DeleteAction, ExtGrouping, PercentBase, Settings, SizeUnit, SortColumn as SortKey,
-    StartupMode, ThemePreference, TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency,
-    WindowState,
+    StartupMode, ThemePreference, TreemapColorMode, TreemapLayout, TreemapPalette, UpdateChannel,
+    UpdateFrequency, WindowState,
 };
-use fastdir_treemap::{self as treemap, ColorMode, Palette, RenderOptions};
+use fastdir_treemap::{self as treemap, ColorMode, Layout, Palette, RenderOptions};
 use fastdir_updater::{self as updater, Release};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Disableable as _;
@@ -278,6 +278,13 @@ fn color_mode_of(m: TreemapColorMode) -> ColorMode {
         TreemapColorMode::Age => ColorMode::Age,
         TreemapColorMode::Category => ColorMode::Category,
         TreemapColorMode::Change => ColorMode::Change,
+    }
+}
+
+fn layout_of(l: TreemapLayout) -> Layout {
+    match l {
+        TreemapLayout::Treemap => Layout::Treemap,
+        TreemapLayout::Sunburst => Layout::Sunburst,
     }
 }
 
@@ -562,7 +569,12 @@ impl FastDir {
         let render_opts = treemap_render_options(&settings);
         let treemap = cx.new(|_| TreemapView::new());
         treemap.update(cx, |t, cx| {
-            t.set_render(&render_opts, decimal_sizes, cx);
+            t.set_render(
+                &render_opts,
+                layout_of(settings.treemap.layout),
+                decimal_sizes,
+                cx,
+            );
             t.set_language(fastdir_locale::resolve(&settings.locale.language), cx);
         });
         let main_split = cx.new(|_| ResizableState::default());
@@ -829,6 +841,17 @@ impl FastDir {
         cx.notify();
     }
 
+    /// Switch the map panel between the treemap and the sunburst.
+    pub(super) fn toggle_sunburst(&mut self, cx: &mut Context<Self>) {
+        self.settings.treemap.layout = match self.settings.treemap.layout {
+            TreemapLayout::Treemap => TreemapLayout::Sunburst,
+            TreemapLayout::Sunburst => TreemapLayout::Treemap,
+        };
+        self.settings.save();
+        self.refresh_treemap_options(cx);
+        cx.notify();
+    }
+
     /// Toggle between extension/category colours and the age scale.
     pub(super) fn toggle_treemap_age_colors(&mut self, cx: &mut Context<Self>) {
         self.settings.treemap.color_mode =
@@ -874,8 +897,9 @@ impl FastDir {
     pub(super) fn refresh_treemap_options(&mut self, cx: &mut Context<Self>) {
         let opts = treemap_render_options(&self.settings);
         let decimal = self.decimal_sizes();
+        let layout = layout_of(self.settings.treemap.layout);
         self.treemap.update(cx, |t, cx| {
-            t.set_render(&opts, decimal, cx);
+            t.set_render(&opts, layout, decimal, cx);
             t.invalidate(cx);
         });
     }

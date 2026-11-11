@@ -697,6 +697,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 anno",
         "set.snapshots.age_none" => "Mai",
         "set.snapshots.open" => "Apri cartella",
+        "tb.menu_sunburst" => "Mostra come grafico a raggiera",
+        "set.tree.layout" => "Vista",
+        "set.tree.layout_treemap" => "Treemap",
+        "set.tree.layout_sunburst" => "Raggiera",
+        "set.tree.layout_cap" => "La raggiera mette la cartella al centro, con un anello per livello.",
+        "a11y.sunburst" => "Grafico a raggiera",
+        "a11y.sunburst_hint" => "Premi F8: sinistra e destra scorrono lungo un anello, giù esce di un livello, su torna verso il centro",
         _ => return None,
     })
 }

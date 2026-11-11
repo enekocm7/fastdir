@@ -669,6 +669,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 yıl",
         "set.snapshots.age_none" => "Hiçbir zaman",
         "set.snapshots.open" => "Klasörü aç",
+        "tb.menu_sunburst" => "Güneş ışığı grafiği olarak göster",
+        "set.tree.layout" => "Görünüm",
+        "set.tree.layout_treemap" => "Ağaç haritası",
+        "set.tree.layout_sunburst" => "Güneş ışığı",
+        "set.tree.layout_cap" => "Güneş ışığı grafiği klasörü ortaya koyar ve her düzey için bir halka çizer.",
+        "a11y.sunburst" => "Güneş ışığı grafiği",
+        "a11y.sunburst_hint" => "F8'e basın: sol ve sağ ok halka boyunca ilerler, aşağı ok bir düzey dışarı çıkar, yukarı ok merkeze döner",
         _ => return None,
     })
 }

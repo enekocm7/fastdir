@@ -697,6 +697,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 Jahr",
         "set.snapshots.age_none" => "Nie",
         "set.snapshots.open" => "Ordner öffnen",
+        "tb.menu_sunburst" => "Als Sunburst anzeigen",
+        "set.tree.layout" => "Ansicht",
+        "set.tree.layout_treemap" => "Treemap",
+        "set.tree.layout_sunburst" => "Sunburst",
+        "set.tree.layout_cap" => "Sunburst zeigt den Ordner in der Mitte und einen Ring pro Ebene.",
+        "a11y.sunburst" => "Sunburst",
+        "a11y.sunburst_hint" => "F8 drücken: Links und Rechts bewegen entlang eines Rings, Unten geht eine Ebene nach außen, Oben zurück nach innen",
         _ => return None,
     })
 }

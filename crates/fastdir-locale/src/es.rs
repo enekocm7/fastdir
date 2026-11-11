@@ -699,6 +699,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 año",
         "set.snapshots.age_none" => "Nunca",
         "set.snapshots.open" => "Abrir carpeta",
+        "tb.menu_sunburst" => "Mostrar como diagrama solar",
+        "set.tree.layout" => "Vista",
+        "set.tree.layout_treemap" => "Treemap",
+        "set.tree.layout_sunburst" => "Diagrama solar",
+        "set.tree.layout_cap" => "El diagrama solar pone la carpeta en el centro, con un anillo por nivel.",
+        "a11y.sunburst" => "Diagrama solar",
+        "a11y.sunburst_hint" => "Pulsa F8: izquierda y derecha recorren un anillo, abajo sale un nivel y arriba vuelve hacia el centro",
         _ => return None,
     })
 }

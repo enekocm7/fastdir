@@ -15,7 +15,7 @@ headless CLI (`fastdir-cli`) with JSON/CSV output and an MCP server. See
 |---|---|
 | `fastdir` (root) | `src/main.rs` (GUI, or the CLI for subcommands), `build.rs` (icon / resource embedding) |
 | `crates/fastdir-core` | Tree model, parallel scanner, drives, file-system ops, formatting, categories |
-| `crates/fastdir-treemap` | Squarified cushion layout, hit-testing and CPU rendering |
+| `crates/fastdir-treemap` | Squarified cushion layout, sunburst layout, hit-testing and CPU rendering |
 | `crates/fastdir-updater` | Release check, verified download and self-update |
 | `crates/fastdir-settings` | Persisted settings (`%APPDATA%\FastDir\config.toml`) |
 | `crates/fastdir-locale` | UI string tables (16 languages) and locale-aware number/date formatting |
@@ -72,7 +72,7 @@ and fix new warnings in code you touched.
 Criterion benchmarks live in `crates/fastdir-core/benches/scanner.rs`
 (scan default / exclusions / 1 vs all threads, arena build, sorting) and
 `crates/fastdir-treemap/benches/treemap.rs` (squarify layout for 1k / 10k /
-100k nodes, CPU render).
+100k nodes, CPU render, sunburst render and hit test).
 
 **You must run the benchmarks** when a change:
 

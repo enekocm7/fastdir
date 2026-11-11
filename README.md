@@ -147,6 +147,14 @@ culprit? Rename, move, recycle or delete it right there.
     the CPU in parallel and drawn as one image. Hover to see a path, click
     to find the item in the tree, double-click to open it. Zoom into any
     folder and climb back out with the breadcrumb above the treemap.
+  - **Sunburst view** as an alternative to the treemap (`…` → *Show as
+    sunburst*, or *Settings → Treemap → View*; `layout = "sunburst"` under
+    `[treemap]` in the config). The folder sits in the middle and every
+    level below it is a ring, up to eight levels deep; zoom in to go
+    deeper. It shares everything with the treemap: selection, hover, zoom,
+    the breadcrumb, palettes, the extension / age / category / change colour
+    modes, highlights, free space / unknown and the size-on-disk metric.
+    Clicking the centre selects the folder being shown.
   - Panels can be resized by dragging.
 - **File operations** that update the tree in place, with no rescan:
   rename, move (also across drives), move to Recycle Bin, delete permanently,
@@ -897,6 +905,7 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 | F8 | Move keyboard focus to the treemap (and back) |
 | Tab / Shift+Tab | Cycle search box → list → treemap |
 | ↑ ↓ ← → *(treemap focused)* | Select the neighbouring cell; the list follows |
+| ← → / ↓ / ↑ *(sunburst focused)* | Move round the ring / step out into the largest child / step back in to the parent |
 | Enter / Backspace *(treemap focused)* | Zoom into the selected folder / zoom out |
 | Esc *(treemap focused)* | Give the keys back to the list |
 | Ctrl+E | Show in Explorer |
@@ -922,7 +931,8 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 - Everything is reachable by keyboard, including the treemap: press **F8**
   (or click a cell) and the arrow keys walk between cells, with an accent
   focus ring around the selected cell and the panel. The list selection
-  stays in sync.
+  stays in sync. The sunburst view works the same way: left and right move
+  round a ring, down steps out a level and up steps back in.
 - **Tab / Shift+Tab** move between the search box, the list and the
   treemap. Dialogs trap focus, close with Esc and give focus back to where
   it was.
@@ -961,7 +971,7 @@ logic lives in focused sub-crates so it can be built and tested without GPUI:
 |---|---|
 | `fastdir` (root) | `src/main.rs` (GUI, or the CLI for subcommands), `build.rs` (icon / resource embedding) |
 | `crates/fastdir-core` | Tree model, parallel scanner, drives, file-system ops, formatting |
-| `crates/fastdir-treemap` | Squarified cushion layout, hit-testing and CPU rendering |
+| `crates/fastdir-treemap` | Squarified cushion layout, sunburst layout, hit-testing and CPU rendering |
 | `crates/fastdir-updater` | Release check, verified download and self-update |
 | `crates/fastdir-settings` | Persisted settings (`config.toml`) |
 | `crates/fastdir-ui` | GPUI window, list/treemap panels, dialogs and menus |
@@ -984,7 +994,7 @@ Linux and macOS:
 
 ```sh
 cargo bench -p fastdir-core       # scan (default, exclusions, 1 vs all threads), arena build, sorting
-cargo bench -p fastdir-treemap    # squarify layout for 1k / 10k / 100k nodes, CPU render
+cargo bench -p fastdir-treemap    # squarify layout for 1k / 10k / 100k nodes, CPU render, sunburst render / hit test
 ```
 
 The scan benchmarks use a synthetic tree (200k files, 20k directories, a few

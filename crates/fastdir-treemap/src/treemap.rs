@@ -115,7 +115,7 @@ pub fn category_color(category: usize) -> (u8, u8, u8) {
 }
 
 /// Normalise so channel overflow spills into the others (keeps hue, avoids clipping).
-fn normalize(r: &mut f64, g: &mut f64, b: &mut f64) {
+pub(crate) fn normalize(r: &mut f64, g: &mut f64, b: &mut f64) {
     if *r > 255.0 {
         let over = *r - 255.0;
         *r = 255.0;
@@ -377,9 +377,12 @@ pub fn age_bucket_totals(
     std::array::from_fn(|i| (AgeBucket::ALL[i], totals[i]))
 }
 
-fn shade_node(
+/// Base colour of `node` under `opts`. `ext` is the extension rank to colour
+/// by: the node's own, or the dominant one for a folder drawn as one shape.
+pub(crate) fn shade_node(
     tree: &Tree,
     node: &Node,
+    ext: u16,
     opts: &RenderOptions,
     change: Option<&ScanDiff>,
 ) -> [f64; 3] {
@@ -388,9 +391,9 @@ fn shade_node(
         NodeKind::Unknown => UNKNOWN_COLOR,
         NodeKind::Streams => STREAMS_COLOR,
         _ => match opts.color_mode {
-            ColorMode::Extension => ext_color_with(opts.palette, node.ext),
+            ColorMode::Extension => ext_color_with(opts.palette, ext),
             ColorMode::Age => age_color(node.modified(), opts.now, opts.palette),
-            ColorMode::Category => category_color(tree.ext_category(node.ext).index()),
+            ColorMode::Category => category_color(tree.ext_category(ext).index()),
             ColorMode::Change => change_color(
                 change
                     .and_then(|diff| diff.change(node))
@@ -407,9 +410,25 @@ fn shade_node(
     bright_color(rgb)
 }
 
+/// Whether a shape with dominant extension `ext` and owner `owner` is faded
+/// by the active highlight. An owner highlight wins over a category one,
+/// which works in every colour mode; an extension highlight only applies
+/// when colouring by extension (in the other modes every leaf keeps its own
+/// colour).
+#[inline]
+pub(crate) fn is_dimmed(tree: &Tree, ext: u16, owner: u16, opts: &RenderOptions) -> bool {
+    if let Some(want) = opts.highlight_owner {
+        want != owner
+    } else if let Some(want) = opts.highlight_category {
+        want as usize != tree.ext_category(ext).index()
+    } else {
+        opts.color_mode == ColorMode::Extension && opts.highlight.is_some_and(|hl| hl != ext)
+    }
+}
+
 /// Desaturate and darken a colour so non-highlighted leaves fade into the
 /// background without disappearing completely.
-fn dim_color(color: [f64; 3]) -> [f64; 3] {
+pub(crate) fn dim_color(color: [f64; 3]) -> [f64; 3] {
     const DIM: f64 = 38.0;
     const KEEP: f64 = 0.22;
     [
@@ -604,13 +623,13 @@ impl Default for RenderOptions {
 }
 /// The metric used to size a cell: logical bytes or allocated bytes.
 #[inline]
-fn node_size(node: &Node, use_disk: bool) -> u64 {
+pub(crate) fn node_size(node: &Node, use_disk: bool) -> u64 {
     if use_disk { node.disk_size } else { node.size }
 }
 
 /// Whether `node` is laid out given the pseudo-item flags.
 #[inline]
-fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
+pub(crate) fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
     match node.kind() {
         NodeKind::FreeSpace => show_free,
         NodeKind::Unknown => show_unknown,
@@ -619,7 +638,7 @@ fn is_visible(node: &Node, show_free: bool, show_unknown: bool) -> bool {
 }
 
 #[inline]
-fn has_hidden_special(children: &[Node], show_free: bool, show_unknown: bool) -> bool {
+pub(crate) fn has_hidden_special(children: &[Node], show_free: bool, show_unknown: bool) -> bool {
     children
         .iter()
         .any(|c| c.is_special() && !is_visible(c, show_free, show_unknown))
@@ -904,21 +923,8 @@ fn draw(
         node.is_dir() && size > 0 && !children.is_empty() && rc.w() >= min && rc.h() >= min;
     if !subdivide {
         let ext = tree.dominant_ext(node);
-        let mut color = shade_node(tree, node, opts, change);
-        // A category highlight works in every colour mode. Otherwise
-        // extension highlighting only applies when colouring by extension;
-        // in age and category modes every leaf keeps its own colour.
-        if let Some(want) = opts.highlight_owner {
-            if want != owner {
-                color = dim_color(color);
-            }
-        } else if let Some(want) = opts.highlight_category {
-            if want as usize != tree.ext_category(ext).index() {
-                color = dim_color(color);
-            }
-        } else if opts.color_mode == ColorMode::Extension
-            && opts.highlight.is_some_and(|hl| hl != ext)
-        {
+        let mut color = shade_node(tree, node, node.ext, opts, change);
+        if is_dimmed(tree, ext, owner, opts) {
             color = dim_color(color);
         }
         // Cell borders: shrink the leaf so a hairline of background shows.

@@ -271,6 +271,7 @@ impl FastDir {
                 let can_snapshot = self.can_snapshot();
                 let show_partial = self.settings.scan.show_partial_results;
                 let show_treemap = self.settings.treemap.show;
+                let sunburst = self.settings.treemap.layout == TreemapLayout::Sunburst;
                 let hide_empty = self.settings.list.hide_empty_folders;
                 let entity = update_entity.clone();
                 let menu_open_scan = self.tr("menu.open_scan");
@@ -288,6 +289,7 @@ impl FastDir {
                 let menu_age = self.tr("tb.menu_age");
                 let menu_partial = self.tr("tb.menu_partial");
                 let menu_treemap = self.tr("tb.menu_treemap");
+                let menu_sunburst = self.tr("tb.menu_sunburst");
                 let menu_hide_empty = self.tr("tb.menu_hide_empty");
                 let version_label: SharedString = self
                     .tr_fmt("tb.version", &[("version", updater::CURRENT_VERSION)])
@@ -302,6 +304,7 @@ impl FastDir {
                     let e8 = entity.clone();
                     let e9 = entity.clone();
                     let e_change = entity.clone();
+                    let e_sunburst = entity.clone();
                     let e_open = entity.clone();
                     let e_compare = entity.clone();
                     let e_clear = entity.clone();
@@ -449,6 +452,15 @@ impl FastDir {
                             .checked(show_treemap)
                             .on_click(move |_, _, cx| {
                                 e7.update(cx, |this, cx| this.toggle_treemap_visible(cx))
+                                    .ok();
+                            }),
+                    )
+                    .item(
+                        gpui_kit::component::menu::PopupMenuItem::new(menu_sunburst)
+                            .checked(sunburst)
+                            .on_click(move |_, _, cx| {
+                                e_sunburst
+                                    .update(cx, |this, cx| this.toggle_sunburst(cx))
                                     .ok();
                             }),
                     )

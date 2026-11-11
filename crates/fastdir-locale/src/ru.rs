@@ -679,6 +679,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 года",
         "set.snapshots.age_none" => "Никогда",
         "set.snapshots.open" => "Открыть папку",
+        "tb.menu_sunburst" => "Показывать в виде солнечных лучей",
+        "set.tree.layout" => "Вид",
+        "set.tree.layout_treemap" => "Древовидная карта",
+        "set.tree.layout_sunburst" => "Солнечные лучи",
+        "set.tree.layout_cap" => "«Солнечные лучи»: папка в центре и по одному кольцу на каждый уровень.",
+        "a11y.sunburst" => "Диаграмма «солнечные лучи»",
+        "a11y.sunburst_hint" => "Нажмите F8: стрелки влево и вправо перемещают по кольцу, вниз — на уровень наружу, вверх — обратно к центру",
         _ => return None,
     })
 }

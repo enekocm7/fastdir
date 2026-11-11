@@ -6,7 +6,7 @@ use super::*;
 use fastdir_core::integration;
 use fastdir_settings::{
     DateFormat, DeleteAction, PercentBase, SizeUnit, SortSettings, StartupMode, ThemePreference,
-    TreemapColorMode, TreemapPalette, UpdateChannel, UpdateFrequency, config_path,
+    TreemapColorMode, TreemapLayout, TreemapPalette, UpdateChannel, UpdateFrequency, config_path,
 };
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -76,6 +76,10 @@ impl Render for SettingsView {
             TreemapPalette::Default => 0,
             TreemapPalette::ColorBlind => 1,
             TreemapPalette::Mono => 2,
+        };
+        let layout_ix = match treemap.layout {
+            TreemapLayout::Treemap => 0,
+            TreemapLayout::Sunburst => 1,
         };
         let color_mode_ix = match treemap.color_mode {
             TreemapColorMode::Extension => 0,
@@ -178,6 +182,7 @@ impl Render for SettingsView {
         let tm_unknown_owner = self.owner.clone();
         let tm_disk_owner = self.owner.clone();
         let palette_owner = self.owner.clone();
+        let layout_owner = self.owner.clone();
         let color_mode_owner = self.owner.clone();
         let cushion_owner = self.owner.clone();
         let cushion_strength_owner = self.owner.clone();
@@ -874,6 +879,39 @@ impl Render for SettingsView {
                                                 },
                                             )),
                                     ),
+                            )
+                            .child(
+                                v_flex()
+                                    .gap_1()
+                                    .w_full()
+                                    .child(div().text_xs().child(tr("set.tree.layout")))
+                                    .child(
+                                        RadioGroup::horizontal("settings-layout")
+                                            .selected_index(Some(layout_ix))
+                                            .child(
+                                                Radio::new("layout-treemap")
+                                                    .label(tr("set.tree.layout_treemap")),
+                                            )
+                                            .child(
+                                                Radio::new("layout-sunburst")
+                                                    .label(tr("set.tree.layout_sunburst")),
+                                            )
+                                            .on_change(cx.listener(
+                                                move |_, ix: &usize, _window, cx| {
+                                                    let layout = match ix {
+                                                        1 => TreemapLayout::Sunburst,
+                                                        _ => TreemapLayout::Treemap,
+                                                    };
+                                                    layout_owner.update(cx, |this, cx| {
+                                                        this.settings.treemap.layout = layout;
+                                                        this.settings.save();
+                                                        this.refresh_treemap_options(cx);
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            )),
+                                    )
+                                    .child(caption(tr("set.tree.layout_cap").to_string())),
                             )
                             .child(
                                 v_flex()

@@ -709,6 +709,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "سنة واحدة",
         "set.snapshots.age_none" => "أبدًا",
         "set.snapshots.open" => "فتح المجلد",
+        "tb.menu_sunburst" => "العرض كمخطط شمسي",
+        "set.tree.layout" => "طريقة العرض",
+        "set.tree.layout_treemap" => "الخريطة الشجرية",
+        "set.tree.layout_sunburst" => "مخطط شمسي",
+        "set.tree.layout_cap" => "يضع المخطط الشمسي المجلد في المنتصف مع حلقة لكل مستوى.",
+        "a11y.sunburst" => "المخطط الشمسي",
+        "a11y.sunburst_hint" => "اضغط F8: السهمان الأيمن والأيسر للتنقل على الحلقة، والسهم السفلي للانتقال مستوى إلى الخارج، والعلوي للعودة نحو المركز",
         _ => return None,
     })
 }

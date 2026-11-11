@@ -681,6 +681,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 年",
         "set.snapshots.age_none" => "从不",
         "set.snapshots.open" => "打开文件夹",
+        "tb.menu_sunburst" => "以旭日图显示",
+        "set.tree.layout" => "视图",
+        "set.tree.layout_treemap" => "树状图",
+        "set.tree.layout_sunburst" => "旭日图",
+        "set.tree.layout_cap" => "旭日图将文件夹放在中心，每一层级为一个圆环。",
+        "a11y.sunburst" => "旭日图",
+        "a11y.sunburst_hint" => "按 F8 后，左右键沿圆环移动，下键向外进入下一层，上键返回内层",
         _ => return None,
     })
 }

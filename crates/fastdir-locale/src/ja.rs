@@ -697,6 +697,13 @@ pub fn get(key: &str) -> Option<&'static str> {
         "set.snapshots.age_365" => "1 年",
         "set.snapshots.age_none" => "削除しない",
         "set.snapshots.open" => "フォルダーを開く",
+        "tb.menu_sunburst" => "サンバースト図で表示",
+        "set.tree.layout" => "表示形式",
+        "set.tree.layout_treemap" => "ツリーマップ",
+        "set.tree.layout_sunburst" => "サンバースト",
+        "set.tree.layout_cap" => "サンバーストはフォルダーを中央に置き、階層ごとに輪を描きます。",
+        "a11y.sunburst" => "サンバースト図",
+        "a11y.sunburst_hint" => "F8 を押すと、左右キーで輪に沿って移動し、下キーで外側の階層へ、上キーで内側へ戻ります",
         _ => return None,
     })
 }
