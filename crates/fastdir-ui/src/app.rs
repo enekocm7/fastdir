@@ -609,9 +609,9 @@ impl FastDir {
         );
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        // `fastdir <folder>` scans right away, `fastdir <scan>.json` opens a
-        // saved scan; otherwise the startup mode decides: re-scan the last
-        // path, or open the drive overview.
+        // `fastdir <folder>` scans right away, `fastdir <scan>.json` or
+        // `fastdir <scan>.fdscan` opens a saved scan; otherwise the startup
+        // mode decides: re-scan the last path, or open the drive overview.
         let initial = initial_path
             .as_deref()
             .and_then(open_scan::classify_open_path);

@@ -21,10 +21,11 @@ use args::{
     McpCommand, OutputArgs, ScanArgs, ScanCommand, TopCommand,
 };
 use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
-use fastdir_core::export::{ExportOptions, export_csv_filtered, import_json_with_meta};
+use fastdir_core::export::{ExportOptions, export_csv_filtered};
 use fastdir_core::filter::FilterView;
 use fastdir_core::format;
 use fastdir_core::model::Tree;
+use fastdir_core::scanfile;
 use fastdir_core::scanner::{self, Progress, ScanOptions};
 use fastdir_core::windows_apps;
 use schema::{ScanDoc, ScanMeta, TreeShape};
@@ -363,6 +364,24 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
             export_csv_filtered(&scanned.tree, &[], &options, filter, &mut w).map_err(io_error)?;
             w.flush().map_err(io_error)
         }
+        Format::Binary => {
+            let mut w = open_output(&c.out)?;
+            let options = ExportOptions {
+                max_depth: c.max_depth,
+                include_files: c.include_files,
+            };
+            let scanned_at = schema::parse_iso(&scanned.meta.scanned_at).unwrap_or(0);
+            scanfile::export_binary_filtered(
+                &scanned.tree,
+                &[],
+                &options,
+                scanned_at,
+                filter,
+                &mut w,
+            )
+            .map_err(io_error)?;
+            w.flush().map_err(io_error)
+        }
     }
 }
 
@@ -384,6 +403,8 @@ fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        // The parser only accepts `bin` for `scan`.
+        Format::Binary => Err(binary_output_unsupported()),
     }
 }
 
@@ -450,6 +471,8 @@ fn run_duplicates_command(c: &DuplicatesCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        // The parser only accepts `bin` for `scan`.
+        Format::Binary => Err(binary_output_unsupported()),
     }
 }
 
@@ -501,7 +524,8 @@ fn classify_path_error(path: &Path, e: io::Error) -> CliError {
     }
 }
 
-/// Read a saved `fastdir.scan` / export JSON document.
+/// Read a saved scan: a `fastdir.scan` / export JSON document or a binary
+/// `.fdscan` file. The format is detected from the file's first bytes.
 fn load_saved_scan(path: &Path) -> Result<LoadedScan, CliError> {
     let shown = path.display();
     let meta = std::fs::metadata(path).map_err(|e| classify_path_error(path, e))?;
@@ -512,7 +536,7 @@ fn load_saved_scan(path: &Path) -> Result<LoadedScan, CliError> {
         ));
     }
     let file = std::fs::File::open(path).map_err(|e| classify_path_error(path, e))?;
-    let imported = import_json_with_meta(io::BufReader::new(file))
+    let imported = scanfile::import_scan(io::BufReader::new(file))
         .map_err(|e| CliError::new(exit::ERROR, format!("{shown}: {e}")))?;
     let side = diff::DiffSide::new(
         imported.tree.root_path.to_string_lossy().into_owned(),
@@ -570,7 +594,15 @@ fn run_diff_command(c: &DiffCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        // The parser only accepts `bin` for `scan`.
+        Format::Binary => Err(binary_output_unsupported()),
     }
+}
+
+/// A `--format bin` that reached a command other than `scan`. The argument
+/// parser rejects it first, so this is a safety net.
+fn binary_output_unsupported() -> CliError {
+    CliError::new(exit::USAGE, "--format bin is only valid for scan")
 }
 /// Connect a GUI-subsystem process to the console it was started from, so
 /// `fastdir scan ...` can print. Redirected handles (pipes, files) are
@@ -908,6 +940,70 @@ mod tests {
         assert!(!csv.contains("gone.txt"), "below --min-change");
         assert!(csv.contains("added.bin"));
         for path in [&old, &new_scan, &diff_out, &csv_out] {
+            let _ = std::fs::remove_file(path);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn binary_scan_round_trips_through_diff() {
+        let dir = std::env::temp_dir().join(format!("fastdir-cli-bin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub").join("a.bin"), vec![0u8; 1000]).unwrap();
+        let saved =
+            std::env::temp_dir().join(format!("fastdir-cli-bin-{}.fdscan", std::process::id()));
+        let diff_out = std::env::temp_dir().join(format!(
+            "fastdir-cli-bin-diff-{}.json",
+            std::process::id()
+        ));
+        assert_eq!(
+            run(vec![
+                "scan".into(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "--format".into(),
+                "bin".into(),
+                "-o".into(),
+                saved.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let bytes = std::fs::read(&saved).unwrap();
+        assert!(bytes.starts_with(scanfile::MAGIC));
+
+        // Grow the file and diff the binary baseline against a live scan.
+        std::fs::write(dir.join("sub").join("a.bin"), vec![0u8; 4000]).unwrap();
+        assert_eq!(
+            run(vec![
+                "diff".into(),
+                saved.clone().into_os_string(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "-o".into(),
+                diff_out.clone().into_os_string(),
+            ]),
+            exit::OK
+        );
+        let doc: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&diff_out).unwrap()).unwrap();
+        assert_eq!(doc["total"]["delta"], 3000);
+        assert_eq!(
+            doc["old"]["root"].as_str(),
+            Some(dir.to_string_lossy().as_ref())
+        );
+        // Only `scan` writes a saved tree.
+        assert_eq!(
+            run(vec![
+                "top".into(),
+                dir.clone().into_os_string(),
+                "-q".into(),
+                "--format".into(),
+                "bin".into(),
+            ]),
+            exit::USAGE
+        );
+        for path in [&saved, &diff_out] {
             let _ = std::fs::remove_file(path);
         }
         std::fs::remove_dir_all(&dir).unwrap();

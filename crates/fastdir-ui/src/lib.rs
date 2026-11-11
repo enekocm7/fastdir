@@ -84,8 +84,8 @@ pub fn run() {
         });
 }
 
-/// `fastdir <path>` argument: a folder to scan or a saved `.json` scan to
-/// open.
+/// `fastdir <path>` argument: a folder to scan or a saved `.json` / `.fdscan`
+/// scan to open.
 fn cli_open_path() -> Option<PathBuf> {
     std::env::args_os().nth(1).and_then(|arg| {
         let mut arg = arg.to_string_lossy().trim().trim_matches('"').to_string();

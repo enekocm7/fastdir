@@ -9,10 +9,13 @@
 //!   an `owner` column when the scan collected owners.
 //! - JSON is a hierarchical snapshot of the subtree that
 //!   [`import_json`] can read back into a [`Tree`] (sizes, structure,
-//!   timestamps and drive pseudo-item kinds round-trip; UI-only flags such as
-//!   expanded state and hard-link markers do not).
+//!   timestamps, hard-link markers and drive pseudo-item kinds round-trip;
+//!   the UI-only expanded state does not).
+//! - The versioned binary form lives in [`crate::scanfile`]: smaller and
+//!   faster to load for very large scans, and it also keeps hard-link
+//!   markers and owners.
 //!
-//! Both formats honour [`ExportOptions`]: `max_depth` limits how far below
+//! Every format honours [`ExportOptions`]: `max_depth` limits how far below
 //! the exported root rows are emitted (the root itself is depth 0), and
 //! `include_files == false` exports folders only.
 
@@ -48,6 +51,8 @@ impl Default for ExportOptions {
 pub enum ExportFormat {
     Csv,
     Json,
+    /// Versioned binary scan (see [`crate::scanfile`]).
+    Binary,
 }
 
 impl ExportFormat {
@@ -56,6 +61,7 @@ impl ExportFormat {
         match self {
             Self::Csv => "csv",
             Self::Json => "json",
+            Self::Binary => crate::scanfile::EXTENSION,
         }
     }
 }
@@ -243,6 +249,10 @@ struct JsonNode {
     dirs: u32,
     #[serde(default, deserialize_with = "de_modified")]
     modified: i64,
+    /// Another hard link to a file counted elsewhere. Omitted when false so
+    /// ordinary exports stay unchanged.
+    #[serde(default, skip_serializing_if = "is_false")]
+    hard_link: bool,
     /// Display name of the owning account, when the scan collected owners.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     owner: Option<String>,
@@ -297,6 +307,10 @@ fn de_modified<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> 
     })
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn parse_iso_secs(text: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(text)
         .ok()
@@ -349,6 +363,7 @@ fn snapshot(
         files: node.files,
         dirs: node.dirs,
         modified: node.modified(),
+        hard_link: node.hard_link(),
         owner: tree.owner_name(tree.owner_at(path)).map(str::to_owned),
         children,
     })
@@ -419,7 +434,7 @@ fn count_descendants(node: &JsonNode) -> usize {
 }
 
 /// Write the subtree at `root` to `dest` in `format`. Returns the number of
-/// exported rows (CSV) or nodes (JSON).
+/// exported rows (CSV) or nodes (JSON / binary).
 pub fn export_to_file(
     tree: &Tree,
     root: &[u32],
@@ -432,6 +447,9 @@ pub fn export_to_file(
     match format {
         ExportFormat::Csv => export_csv(tree, root, options, out),
         ExportFormat::Json => export_json(tree, root, options, out),
+        ExportFormat::Binary => {
+            crate::scanfile::export_binary(tree, root, options, now_unix(), out)
+        }
     }
 }
 
@@ -460,8 +478,9 @@ fn build_dir(
                 let (dir, dir_owner) = build_dir(child, arena, owners)?;
                 builder.add_dir_owned(&child.name, dir, dir_owner);
             }
-            // Hard-link markers have no builder of their own; keep their
-            // bytes as plain files so totals survive.
+            NodeKind::File if child.hard_link => {
+                builder.add_hard_link_owned(&child.name, child.modified, owner)
+            }
             NodeKind::File => builder.add_file_owned(
                 &child.name,
                 child.size,
@@ -499,10 +518,10 @@ pub struct ImportedScan {
 /// Read back a [`export_json`] snapshot or a CLI `fastdir.scan` document into
 /// a [`Tree`], with the scan/export timestamp.
 ///
-/// Structure, sizes, timestamps and drive pseudo-item kinds round trip;
-/// extension stats are rebuilt from the imported names. Hard-link markers
-/// become plain files, since [`DirBuilder`] has no builder for them: totals
-/// survive, but the UI can no longer tell those entries apart.
+/// Structure, sizes, timestamps, hard-link markers and drive pseudo-item
+/// kinds round trip; extension stats are rebuilt from the imported names.
+/// A `hard_link` marker adds no bytes, exactly as in the scanned tree, and
+/// older documents without the field keep importing as plain files.
 pub fn import_json_with_meta(source: impl Read) -> io::Result<ImportedScan> {
     let doc: ImportDoc =
         serde_json::from_reader(source).map_err(|e| invalid(format!("invalid export: {e}")))?;
@@ -791,6 +810,31 @@ mod tests {
         // Files were excluded, so the imported folder is empty.
         assert_eq!(back.root().files, 0);
         assert_eq!(back.root().size, 0);
+    }
+
+    #[test]
+    fn json_round_trips_hard_link_markers() {
+        let mut arena = Arena::default();
+        let mut root = DirBuilder::new(0);
+        root.add_file("a.bin", 10, 10, 1);
+        root.add_hard_link("b.bin", 2);
+        let root = root.commit(&mut arena);
+        let tree = Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"));
+
+        let mut buf = Vec::new();
+        export_json(&tree, &[], &ExportOptions::default(), &mut buf).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(doc["root"]["children"][1]["hard_link"], true);
+        // The field is omitted on ordinary nodes.
+        assert!(doc["root"].get("hard_link").is_none());
+
+        let back = import_json(buf.as_slice()).unwrap();
+        let b = back.find(Path::new("/root/b.bin")).unwrap();
+        let node = back.get(&b).unwrap();
+        assert!(node.hard_link());
+        assert_eq!((node.size, node.disk_size), (0, 0));
+        assert_eq!(back.root().files, 2);
+        assert_eq!(back.root().size, 10);
     }
 
     #[test]

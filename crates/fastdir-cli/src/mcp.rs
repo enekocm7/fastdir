@@ -15,9 +15,10 @@ use crate::schema::{self, ScanDoc, ScanMeta, TreeShape, entry_summary};
 use crate::{CliError, Scanned, resolve_root};
 use fastdir_core::diff as core_diff;
 use fastdir_core::duplicates::{self, DuplicateOptions, DuplicateProgress};
-use fastdir_core::export::{ExportOptions, export_csv, import_json_with_meta};
+use fastdir_core::export::{ExportOptions, export_csv};
 use fastdir_core::filter::{Filter, parse_modified, parse_size};
 use fastdir_core::model::{Node, NodeKind, NodePath, Tree};
+use fastdir_core::scanfile;
 use fastdir_core::scanner::{self, Progress, ScanOptions};
 use fastdir_core::windows_apps;
 use serde_json::{Value, json};
@@ -39,8 +40,8 @@ const INSTRUCTIONS: &str = "FastDir analyzes disk usage. Call scan_path on a fol
 first (it can take a while on a whole drive), then use get_children to drill down, \
 largest_files for cleanup candidates (optionally filtered by name, size, extension or date), \
 search to find entries by name or glob, find_duplicates for groups of identical files, and \
-path_info for one entry. compare_scans shows what changed since a cached scan or a saved JSON \
-scan. Results come from the in-memory scan; call scan_path again to refresh. Sizes are bytes; \
+path_info for one entry. compare_scans shows what changed since a cached scan or a saved scan \
+(JSON or binary .fdscan). Results come from the in-memory scan; call scan_path again to refresh. Sizes are bytes; \
 `disk_size` is the allocated size on disk.";
 
 // JSON-RPC error codes.
@@ -289,12 +290,12 @@ impl Server {
             }),
             json!({
                 "name": "compare_scans",
-                "description": "Show what changed between two scans of the same folder: added, removed, grown and shrunk paths with their old and new sizes, largest absolute change first. `old` is a cached scan root or a saved JSON scan file; `new` is a saved JSON scan file or a folder to scan now.",
+                "description": "Show what changed between two scans of the same folder: added, removed, grown and shrunk paths with their old and new sizes, largest absolute change first. `old` is a cached scan root or a saved scan file (JSON or binary .fdscan); `new` is a saved scan file or a folder to scan now.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "old": { "type": "string", "description": "Root of a scan cached in this session, or a saved fastdir.scan JSON file" },
-                        "new": { "type": "string", "description": "Folder or drive to scan now, or a saved fastdir.scan JSON file" },
+                        "old": { "type": "string", "description": "Root of a scan cached in this session, or a saved scan file (fastdir.scan JSON or binary .fdscan)" },
+                        "new": { "type": "string", "description": "Folder or drive to scan now, or a saved scan file (fastdir.scan JSON or binary .fdscan)" },
                         "min_change": { "type": ["string", "integer"], "description": "Hide changes smaller than this: bytes, or a size such as 20GB (binary units)" },
                         "max_depth": { "type": "integer", "minimum": 0, "description": "Only entries up to this many levels below the root (0 = the root row)" },
                         "limit": limit(50),
@@ -305,13 +306,13 @@ impl Server {
             }),
             json!({
                 "name": "export_scan",
-                "description": "Write a scanned folder (or a subfolder) to a JSON (fastdir.scan schema) or CSV file.",
+                "description": "Write a scanned folder (or a subfolder) to a JSON (fastdir.scan schema), CSV or compact binary (.fdscan) file. The binary format keeps hard-link markers and loads faster.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "path": path,
                         "output": { "type": "string", "description": "File to write" },
-                        "format": { "type": "string", "enum": ["json", "csv"], "default": "json" },
+                        "format": { "type": "string", "enum": ["json", "csv", "bin"], "default": "json" },
                         "max_depth": { "type": "integer", "minimum": 0 },
                         "include_files": { "type": "boolean", "default": true },
                     },
@@ -748,7 +749,20 @@ impl Server {
                 &mut w,
             )
             .map(|_| ()),
-            other => return tool_err(format!("format must be json or csv, got {other}")),
+            "bin" | "binary" | "fdscan" => scanfile::export_binary(
+                &s.tree,
+                &node,
+                &ExportOptions {
+                    max_depth,
+                    include_files,
+                },
+                schema::parse_iso(&s.meta.scanned_at).unwrap_or(0),
+                &mut w,
+            )
+            .map(|_| ()),
+            other => {
+                return tool_err(format!("format must be json, csv or bin, got {other}"));
+            }
         };
         written
             .and_then(|_| w.flush())
@@ -827,7 +841,7 @@ impl Side {
 fn load_saved_side(path: &Path) -> Result<Side, ToolError> {
     let shown = path.display();
     let file = std::fs::File::open(path).map_err(|e| ToolError(format!("{shown}: {e}")))?;
-    let imported = import_json_with_meta(io::BufReader::new(file))
+    let imported = scanfile::import_scan(io::BufReader::new(file))
         .map_err(|e| ToolError(format!("{shown}: {e}")))?;
     let side = diff_doc::DiffSide::new(
         imported.tree.root_path.to_string_lossy().into_owned(),
