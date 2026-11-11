@@ -61,6 +61,35 @@ pub struct LiveScanResult {
     pub used_mft: bool,
 }
 
+/// One entry reported to a [`ScanObserver`].
+#[derive(Clone, Copy, Debug)]
+pub struct ObservedEntry<'a> {
+    pub name: &'a str,
+    /// Sizes, counts and flags. `ext` is not assigned yet during a scan; use
+    /// [`crate::model::extension_of`] on `name` instead.
+    pub node: &'a Node,
+    /// The owning account, when the scan collects owners.
+    pub owner: Option<&'a str>,
+}
+
+/// Receives entries while a scan runs, as soon as each one is final, so a
+/// caller can stream results instead of waiting for the whole tree.
+///
+/// Called from the scan threads, concurrently and in no particular order
+/// between folders. Within one folder, [`Self::entries`] comes before
+/// [`Self::dir_done`], and a folder is always done after everything below it
+/// (the scan root last). Every entry is reported exactly once.
+pub trait ScanObserver: Sync {
+    /// Entries of the folder `dir` that are final as soon as it is listed:
+    /// its files and the folders the scan does not enter (junctions, other
+    /// volumes). Folders it enters are reported by [`Self::dir_done`].
+    fn entries(&self, dir: &Path, entries: &[ObservedEntry<'_>]);
+
+    /// The folder at `path` and everything below it is complete; `node`
+    /// carries its totals.
+    fn dir_done(&self, path: &Path, node: &Node, owner: Option<&str>);
+}
+
 /// File IDs already seen during a scan. Hard links share their ID, so only
 /// the first link adds bytes to the tree; the rest are marked as duplicates.
 ///
@@ -531,6 +560,8 @@ struct ScanContext<'a> {
     owners: Option<OwnerCollector>,
     /// Folders skipped by full path (the Windows folder, when asked).
     excluded_dirs: Vec<ExcludedDir>,
+    /// Told about every entry as it becomes final (streaming output).
+    observer: Option<&'a dyn ScanObserver>,
 }
 
 impl<'a> ScanContext<'a> {
@@ -554,7 +585,31 @@ impl<'a> ScanContext<'a> {
             volumes: Mutex::new(HashMap::new()),
             owners: options.collect_owners.then(OwnerCollector::new),
             excluded_dirs: excluded_dirs(options),
+            observer: None,
         }
+    }
+
+    /// Tell `observer` about the entries of `dir` that are final once it is
+    /// listed.
+    fn report_listed(&self, dir: &Path, node: &DirBuilder, observer: &dyn ScanObserver) {
+        let table = self.owners.as_ref().map(|o| o.table.lock());
+        let entries: Vec<ObservedEntry<'_>> = node
+            .entries()
+            .map(|(name, node, owner)| ObservedEntry {
+                name,
+                node,
+                owner: table.as_ref().and_then(|t| t.name(owner)),
+            })
+            .collect();
+        if !entries.is_empty() {
+            observer.entries(dir, &entries);
+        }
+    }
+
+    /// Tell `observer` that the folder at `path` is complete.
+    fn report_done(&self, path: &Path, node: &Node, owner: u16, observer: &dyn ScanObserver) {
+        let table = self.owners.as_ref().map(|o| o.table.lock());
+        observer.dir_done(path, node, table.as_ref().and_then(|t| t.name(owner)));
     }
 
     /// `true` when the folder `name` inside `parent` is skipped by path.
@@ -659,12 +714,40 @@ pub(crate) fn with_threads<R: Send>(threads: Option<usize>, f: impl FnOnce() -> 
 
 /// Scan `root` (blocking). Call from a background thread.
 pub fn scan(root: PathBuf, progress: Arc<Progress>, options: &ScanOptions) -> ScanResult {
+    scan_inner(root, progress, options, None)
+}
+
+/// [`scan`] that reports every entry to `observer` as soon as it is final
+/// (see [`ScanObserver`]). An MFT scan yields the whole tree at once, so its
+/// entries are reported right after it is read instead.
+pub fn scan_observed(
+    root: PathBuf,
+    progress: Arc<Progress>,
+    options: &ScanOptions,
+    observer: &dyn ScanObserver,
+) -> ScanResult {
+    let result = scan_inner(root, progress, options, Some(observer));
+    if result.used_mft && !result.cancelled {
+        replay(&result.tree, &[], observer);
+    }
+    result
+}
+
+fn scan_inner(
+    root: PathBuf,
+    progress: Arc<Progress>,
+    options: &ScanOptions,
+    observer: Option<&dyn ScanObserver>,
+) -> ScanResult {
     let start = Instant::now();
     let (tree, used_mft) = with_threads(options.threads, || {
         let name = root.to_string_lossy();
         let (mut sub, used_mft) = match crate::mft::scan(&root, &name, &progress, options) {
             Some(sub) => (sub, true),
-            None => (scan_detached(&root, &name, &progress, options), false),
+            None => (
+                scan_detached(&root, &name, &progress, options, observer),
+                false,
+            ),
         };
         sub.root_mut().set_expanded(true);
         (Tree::new(sub, root.clone()), used_mft)
@@ -743,6 +826,7 @@ pub fn scan_live(
             let child = scan_dir(
                 &child_path,
                 sub.modified,
+                sub.owner,
                 &progress,
                 &links,
                 &arena,
@@ -784,24 +868,86 @@ pub fn scan_subtree(path: &Path, options: &ScanOptions) -> Subtree {
         .unwrap_or(path.as_os_str())
         .to_string_lossy();
     with_threads(options.threads, || {
-        scan_detached(path, &name, &progress, options)
+        scan_detached(path, &name, &progress, options, None)
     })
+}
+
+/// Report the finished folder at `at` (an index path in `tree`) and
+/// everything below it to `observer`, in the order a scan would: each
+/// folder's files, then its sub-folders, then the folder itself. Does
+/// nothing when `at` is not a folder.
+pub fn replay(tree: &Tree, at: &[u32], observer: &dyn ScanObserver) {
+    let (Some(node), Some(path)) = (tree.get(at), tree.fs_path(at)) else {
+        return;
+    };
+    if node.is_dir() {
+        replay_dir(tree, node, tree.owner_at(at), &path, observer);
+    }
+}
+
+fn replay_dir(tree: &Tree, node: &Node, owner: u16, path: &Path, observer: &dyn ScanObserver) {
+    let children = tree.children(node);
+    let files: Vec<ObservedEntry<'_>> = children
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !c.is_dir())
+        .map(|(i, c)| ObservedEntry {
+            name: tree.name(c),
+            node: c,
+            owner: tree.owner_name(tree.child_owner(node, i)),
+        })
+        .collect();
+    if !files.is_empty() {
+        observer.entries(path, &files);
+    }
+    for (i, child) in children.iter().enumerate().filter(|(_, c)| c.is_dir()) {
+        let child_path = path.join(tree.name(child));
+        replay_dir(
+            tree,
+            child,
+            tree.child_owner(node, i),
+            &child_path,
+            observer,
+        );
+    }
+    observer.dir_done(path, node, tree.owner_name(owner));
 }
 
 /// Scan `path` into a new arena. The hard-link tracker only lives for the
 /// scan itself, so it is freed before the caller builds anything on top.
-fn scan_detached(path: &Path, name: &str, progress: &Progress, options: &ScanOptions) -> Subtree {
+fn scan_detached(
+    path: &Path,
+    name: &str,
+    progress: &Progress,
+    options: &ScanOptions,
+    observer: Option<&dyn ScanObserver>,
+) -> Subtree {
     let arena = Mutex::new(Arena::default());
-    let owners;
-    let root = {
+    let (root, owners) = {
         let links = LinkTracker::default();
         let visited = Mutex::new(HashSet::new());
-        let ctx = ScanContext::for_scan(path, options, &visited);
-        owners = ctx
+        let mut ctx = ScanContext::for_scan(path, options, &visited);
+        ctx.observer = observer;
+        let root_owner = ctx
             .owners
             .as_ref()
-            .map(|collector| (collector.owner_of_root(path), collector.snapshot()));
-        scan_dir(path, 0, progress, &links, &arena, &ctx, &ctx.root_info)
+            .map_or(NO_OWNER, |collector| collector.owner_of_root(path));
+        let root = scan_dir(
+            path,
+            0,
+            root_owner,
+            progress,
+            &links,
+            &arena,
+            &ctx,
+            &ctx.root_info,
+        );
+        // Snapshot after the scan so the table holds every owner seen.
+        let owners = ctx
+            .owners
+            .as_ref()
+            .map(|collector| (root_owner, collector.snapshot()));
+        (root, owners)
     };
     let mut arena = arena.into_inner();
     match owners {
@@ -1031,10 +1177,13 @@ fn list_one(
 
 /// Scan one directory (and, in parallel, everything below it). Each
 /// directory's children are stored in `arena` as soon as they are final.
-/// Returns the directory's node; its parent supplies the name.
+/// Returns the directory's node; its parent supplies the name. `owner` is
+/// the directory's own owner, only used to report it to an observer.
+#[allow(clippy::too_many_arguments)]
 fn scan_dir(
     path: &Path,
     modified: i64,
+    owner: u16,
     progress: &Progress,
     links: &LinkTracker,
     arena: &Mutex<Arena>,
@@ -1045,6 +1194,9 @@ fn scan_dir(
         return DirBuilder::new(modified).commit(&mut arena.lock());
     }
     let Listing { mut node, subdirs } = list_one(path, modified, progress, links, ctx, volume);
+    if let Some(observer) = ctx.observer {
+        ctx.report_listed(path, &node, observer);
+    }
 
     if !subdirs.is_empty() {
         let children: Vec<(Box<str>, Node, u16)> = subdirs
@@ -1055,6 +1207,7 @@ fn scan_dir(
                 let child = scan_dir(
                     &child_path,
                     sub.modified,
+                    sub.owner,
                     progress,
                     links,
                     arena,
@@ -1070,6 +1223,11 @@ fn scan_dir(
     }
     // Sort outside the lock; only the copy into the arena is serialised.
     node.finish();
+    if let Some(observer) = ctx.observer
+        && !progress.cancelled()
+    {
+        ctx.report_done(path, node.node(), owner, observer);
+    }
     node.commit(&mut arena.lock())
 }
 
@@ -2108,6 +2266,89 @@ mod tests {
         // A rescan of one folder (after a move) counts them too.
         let sub_tree = scan_subtree(&dir.join("sub"), &options);
         assert_eq!(sub_tree.root().size, 10 + 9000 + 7);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Records what a [`ScanObserver`] is told, in order.
+    #[derive(Default)]
+    struct Recorder {
+        /// (path, size, is a finished folder)
+        events: Mutex<Vec<(PathBuf, u64, bool)>>,
+    }
+
+    impl ScanObserver for Recorder {
+        fn entries(&self, dir: &Path, entries: &[ObservedEntry<'_>]) {
+            let mut events = self.events.lock();
+            for e in entries {
+                events.push((dir.join(e.name), e.node.size, false));
+            }
+        }
+        fn dir_done(&self, path: &Path, node: &Node, _owner: Option<&str>) {
+            self.events
+                .lock()
+                .push((path.to_path_buf(), node.size, true));
+        }
+    }
+
+    #[test]
+    fn observed_scan_reports_every_entry_once_children_first() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(dir.join("a/b")).unwrap();
+        std::fs::create_dir_all(dir.join("empty")).unwrap();
+        std::fs::write(dir.join("top.txt"), vec![0u8; 10]).unwrap();
+        std::fs::write(dir.join("a/one.bin"), vec![0u8; 20]).unwrap();
+        std::fs::write(dir.join("a/b/two.bin"), vec![0u8; 30]).unwrap();
+
+        let recorder = Recorder::default();
+        let result = scan_observed(
+            dir.clone(),
+            Arc::new(Progress::default()),
+            &ScanOptions::default(),
+            &recorder,
+        );
+        let events = recorder.events.into_inner();
+        let mut paths: Vec<&PathBuf> = events.iter().map(|(p, _, _)| p).collect();
+        paths.sort();
+        let mut expected = [
+            dir.clone(),
+            dir.join("a"),
+            dir.join("a").join("b"),
+            dir.join("a").join("b").join("two.bin"),
+            dir.join("a").join("one.bin"),
+            dir.join("empty"),
+            dir.join("top.txt"),
+        ];
+        expected.sort();
+        assert_eq!(paths, expected.iter().collect::<Vec<_>>());
+
+        // Every folder comes after everything below it; the root is last
+        // and carries the final total.
+        for (i, (path, _, done)) in events.iter().enumerate() {
+            if *done {
+                assert!(
+                    events[i + 1..]
+                        .iter()
+                        .all(|(later, _, _)| !later.starts_with(path) || later == path),
+                    "{} reported before its contents",
+                    path.display()
+                );
+            }
+        }
+        let (last, size, done) = events.last().unwrap();
+        assert!(*done && *last == dir);
+        assert_eq!(*size, 60);
+        assert_eq!(result.tree.root().size, 60);
+        let a = events.iter().find(|(p, _, _)| *p == dir.join("a")).unwrap();
+        assert_eq!(a.1, 50);
+
+        // Replaying the finished tree reports the same entries.
+        let replayed = Recorder::default();
+        replay(&result.tree, &[], &replayed);
+        let mut again: Vec<(PathBuf, u64, bool)> = replayed.events.into_inner();
+        let mut first = events.clone();
+        again.sort();
+        first.sort();
+        assert_eq!(again, first);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
