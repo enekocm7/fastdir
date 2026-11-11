@@ -6,6 +6,11 @@ on:
   # Manual runs build the installer and upload it as a workflow artifact
   # without publishing a release.
   workflow_dispatch:
+    inputs:
+      sign:
+        description: Code-sign the Windows binaries and installer (needs the signing secrets)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -17,6 +22,12 @@ jobs:
   windows:
     name: Windows x64
     runs-on: windows-2025
+    env:
+      # Code signing (packaging/README.md, "Windows code signing"). Either
+      # Azure Artifact Signing or SignPath; without their secrets nothing is
+      # signed and the build is otherwise unchanged.
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,8 +51,67 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
 
+      # Releases are signed whenever a provider is configured; manual runs
+      # only when asked (`sign` input), to save signing quota.
+      - name: Choose signing provider
+        id: sign
+        shell: pwsh
+        run: |
+          $wanted = $env:GITHUB_REF_TYPE -eq "tag" -or "${{ inputs.sign }}" -eq "true"
+          $provider = "none"
+          if ($wanted -and $env:AZURE_CLIENT_ID) { $provider = "azure" }
+          elseif ($wanted -and $env:SIGNPATH_API_TOKEN) { $provider = "signpath" }
+          "provider=$provider" >> $env:GITHUB_OUTPUT
+          Write-Host "Signing provider: $provider"
+
       - name: Build
         run: cargo build --release --locked
+
+      # The binaries are signed before they go into the installer and the
+      # portable zip, so every copy a user runs carries the signature.
+      - name: Sign binaries (Azure Artifact Signing)
+        if: steps.sign.outputs.provider == 'azure'
+        uses: azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: |
+            ${{ github.workspace }}\target\release\fastdir.exe
+            ${{ github.workspace }}\target\release\fastdir-cli.exe
+          description: FastDir
+          description-url: https://github.com/enekocm7/fastdir
+
+      - name: Upload unsigned binaries for SignPath
+        id: unsigned-binaries
+        if: steps.sign.outputs.provider == 'signpath'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-binaries
+          path: |
+            target/release/fastdir.exe
+            target/release/fastdir-cli.exe
+
+      - name: Sign binaries (SignPath)
+        if: steps.sign.outputs.provider == 'signpath'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'fastdir' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: binaries
+          github-artifact-id: ${{ steps.unsigned-binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-binaries
+
+      - name: Use the SignPath-signed binaries
+        if: steps.sign.outputs.provider == 'signpath'
+        shell: pwsh
+        run: Copy-Item signed-binaries\*.exe target\release\ -Force
 
       - name: Install Inno Setup
         shell: pwsh
@@ -66,6 +136,58 @@ jobs:
             installer\fastdir.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Sign installer (Azure Artifact Signing)
+        if: steps.sign.outputs.provider == 'azure'
+        uses: azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\dist\FastDir-${{ steps.version.outputs.version }}-setup-x64.exe
+          description: FastDir Setup
+          description-url: https://github.com/enekocm7/fastdir
+
+      - name: Upload unsigned installer for SignPath
+        id: unsigned-installer
+        if: steps.sign.outputs.provider == 'signpath'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/FastDir-${{ steps.version.outputs.version }}-setup-x64.exe
+
+      - name: Sign installer (SignPath)
+        if: steps.sign.outputs.provider == 'signpath'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'fastdir' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-installer
+
+      - name: Use the SignPath-signed installer
+        if: steps.sign.outputs.provider == 'signpath'
+        shell: pwsh
+        run: Copy-Item signed-installer\*.exe dist\ -Force
+
+      - name: Check signatures
+        if: steps.sign.outputs.provider != 'none'
+        shell: pwsh
+        run: |
+          $files = "target\release\fastdir.exe", "target\release\fastdir-cli.exe",
+            "dist\FastDir-${{ steps.version.outputs.version }}-setup-x64.exe"
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f
+            Write-Host "$f : $($sig.Status) $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne "Valid") { throw "$f is not validly signed" }
+          }
+
       - name: Package portable zip
         shell: pwsh
         run: |
@@ -75,6 +197,15 @@ jobs:
           Copy-Item target\release\fastdir-cli.exe staging\fastdir-cli.exe
           Copy-Item README.md staging\
           Compress-Archive -Path staging\* -DestinationPath "dist\FastDir-$v-portable-x64.zip" -Force
+
+      # Validates the Chocolatey and Scoop manifests on every run, so a
+      # broken template fails here instead of in the publishing jobs.
+      - name: Check package manifests
+        shell: pwsh
+        run: |
+          choco pack packaging\chocolatey\fastdir.nuspec --out "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content packaging\scoop\fastdir.json -Raw | ConvertFrom-Json | Out-Null
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -373,3 +504,116 @@ jobs:
           commit_email: ${{ vars.AUR_COMMIT_EMAIL || 'enekocm7@users.noreply.github.com' }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: Update to ${{ needs.linux.outputs.version }}
+
+  # Windows package managers, stable tags only. Each job is skipped until its
+  # secret exists; the one-time setup is in packaging/README.md.
+
+  # Opens a pull request on microsoft/winget-pkgs with komac. Needs the
+  # WINGET_TOKEN secret (a classic PAT with `public_repo`, from the account
+  # that owns a fork of winget-pkgs) and a first version already in winget.
+  winget:
+    name: winget (enekocm7.FastDir)
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [publish]
+    runs-on: windows-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Submit to winget-pkgs
+        if: env.WINGET_TOKEN != ''
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: enekocm7.FastDir
+          installers-regex: '-setup-x64\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
+          fork-user: ${{ vars.WINGET_FORK_USER || github.repository_owner }}
+
+  # Updates bucket/fastdir.json in a Scoop bucket repository (default
+  # enekocm7/scoop-bucket). Needs the SCOOP_BUCKET_TOKEN secret: a
+  # fine-grained PAT with Contents read/write on that repository.
+  scoop:
+    name: Scoop bucket
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [linux, publish]
+    runs-on: ubuntu-24.04
+    env:
+      SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+      BUCKET_REPO: ${{ vars.SCOOP_BUCKET_REPO || 'enekocm7/scoop-bucket' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.SCOOP_BUCKET_TOKEN != ''
+
+      - uses: actions/checkout@v4
+        if: env.SCOOP_BUCKET_TOKEN != ''
+        with:
+          repository: ${{ env.BUCKET_REPO }}
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          path: bucket-repo
+
+      - name: Update the manifest
+        if: env.SCOOP_BUCKET_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ needs.linux.outputs.version }}"
+          zip="FastDir-$v-portable-x64.zip"
+          gh release download "v$v" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS.txt
+          hash=$(awk -v f="$zip" '$2 == f { print $1 }' SHA256SUMS.txt)
+          test -n "$hash"
+          mkdir -p bucket-repo/bucket
+          jq --arg v "$v" --arg hash "$hash" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$v/$zip" \
+            '.version = $v | .architecture."64bit".url = $url | .architecture."64bit".hash = $hash' \
+            packaging/scoop/fastdir.json > bucket-repo/bucket/fastdir.json
+          cat bucket-repo/bucket/fastdir.json
+
+      - name: Push
+        if: env.SCOOP_BUCKET_TOKEN != ''
+        working-directory: bucket-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/fastdir.json
+          git diff --cached --quiet && exit 0
+          git commit -m "fastdir: Update to version ${{ needs.linux.outputs.version }}"
+          git push
+
+  # Packs packaging/chocolatey and pushes it to the Chocolatey community
+  # repository (each version goes through its moderation). Needs the
+  # CHOCOLATEY_API_KEY secret.
+  chocolatey:
+    name: Chocolatey
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    needs: [linux, publish]
+    runs-on: windows-2025
+    env:
+      CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.CHOCOLATEY_API_KEY != ''
+
+      - name: Pack and push
+        if: env.CHOCOLATEY_API_KEY != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ needs.linux.outputs.version }}"
+          $setup = "FastDir-$v-setup-x64.exe"
+          gh release download "v$v" --repo $env:GITHUB_REPOSITORY --pattern SHA256SUMS.txt
+          $line = Get-Content SHA256SUMS.txt | Where-Object { $_ -match "\s\*?$([regex]::Escape($setup))$" }
+          if (-not $line) { throw "$setup is not in SHA256SUMS.txt" }
+          $sum = ($line -split '\s+')[0]
+          $install = "packaging\chocolatey\tools\chocolateyinstall.ps1"
+          (Get-Content $install -Raw) `
+            -replace "(?m)^\`$version = '.*'", "`$version = '$v'" `
+            -replace "(?m)^\`$checksum = '.*'", "`$checksum = '$sum'" |
+            Set-Content $install -NoNewline
+          $nuspec = "packaging\chocolatey\fastdir.nuspec"
+          (Get-Content $nuspec -Raw) -replace '<version>.*</version>', "<version>$v</version>" |
+            Set-Content $nuspec -NoNewline
+          Get-Content $install
+          choco pack $nuspec --out dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          choco push "dist\fastdir.$v.nupkg" --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

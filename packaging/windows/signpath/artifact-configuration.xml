@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration for the release workflow. GitHub Actions
+     artifacts arrive as a zip; every .exe in it is Authenticode-signed. Use
+     this for both artifact configurations the workflow submits (binaries:
+     fastdir.exe + fastdir-cli.exe; installer: the Inno Setup exe). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="*.exe" max-matches="unbounded">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

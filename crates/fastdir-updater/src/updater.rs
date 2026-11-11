@@ -367,7 +367,21 @@ pub fn detect_kind() -> InstallKind {
     let Some(dir) = exe.parent() else {
         return InstallKind::Portable;
     };
+    classify_windows(dir)
+}
+
+/// Install kind of a Windows build from the directory its exe is in.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn classify_windows(dir: &Path) -> InstallKind {
+    // Scoop unpacks the portable zip into `apps\<app>\<version>` and records
+    // the install there; `scoop update` owns that folder.
+    if dir.join("manifest.json").is_file() && dir.join("install.json").is_file() {
+        return InstallKind::PackageManager;
+    }
     // Inno Setup always drops its uninstaller (`unins000.exe`) in the app dir.
+    // winget and Chocolatey run that same installer. Updating in the app is
+    // safe for both: winget reads the version from Apps & features, and a
+    // later `choco upgrade` just runs the newer installer again.
     if !dir.join("unins000.exe").is_file() {
         return InstallKind::Portable;
     }
@@ -790,6 +804,32 @@ mod tests {
             classify_unix(Some(Path::new("/app/bin/fastdir")), None, true),
             InstallKind::PackageManager
         );
+    }
+
+    #[test]
+    fn classifies_windows_installs() {
+        let dir = std::env::temp_dir().join(format!("fastdir-kind-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let touch = |name: &str| fs::write(dir.join(name), b"").unwrap();
+
+        // Unzipped portable build.
+        touch("FastDir.exe");
+        assert_eq!(classify_windows(&dir), InstallKind::Portable);
+        // Inno Setup install (also what winget and Chocolatey run).
+        touch("unins000.exe");
+        assert!(matches!(
+            classify_windows(&dir),
+            InstallKind::Installed { .. }
+        ));
+        fs::remove_file(dir.join("unins000.exe")).unwrap();
+        // Scoop needs both of its files; one alone is not a Scoop install.
+        touch("manifest.json");
+        assert_eq!(classify_windows(&dir), InstallKind::Portable);
+        touch("install.json");
+        assert_eq!(classify_windows(&dir), InstallKind::PackageManager);
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[cfg(target_os = "linux")]

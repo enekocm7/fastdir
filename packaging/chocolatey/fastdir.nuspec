@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chocolatey package. The release workflow's `chocolatey` job fills in the
+     version and the installer checksum, then packs and pushes it. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>fastdir</id>
+    <version>0.3.2</version>
+    <packageSourceUrl>https://github.com/enekocm7/fastdir/tree/main/packaging/chocolatey</packageSourceUrl>
+    <owners>enekocm7</owners>
+    <title>FastDir</title>
+    <authors>enekocm7</authors>
+    <projectUrl>https://github.com/enekocm7/fastdir</projectUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/enekocm7/fastdir@main/assets/logo.svg</iconUrl>
+    <licenseUrl>https://github.com/enekocm7/fastdir/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/enekocm7/fastdir</projectSourceUrl>
+    <docsUrl>https://github.com/enekocm7/fastdir#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/enekocm7/fastdir/issues</bugTrackerUrl>
+    <releaseNotes>https://github.com/enekocm7/fastdir/releases</releaseNotes>
+    <tags>disk-usage disk-space treemap windirstat wiztree storage cli foss</tags>
+    <summary>Blazing fast disk usage analyzer with a treemap</summary>
+    <description><![CDATA[FastDir scans a drive or folder on every CPU core and shows where the space went: a sortable directory tree, a per-extension and per-category breakdown and a cushion-shaded treemap.
+
+- Rename, move, trash or delete files without rescanning
+- Duplicate finder, saved scans, scan comparison and growth over time
+- `fastdir-cli`: a headless scanner with JSON/CSV output and an MCP server
+
+The package runs the official installer for all users, with the Explorer "Analyze with FastDir" context menu entry.
+
+FastDir can also update itself from its own update notification; `choco upgrade fastdir` keeps working either way.
+]]></description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

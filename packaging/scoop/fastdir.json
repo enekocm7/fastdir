@@ -1,0 +1,30 @@
+{
+    "version": "0.3.2",
+    "description": "Blazing fast disk usage analyzer with a treemap (GUI and CLI)",
+    "homepage": "https://github.com/enekocm7/fastdir",
+    "license": "GPL-3.0-or-later",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/enekocm7/fastdir/releases/download/v0.3.2/FastDir-0.3.2-portable-x64.zip",
+            "hash": "e12d44c6d2c4e064db288f9664bab85631b2dd1aa204103539e129df49c43cef"
+        }
+    },
+    "bin": "fastdir-cli.exe",
+    "shortcuts": [
+        [
+            "FastDir.exe",
+            "FastDir"
+        ]
+    ],
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/enekocm7/fastdir/releases/download/v$version/FastDir-$version-portable-x64.zip"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS.txt"
+        }
+    }
+}

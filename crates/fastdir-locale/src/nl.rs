@@ -266,7 +266,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "Je wordt niet meer herinnerd aan v{version}.",
         "upd.skip_title" => "Versie overgeslagen",
         "upd.no_asset" => "Deze release heeft geen download voor jouw installatietype.",
-        "upd.use_package_manager" => "FastDir is geïnstalleerd via je pakketbeheerder, dus werk het daar bij (apt, dnf, pacman, nix…).",
+        "upd.use_package_manager" => "FastDir is geïnstalleerd via je pakketbeheerder, dus werk het daar bij (apt, dnf, pacman, nix, scoop…).",
         "upd.manual_download" => "Download de nieuwe versie van de releasepagina: https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "Bijwerken mislukt",
         "upd.updating_title" => "FastDir bijwerken",

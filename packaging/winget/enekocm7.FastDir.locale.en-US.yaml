@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+PackageIdentifier: enekocm7.FastDir
+PackageVersion: 0.3.2
+PackageLocale: en-US
+Publisher: enekocm7
+PublisherUrl: https://github.com/enekocm7
+PublisherSupportUrl: https://github.com/enekocm7/fastdir/issues
+PackageName: FastDir
+PackageUrl: https://github.com/enekocm7/fastdir
+License: GPL-3.0-or-later
+LicenseUrl: https://github.com/enekocm7/fastdir/blob/main/LICENSE
+ShortDescription: Blazing fast disk usage analyzer with a treemap
+Description: |-
+  FastDir scans a drive or folder on every CPU core and shows where the space went:
+  a sortable directory tree, a per-extension and per-category breakdown and a
+  cushion-shaded treemap. It can rename, move, trash or delete files without
+  rescanning, find duplicates and compare saved scans. Also installs
+  fastdir-cli, a headless scanner with JSON/CSV output and an MCP server.
+Moniker: fastdir
+Tags:
+  - disk-usage
+  - disk-space
+  - treemap
+  - windirstat
+  - wiztree
+  - storage
+ReleaseNotesUrl: https://github.com/enekocm7/fastdir/releases/tag/v0.3.2
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

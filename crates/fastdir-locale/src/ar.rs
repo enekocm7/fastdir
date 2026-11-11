@@ -268,7 +268,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "لن يتم تذكيرك بـ v{version} مرة أخرى.",
         "upd.skip_title" => "تم تخطي الإصدار",
         "upd.no_asset" => "لا يتضمن هذا الإصدار تنزيلًا لنوع التثبيت لديك.",
-        "upd.use_package_manager" => "ثُبِّت FastDir بواسطة مدير الحزم، لذا حدّثه من هناك (apt أو dnf أو pacman أو nix…).",
+        "upd.use_package_manager" => "ثُبِّت FastDir بواسطة مدير الحزم، لذا حدّثه من هناك (apt أو dnf أو pacman أو nix أو scoop…).",
         "upd.manual_download" => "نزّل الإصدار الجديد من صفحة الإصدارات: https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "فشل التحديث",
         "upd.updating_title" => "جارٍ تحديث FastDir",

@@ -268,7 +268,7 @@ pub fn get(key: &str) -> Option<&'static str> {
         "upd.skip_body" => "No se te avisará más sobre la v{version}.",
         "upd.skip_title" => "Versión omitida",
         "upd.no_asset" => "Esta versión no tiene descarga para tu tipo de instalación.",
-        "upd.use_package_manager" => "FastDir se instaló con tu gestor de paquetes, así que actualízalo desde allí (apt, dnf, pacman, nix…).",
+        "upd.use_package_manager" => "FastDir se instaló con tu gestor de paquetes, así que actualízalo desde allí (apt, dnf, pacman, nix, scoop…).",
         "upd.manual_download" => "Descarga la nueva versión desde la página de versiones: https://github.com/enekocm7/fastdir/releases",
         "upd.fail_title" => "Falló la actualización",
         "upd.updating_title" => "Actualizando FastDir",

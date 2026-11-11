@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+PackageIdentifier: enekocm7.FastDir
+PackageVersion: 0.3.2
+InstallerType: inno
+UpgradeBehavior: install
+ProductCode: '{6B4F2A31-9C1E-4E7A-B2D5-FA57D1A0C0DE}_is1'
+ReleaseDate: 2026-11-04
+AppsAndFeaturesEntries:
+  - DisplayName: FastDir
+    Publisher: enekocm7
+    ProductCode: '{6B4F2A31-9C1E-4E7A-B2D5-FA57D1A0C0DE}_is1'
+# installer/fastdir.iss allows both scopes (PrivilegesRequiredOverridesAllowed).
+Installers:
+  - Architecture: x64
+    Scope: user
+    InstallerUrl: https://github.com/enekocm7/fastdir/releases/download/v0.3.2/FastDir-0.3.2-setup-x64.exe
+    InstallerSha256: E508ECC61B4AA2E028F4463F2E00E0D03093C09D0A171483B8040C7D31D353AC
+    InstallerSwitches:
+      Custom: /CURRENTUSER
+  - Architecture: x64
+    Scope: machine
+    InstallerUrl: https://github.com/enekocm7/fastdir/releases/download/v0.3.2/FastDir-0.3.2-setup-x64.exe
+    InstallerSha256: E508ECC61B4AA2E028F4463F2E00E0D03093C09D0A171483B8040C7D31D353AC
+    InstallerSwitches:
+      Custom: /ALLUSERS
+ManifestType: installer
+ManifestVersion: 1.10.0

@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+# First submission to microsoft/winget-pkgs (see packaging/README.md). After
+# that, the release workflow's `winget` job opens the PR for every new
+# version with komac, starting from the manifests already in winget-pkgs.
+PackageIdentifier: enekocm7.FastDir
+PackageVersion: 0.3.2
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.10.0

@@ -225,6 +225,18 @@ Download the latest release from the
 | `FastDir-<version>-setup-x64.exe` | Installer: Start menu shortcut, optional desktop icon and Explorer context menu, uninstaller. Installs per-user by default (no admin prompt). |
 | `FastDir-<version>-portable-x64.zip` | Just the executables (`FastDir.exe` and the console `fastdir-cli.exe`), no installation needed. |
 
+Or with a Windows package manager (each one lists FastDir once its first
+submission is accepted):
+
+| Package manager | Install | Updates |
+|---|---|---|
+| winget | `winget install enekocm7.FastDir` | `winget upgrade enekocm7.FastDir`, or **Update now** in the app |
+| Scoop | `scoop bucket add fastdir https://github.com/enekocm7/scoop-bucket` then `scoop install fastdir/fastdir` | `scoop update fastdir` |
+| Chocolatey | `choco install fastdir` | `choco upgrade fastdir`, or **Update now** in the app |
+
+Release binaries and the installer are code-signed once the project's signing
+certificate is set up, so SmartScreen stops warning about an unknown publisher.
+
 ### Linux
 
 Every Linux package installs both `fastdir` (the GUI) and `fastdir-cli`, plus an
