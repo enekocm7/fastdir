@@ -656,6 +656,8 @@ impl TreemapView {
             };
             let link = if node.hard_link() {
                 fastdir_locale::t(&self.lang, "tree.hover_link")
+            } else if node.cloud() {
+                fastdir_locale::t(&self.lang, "tree.hover_cloud")
             } else {
                 ""
             };

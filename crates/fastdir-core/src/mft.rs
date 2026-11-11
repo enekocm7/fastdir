@@ -21,7 +21,7 @@
 //! buffers, so they build and are tested on every platform; only reading
 //! the volume is Windows-specific.
 
-use crate::model::{Arena, DirBuilder, Node, Subtree};
+use crate::model::{Arena, DirBuilder, NO_OWNER, Node, Subtree};
 use crate::scanner::{
     ExcludedDir, LinkTracker, Progress, ScanOptions, Streams, excluded_dirs, is_content_stream,
     round_up,
@@ -66,6 +66,8 @@ const NAMESPACE_DOS: u8 = 2;
 
 // Windows file attributes, spelled out so this module builds everywhere.
 const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0002;
+/// `FILE_ATTRIBUTE_OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS`.
+const CLOUD_RECALL_ATTRIBUTES: u32 = 0x1000 | 0x40000 | 0x400000;
 const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0004;
 const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x0200;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
@@ -163,6 +165,11 @@ impl Record {
         self.attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM) != 0
     }
 
+    /// An online-only cloud placeholder (OneDrive Files On-Demand).
+    fn cloud(&self) -> bool {
+        self.attrs & CLOUD_RECALL_ATTRIBUTES != 0
+    }
+
     fn reparse(&self) -> bool {
         self.attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0
     }
@@ -173,6 +180,9 @@ impl Record {
     /// size up to the cluster, and WOF files report the size of their
     /// compressed stream.
     fn disk_size(&self, cluster: u64) -> u64 {
+        if self.cloud() {
+            return self.alloc;
+        }
         let special = self.attrs
             & (FILE_ATTRIBUTE_COMPRESSED
                 | FILE_ATTRIBUTE_SPARSE_FILE
@@ -820,7 +830,17 @@ fn build_dir(
             node.add_hard_link(name, r.modified);
         } else {
             streams.add(own_streams);
-            node.add_file(name, r.size, r.disk_size(ctx.cluster), r.modified);
+            if r.cloud() {
+                node.add_cloud_file_owned(
+                    name,
+                    r.size,
+                    r.disk_size(ctx.cluster),
+                    r.modified,
+                    NO_OWNER,
+                );
+            } else {
+                node.add_file(name, r.size, r.disk_size(ctx.cluster), r.modified);
+            }
         }
     }
     node.add_streams(streams.size, streams.disk_size);

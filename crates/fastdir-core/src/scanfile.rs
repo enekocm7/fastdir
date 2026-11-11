@@ -70,6 +70,8 @@ const FLAG_OWNERS: u16 = 1 << 0;
 const FLAG_ERROR: u8 = 1 << 3;
 const FLAG_HARD_LINK: u8 = 1 << 4;
 const FLAG_OWNER: u8 = 1 << 5;
+/// Files only (version 2): an online-only cloud placeholder.
+const FLAG_CLOUD: u8 = 1 << 6;
 const KIND_MASK: u8 = 0b111;
 /// Version-1 layout: two kind bits, then the same flags one bit lower.
 const V1_FLAG_ERROR: u8 = 1 << 2;
@@ -199,6 +201,9 @@ fn encode_record(buf: &mut Vec<u8>, tree: &Tree, node: &Node, owner: u16, child_
     if node.hard_link() {
         flags |= FLAG_HARD_LINK;
     }
+    if node.cloud() {
+        flags |= FLAG_CLOUD;
+    }
     if owner != NO_OWNER {
         flags |= FLAG_OWNER;
     }
@@ -287,6 +292,13 @@ pub fn import_binary(source: impl Read) -> io::Result<ImportedScan> {
                         .builder
                         .add_hard_link_owned(&record.name, record.modified, record.owner);
                 }
+                NodeKind::File if record.cloud => parent.builder.add_cloud_file_owned(
+                    &record.name,
+                    record.size,
+                    record.disk_size,
+                    record.modified,
+                    record.owner,
+                ),
                 NodeKind::File => parent.builder.add_file_owned(
                     &record.name,
                     record.size,
@@ -380,6 +392,7 @@ struct Record {
     modified: i64,
     error: bool,
     hard_link: bool,
+    cloud: bool,
     owner: u16,
     child_count: u32,
 }
@@ -413,6 +426,7 @@ fn read_record<R: Read>(
     };
     let error = flags & error_bit != 0;
     let hard_link = flags & hard_link_bit != 0;
+    let cloud = version >= 2 && flags & FLAG_CLOUD != 0;
     let has_owner = flags & owner_bit != 0;
     let name = input.string(MAX_NAME_LEN)?;
     if name.is_empty() {
@@ -449,6 +463,7 @@ fn read_record<R: Read>(
         modified,
         error,
         hard_link,
+        cloud,
         owner,
         child_count,
     })
@@ -582,6 +597,24 @@ mod tests {
         assert_eq!(back.name(node), "a.txt");
         // Extension stats are rebuilt from the imported names.
         assert!(back.exts.iter().any(|e| &*e.name == ".txt"));
+    }
+
+    #[test]
+    fn keeps_cloud_placeholder_markers() {
+        let mut arena = Arena::default();
+        let mut dir = DirBuilder::new(1_700_000_000);
+        dir.add_cloud_file_owned("remote.docx", 5000, 0, 1_700_000_000, NO_OWNER);
+        dir.add_file("local.docx", 10, 4096, 1_700_000_000);
+        let dir = dir.commit(&mut arena);
+        let tree = Tree::new(Subtree::new(arena, "root", dir), PathBuf::from("/root"));
+        let (back, _) = round_trip(&tree);
+        let remote = back.find(Path::new("/root/remote.docx")).unwrap();
+        let node = back.get(&remote).unwrap();
+        assert!(node.cloud());
+        assert!(!node.error());
+        assert_eq!((node.size, node.disk_size), (5000, 0));
+        let local = back.find(Path::new("/root/local.docx")).unwrap();
+        assert!(!back.get(&local).unwrap().cloud());
     }
 
     #[test]

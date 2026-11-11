@@ -137,6 +137,9 @@ const KIND_MASK: u16 = 0b111;
 const EXPANDED: u16 = 1 << 13;
 const ERROR: u16 = 1 << 14;
 const HARD_LINK: u16 = 1 << 15;
+/// Files only: an online-only cloud placeholder. Shares the bit of [`ERROR`],
+/// which only ever applies to directories.
+const CLOUD: u16 = 1 << 14;
 
 /// `block` of a node without children.
 const NO_BLOCK: u32 = u32::MAX;
@@ -281,7 +284,15 @@ impl Node {
     /// The directory could not be read (access denied, etc.).
     #[inline]
     pub fn error(&self) -> bool {
-        self.bits & ERROR != 0
+        self.bits & ERROR != 0 && self.kind() != NodeKind::File
+    }
+
+    /// This file is an online-only cloud placeholder (OneDrive Files
+    /// On-Demand and similar): it reports its full logical size but its data
+    /// is not stored locally, so it takes almost no disk space.
+    #[inline]
+    pub fn cloud(&self) -> bool {
+        self.bits & CLOUD != 0 && self.kind() == NodeKind::File
     }
 
     /// This file is another hard link to a file already counted elsewhere in
@@ -792,6 +803,20 @@ impl DirBuilder {
             Node::new(NodeKind::File, size, disk_size, modified),
             owner,
         );
+    }
+
+    /// An online-only cloud placeholder (see [`Node::cloud`]).
+    pub fn add_cloud_file_owned(
+        &mut self,
+        name: &str,
+        size: u64,
+        disk_size: u64,
+        modified: i64,
+        owner: u16,
+    ) {
+        let mut node = Node::new(NodeKind::File, size, disk_size, modified);
+        node.set_flag(CLOUD, true);
+        self.push(name, node, owner);
     }
 
     /// A later hard link to a file that was already counted. It still counts

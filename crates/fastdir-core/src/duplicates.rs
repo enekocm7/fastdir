@@ -347,7 +347,7 @@ fn collect_candidates(
                 stack.push((child_path, child));
                 continue;
             }
-            if child.is_special() || child.hard_link() {
+            if child.is_special() || child.hard_link() || child.cloud() {
                 continue;
             }
             if child.size == 0 || child.size < options.min_size {
