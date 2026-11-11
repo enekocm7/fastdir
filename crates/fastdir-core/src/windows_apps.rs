@@ -154,6 +154,59 @@ pub fn recover_packages(tree: &mut Tree, options: &ScanOptions, progress: &Progr
     inserted
 }
 
+/// [`recover_packages`] for a scan that streamed its entries to `observer`
+/// (see [`scanner::scan_observed`]): every recovered package is reported,
+/// and so is every folder from its `WindowsApps` up to the scan root again,
+/// since their totals grew. Those folders were already reported once, so an
+/// observer sees them twice; the later report is the correct one.
+pub fn recover_packages_observed(
+    tree: &mut Tree,
+    options: &ScanOptions,
+    progress: &Progress,
+    observer: &dyn scanner::ScanObserver,
+) -> usize {
+    let dirs = package_dirs(tree, &installed_package_names());
+    if dirs.is_empty() {
+        return 0;
+    }
+    let scanned = scan_packages(&dirs, options, progress);
+    let paths: Vec<PathBuf> = dirs
+        .iter()
+        .take(scanned.len())
+        .map(|d| d.path.clone())
+        .collect();
+    let inserted = insert_packages(tree, scanned);
+    if inserted == 0 {
+        return 0;
+    }
+    tree.rebuild_extensions();
+    for path in &paths {
+        if let Some(at) = tree.find(path) {
+            scanner::replay(tree, &at, observer);
+        }
+    }
+    // The folders whose totals changed, deepest first so each is reported
+    // after everything below it.
+    let mut changed: BTreeSet<PathBuf> = BTreeSet::new();
+    for path in &paths {
+        let mut dir = path.parent();
+        while let Some(d) = dir.filter(|d| d.starts_with(&tree.root_path)) {
+            changed.insert(d.to_path_buf());
+            dir = d.parent();
+        }
+    }
+    let mut changed: Vec<PathBuf> = changed.into_iter().collect();
+    changed.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+    for path in changed {
+        if let Some(at) = tree.find(&path)
+            && let Some(node) = tree.get(&at)
+        {
+            observer.dir_done(&path, node, tree.owner_name(tree.owner_at(&at)));
+        }
+    }
+    inserted
+}
+
 /// [`recover_packages`] for a tree the UI reads while the scan runs: the
 /// packages are scanned without holding the lock, which is only taken for
 /// the lookup and the inserts.

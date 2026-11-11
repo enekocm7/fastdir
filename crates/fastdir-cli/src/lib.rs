@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod schema;
 mod signal;
 pub mod snapshot;
+pub mod stream;
 
 use args::{
     Command, ConfigCommand, ConfigSource, DiffCommand, DuplicatesCommand, Format, HelpTopic,
@@ -225,6 +226,12 @@ pub struct Scanned {
 /// Scan `args.path`, reporting progress on stderr unless `args.quiet`.
 /// `Ctrl+C` cancels the scan and yields [`exit::CANCELLED`].
 pub fn scan_with_progress(args: &ScanArgs) -> Result<Scanned, CliError> {
+    scan_with(args, None)
+}
+
+/// [`scan_with_progress`], streaming every entry to `stream` while the scan
+/// runs when one is given.
+fn scan_with(args: &ScanArgs, stream: Option<&stream::ScanStream>) -> Result<Scanned, CliError> {
     let root = resolve_root(&args.path)?;
     signal::install();
     let progress = Arc::new(Progress::default());
@@ -237,16 +244,35 @@ pub fn scan_with_progress(args: &ScanArgs) -> Result<Scanned, CliError> {
     };
     let scanned_at = schema::now_iso();
     let options = args.scan_options();
-    let mut result = scanner::scan(root.clone(), progress.clone(), &options);
+    let mut result = match stream {
+        Some(stream) => {
+            stream.start(&scanned_at, &progress);
+            scanner::scan_observed(root.clone(), progress.clone(), &options, stream)
+        }
+        None => scanner::scan(root.clone(), progress.clone(), &options),
+    };
     // Store packages in an unreadable `WindowsApps` folder can still be
     // scanned one by one.
-    let packages = if result.cancelled || signal::interrupted() {
+    let packages = if result.cancelled || signal::interrupted() || progress.cancelled() {
         0
     } else {
-        windows_apps::recover_packages(&mut result.tree, &options, &progress)
+        match stream {
+            Some(stream) => windows_apps::recover_packages_observed(
+                &mut result.tree,
+                &options,
+                &progress,
+                stream,
+            ),
+            None => windows_apps::recover_packages(&mut result.tree, &options, &progress),
+        }
     };
     done.store(true, Ordering::Relaxed);
     let _ = reporter.join();
+    // A failed write (e.g. the reader closed the pipe) cancelled the scan;
+    // report the write, not a cancellation.
+    if let Some(e) = stream.and_then(|s| s.take_error()) {
+        return Err(io_error(e));
+    }
     if result.cancelled || signal::interrupted() {
         return Err(CliError::new(exit::CANCELLED, "scan cancelled"));
     }
@@ -320,9 +346,12 @@ fn report_progress(progress: &Progress, done: &AtomicBool, quiet: bool) {
 }
 
 /// Open the destination of `out`: a buffered file or stdout.
-fn open_output(out: &OutputArgs) -> Result<Box<dyn Write>, CliError> {
+fn open_output(out: &OutputArgs) -> Result<Box<dyn Write + Send>, CliError> {
     match &out.output {
-        None => Ok(Box::new(io::BufWriter::new(io::stdout().lock()))),
+        None => Ok(Box::new(io::BufWriter::with_capacity(
+            64 * 1024,
+            io::stdout(),
+        ))),
         Some(path) => {
             let file = std::fs::File::create(path).map_err(|e| {
                 let code = if e.kind() == io::ErrorKind::PermissionDenied {
@@ -355,6 +384,9 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
             exit::USAGE,
             "filters (--name, --ext, --min-size, ...) are not supported with --format html",
         ));
+    }
+    if c.out.format == Format::Ndjson {
+        return run_scan_stream(c);
     }
     let scanned = scan_with_progress(&c.scan)?;
     let filter = c.filter.is_active().then_some(&c.filter);
@@ -410,7 +442,26 @@ fn run_scan_command(c: &ScanCommand) -> Result<(), CliError> {
             .map_err(io_error)?;
             w.flush().map_err(io_error)
         }
+        Format::Ndjson => unreachable!("streamed by run_scan_stream"),
     }
+}
+
+/// `scan --format ndjson`: entries are written while the scan runs.
+fn run_scan_stream(c: &ScanCommand) -> Result<(), CliError> {
+    // Resolve first so a bad path fails before anything is written.
+    let root = resolve_root(&c.scan.path)?;
+    let filter = c.filter.is_active().then_some(&c.filter);
+    let stream = stream::ScanStream::new(
+        root,
+        c.max_depth,
+        c.include_files,
+        filter,
+        open_output(&c.out)?,
+    );
+    let scanned = scan_with(&c.scan, Some(&stream))?;
+    stream
+        .finish(&scanned.meta, &scanned.tree)
+        .map_err(io_error)
 }
 
 fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
@@ -432,8 +483,13 @@ fn run_top_command(c: &TopCommand) -> Result<(), CliError> {
                 .map_err(io_error)
         }
         Format::Html => Err(html_not_supported()),
+        Format::Ndjson => {
+            let mut w = open_output(&c.out)?;
+            stream::write_top(&mut w, &scanned.meta, &scanned.tree, &files, c.limit)
+                .map_err(io_error)
+        }
         // The parser only accepts `bin` for `scan`.
-        Format::Binary => Err(binary_output_unsupported()),
+        Format::Binary => Err(format_unsupported(c.out.format)),
     }
 }
 
@@ -501,8 +557,8 @@ fn run_duplicates_command(c: &DuplicatesCommand) -> Result<(), CliError> {
                 .map_err(io_error)
         }
         Format::Html => Err(html_not_supported()),
-        // The parser only accepts `bin` for `scan`.
-        Format::Binary => Err(binary_output_unsupported()),
+        // The parser only accepts these for `scan` / `top`.
+        Format::Binary | Format::Ndjson => Err(format_unsupported(c.out.format)),
     }
 }
 
@@ -625,15 +681,19 @@ fn run_diff_command(c: &DiffCommand) -> Result<(), CliError> {
                 .map_err(io_error)
         }
         Format::Html => Err(html_not_supported()),
-        // The parser only accepts `bin` for `scan`.
-        Format::Binary => Err(binary_output_unsupported()),
+        // The parser only accepts these for `scan` / `top`.
+        Format::Binary | Format::Ndjson => Err(format_unsupported(c.out.format)),
     }
 }
 
-/// A `--format bin` that reached a command other than `scan`. The argument
-/// parser rejects it first, so this is a safety net.
-fn binary_output_unsupported() -> CliError {
-    CliError::new(exit::USAGE, "--format bin is only valid for scan")
+/// A `--format bin` or `ndjson` that reached a command that cannot write
+/// it. The argument parser rejects it first, so this is a safety net.
+fn format_unsupported(format: Format) -> CliError {
+    let message = match format {
+        Format::Ndjson => "--format ndjson is only valid for scan and top",
+        _ => "--format bin is only valid for scan",
+    };
+    CliError::new(exit::USAGE, message)
 }
 /// Connect a GUI-subsystem process to the console it was started from, so
 /// `fastdir scan ...` can print. Redirected handles (pipes, files) are
@@ -1027,10 +1087,8 @@ mod tests {
         std::fs::write(dir.join("sub").join("a.bin"), vec![0u8; 1000]).unwrap();
         let saved =
             std::env::temp_dir().join(format!("fastdir-cli-bin-{}.fdscan", std::process::id()));
-        let diff_out = std::env::temp_dir().join(format!(
-            "fastdir-cli-bin-diff-{}.json",
-            std::process::id()
-        ));
+        let diff_out =
+            std::env::temp_dir().join(format!("fastdir-cli-bin-diff-{}.json", std::process::id()));
         assert_eq!(
             run(vec![
                 "scan".into(),

@@ -49,6 +49,9 @@ pub enum Format {
     /// Versioned binary scan (`.fdscan`), written by `scan` and read by
     /// `diff` and the GUI's "Open scan…".
     Binary,
+    /// Newline-delimited JSON, one record per line. `scan` streams entries
+    /// while it runs; `top` writes one file per line.
+    Ndjson,
 }
 
 /// Where `--config` reads scan settings from.
@@ -316,8 +319,23 @@ fn parse_format(raw: &str) -> Result<Format, UsageError> {
         "csv" => Ok(Format::Csv),
         "bin" | "binary" | "fdscan" => Ok(Format::Binary),
         "html" => Ok(Format::Html),
+        "ndjson" | "jsonl" => Ok(Format::Ndjson),
         _ => err(format!(
-            "--format expects json, csv, bin or html, got \"{raw}\""
+            "--format expects json, csv, ndjson, bin or html, got \"{raw}\""
+        )),
+    }
+}
+
+/// `top` writes a list, so it can be streamed line by line but is not a
+/// saved tree.
+fn parse_top_format(raw: &str) -> Result<Format, UsageError> {
+    match raw.to_ascii_lowercase().as_str() {
+        "json" => Ok(Format::Json),
+        "csv" => Ok(Format::Csv),
+        "ndjson" | "jsonl" => Ok(Format::Ndjson),
+        "html" => err("--format html is only available for `fastdir scan`"),
+        _ => err(format!(
+            "--format expects json, csv or ndjson, got \"{raw}\""
         )),
     }
 }
@@ -462,7 +480,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
                 format = if is_scan {
                     parse_format(&raw)?
                 } else {
-                    parse_non_binary_format(&raw)?
+                    parse_top_format(&raw)?
                 };
             }
             "--output" | "-o" => {
@@ -1036,15 +1054,16 @@ Scans <path> and writes the tree to stdout (JSON by default). Progress and a
 summary go to stderr.
 
 Output:
-  --format json|csv|bin|html
-                          output format (default: json); bin writes the compact
-                          binary .fdscan form (slower to read for humans,
-                          faster to reopen for very large scans); html writes
-                          one self-contained report file with the summary
-                          totals, a treemap image, the largest files and a
-                          folder tree
+  --format json|csv|ndjson|bin|html
+                          output format (default: json); ndjson streams one
+                          entry per line while the scan runs; bin writes the
+                          compact binary .fdscan form (slower to read for
+                          humans, faster to reopen for very large scans); html
+                          writes one self-contained report file with the
+                          summary totals, a treemap image, the largest files
+                          and a folder tree
   -o, --output <file|->   write to a file instead of stdout
-  --pretty                indent the JSON
+  --pretty                indent the JSON (ignored for ndjson)
   --max-depth <n>         only include entries up to <n> levels below <path>
                           (0 = just <path>); sizes still count everything
   --no-files              only include folders (also limits the html report)
@@ -1058,7 +1077,7 @@ Filtering:
                           age (30d, 6m, 1y)
   --older-than <when>     modified on/before a date or older than an age
   Matching entries and their ancestors are kept; folder totals still count
-  everything below them.
+  everything below them. With ndjson only the matching entries are written.
 
 Scanning:
   --threads <n>           scan threads, 1-64 (default: automatic)
@@ -1087,7 +1106,9 @@ Scans <path> and writes its largest files to stdout, largest first.
 
 Output:
   -n, --limit <n>         how many files to list (default: 20)
-  --format json|csv       output format (default: json)
+  --format json|csv|ndjson
+                          output format (default: json); ndjson writes one
+                          file per line
   -o, --output <file|->   write to a file instead of stdout
   --pretty                indent the JSON
 
@@ -1337,6 +1358,21 @@ mod tests {
         assert_eq!(format("binary"), Format::Binary);
         assert_eq!(format("fdscan"), Format::Binary);
         assert_eq!(format("BIN"), Format::Binary);
+    }
+
+    #[test]
+    fn ndjson_is_accepted_by_scan_and_top_only() {
+        let format = |raw: &str| scan_cmd(&["scan", "dir", "--format", raw]).out.format;
+        assert_eq!(format("ndjson"), Format::Ndjson);
+        assert_eq!(format("JSONL"), Format::Ndjson);
+        match parse_ok(&["top", "dir", "--format=ndjson"]) {
+            Command::Top(t) => assert_eq!(t.out.format, Format::Ndjson),
+            other => panic!("expected top, got {other:?}"),
+        }
+        assert!(parse_err(&["top", "dir", "--format", "bin"]).contains("ndjson"));
+        assert!(parse_err(&["duplicates", "dir", "--format", "ndjson"]).contains("json or csv"));
+        assert!(parse_err(&["diff", "a", "b", "--format", "ndjson"]).contains("json or csv"));
+        assert!(parse_err(&["history", "dir", "--format", "ndjson"]).contains("json or csv"));
     }
 
     #[test]
@@ -1683,9 +1719,11 @@ mod tests {
     fn usage_errors() {
         assert!(parse_err(&["scan"]).contains("missing <path>"));
         assert!(parse_err(&["scan", "a", "b"]).contains("extra argument"));
-        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json, csv, bin or html"));
+        assert!(
+            parse_err(&["scan", "a", "--format", "xml"]).contains("json, csv, ndjson, bin or html")
+        );
         // Only `scan` writes a saved tree, so only it accepts the binary form.
-        assert!(parse_err(&["top", "a", "--format", "bin"]).contains("json or csv"));
+        assert!(parse_err(&["top", "a", "--format", "bin"]).contains("json, csv or ndjson"));
         assert!(parse_err(&["duplicates", "a", "--format", "bin"]).contains("json or csv"));
         assert!(parse_err(&["diff", "a", "b", "--format", "bin"]).contains("json or csv"));
         assert!(parse_err(&["history", "--format", "bin"]).contains("json or csv"));

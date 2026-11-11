@@ -856,6 +856,26 @@ impl DirBuilder {
         self.push(name, dir, owner);
     }
 
+    /// The entries added so far with their owners ([`NO_OWNER`] when not
+    /// collected), in the order they were added until [`Self::finish`]
+    /// sorts them.
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, &Node, u16)> + '_ {
+        self.children.iter().enumerate().map(|(i, c)| {
+            let start = c.name_off as usize;
+            let owner = self
+                .owners
+                .as_ref()
+                .and_then(|o| o.get(i).copied())
+                .unwrap_or(NO_OWNER);
+            (&self.names[start..start + c.name_len()], c, owner)
+        })
+    }
+
+    /// The directory's own node; its totals are final after [`Self::finish`].
+    pub(crate) fn node(&self) -> &Node {
+        &self.node
+    }
+
     /// The directory could not be read.
     pub fn set_error(&mut self) {
         self.node.set_flag(ERROR, true);

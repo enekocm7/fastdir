@@ -447,10 +447,11 @@ skipped and only locations inside the scan take part.
 
 ### Command line (for scripts and agents)
 
-FastDir also runs headless: it scans, prints JSON or CSV (or writes an HTML
-report) and exits without opening a window. Use **`fastdir-cli`** (shipped
-next to `fastdir.exe`) from a terminal. `fastdir.exe` accepts the same
-commands, but it is a GUI program on Windows, so `cmd.exe` does not wait for it; it is fine when its output is
+FastDir also runs headless: it scans, prints JSON, NDJSON or CSV (or writes
+an HTML report) and exits without opening a window. Use **`fastdir-cli`**
+(shipped next to `fastdir.exe`) from a terminal. `fastdir.exe` accepts the
+same commands, but it is a GUI program on Windows, so `cmd.exe` does not wait
+for it; it is fine when its output is
 piped or redirected.
 
 ```text
@@ -489,6 +490,10 @@ fastdir-cli diff saved.json D:\ --min-change 1GB
 # Save a whole drive as a compact binary scan (loads faster than JSON)
 fastdir-cli scan D:\ --format bin -o D.fdscan
 
+# Stream a whole drive one entry per line while it scans: folders over 10 GB
+fastdir-cli scan D:\ --format ndjson --no-files |
+  jq -c 'select(.record == "entry" and .size > 10e9) | {path, size}'
+
 # ISO files over 1 GB that were not touched this year
 fastdir-cli top D:\ --ext .iso --min-size 1GB --older-than 1y
 
@@ -515,10 +520,11 @@ row has its own sizes.
 
 | Option | Commands | |
 |---|---|---|
-| `--format json\|csv\|bin\|html` | scan | Output format (default `json`; `bin` writes the compact `.fdscan` scan; `html` writes one self-contained report with the summary, a treemap image, the largest files and a folder tree, honouring `--max-depth` and `--no-files` but not filters) |
-| `--format json\|csv` | top, duplicates, diff | Output format (default `json`; CSV uses the export dialog's columns) |
+| `--format json\|csv\|ndjson\|bin\|html` | scan | Output format (default `json`; `ndjson` streams one entry per line while the scan runs, see [NDJSON streams](#ndjson-streams); `bin` writes the compact `.fdscan` scan; `html` writes one self-contained report with the summary, a treemap image, the largest files and a folder tree, honouring `--max-depth` and `--no-files` but not filters) |
+| `--format json\|csv\|ndjson` | top | Output format (default `json`; `ndjson` writes one file per line) |
+| `--format json\|csv` | duplicates, diff | Output format (default `json`; CSV uses the export dialog's columns) |
 | `-o, --output <file\|->` | scan, top, duplicates, diff | Write to a file instead of stdout |
-| `--pretty` | scan, top, duplicates, diff | Indent the JSON |
+| `--pretty` | scan, top, duplicates, diff | Indent the JSON (ignored for `ndjson`) |
 | `--max-depth <n>` | scan | List entries up to `<n>` levels below `<path>` (`0` = just the root). Sizes always count everything. |
 | `--max-depth <n>` | diff | Only list changed entries up to `<n>` levels below the root (`0` = the root row) |
 | `--no-files` | scan | List folders only |
@@ -577,7 +583,8 @@ debugging. Without `--config`, nothing changes.
 
 **Output streams.** The result goes to stdout. stderr gets a live progress
 line (only when it is a terminal) and a one-line summary, unless `--quiet`.
-**Ctrl+C** stops the scan cleanly; nothing is written to stdout. A second
+**Ctrl+C** stops the scan cleanly; nothing is written to stdout (with
+`--format ndjson`, the lines written so far stay, without an `end` line). A second
 Ctrl+C ends the process at once.
 
 **Exit codes.**
@@ -647,6 +654,63 @@ modified, owner? }`, largest first. Hard links are listed once. `owner` is
 only present with `--owners`; CSV gains an `owner` column in the same case.
 With filter options, `files` contains only matching files while `total` still
 describes the whole scan.
+
+#### NDJSON streams
+
+`--format ndjson` (also `jsonl`) writes newline-delimited JSON: one compact
+JSON object per line, each with a `record` field saying what it is. A stream
+is one `start` line, the data lines, then one `end` line. A stream without an
+`end` line was cut short (Ctrl+C, exit code 130, or a write error). The
+NDJSON streams have their own schema names and versions; the `fastdir.scan`
+and `fastdir.top` documents above are unchanged.
+
+`fastdir scan --format ndjson` (`schema: "fastdir.scan.ndjson"`) writes each
+entry **while the scan runs**, as soon as it is final, so a script can start
+on the first folders long before a drive scan ends and never has to load one
+huge document. While entries keep arriving, the output is flushed about
+every 100 ms. Closing the pipe
+(`... | head`) stops the scan.
+
+```jsonc
+{"record": "start", "schema": "fastdir.scan.ndjson", "version": 1, "fastdir_version": "0.3.2",
+ "root": "C:\Users", "scanned_at": "2026-11-03T12:00:00Z"}
+{"record": "entry", "name": "notes.txt", "path": "C:\Users\me\notes.txt", "type": "file",
+ "depth": 2, "size": 1200, "disk_size": 4096, "items": 1, "files": 1, "folders": 0,
+ "modified": "2026-11-02T18:30:00Z", "error": false, "hard_link": false,
+ "extension": ".txt"}                // files only; null when the name has none
+{"record": "entry", "name": "me", "path": "C:\Users\me", "type": "dir", "depth": 1, ...}
+{"record": "entry", "name": "C:\Users", "path": "C:\Users", "type": "dir", "depth": 0, ...}
+{"record": "end", "elapsed_ms": 1234, "errors": 2,
+ "unreadable": ["C:\Users\other"],  // as in fastdir.scan
+ "entries": 4567,                    // entry lines written
+ "total": {"size": 123456789, "disk_size": 130000000, "items": 4567, "files": 4000, "folders": 567}}
+```
+
+(Shown wrapped here; each record is one line.) An `entry` has the fields of a
+`fastdir.scan` entry (including `owner` with `--owners`) without `children`
+and `truncated`, plus `depth` (levels below `root`, which is `0`) and, for
+files, `extension`. Its `path` is always complete, so a line can be used on
+its own.
+
+- **Order.** Entries come in the order the scan finishes them, which varies
+  between runs because folders are scanned in parallel. A folder's line comes
+  after every line below it (its totals are only known then), so the root is
+  always the last entry.
+- **Repeated folders.** On Windows, when an unreadable `WindowsApps` folder is
+  recovered package by package (see the summary line), its packages are
+  written after the scan and `WindowsApps` and each folder above it are
+  written again with their larger totals. Keep the last line for a path.
+- **Options.** `--max-depth` and `--no-files` decide which entries are
+  written. Filters (`--name`, `--min-size`, `--ext`, `--newer-than`,
+  `--older-than`) write only the matching entries, without the ancestors the
+  JSON tree keeps (each line carries its full path instead).
+- With `--mft` the tree is read in one go, so the entries are written right
+  after it is read rather than during the scan.
+
+`fastdir top --format ndjson` (`schema: "fastdir.top.ndjson"`) ranks after
+the scan, then writes a `start` line (as above), one `file` line per file
+(largest first, with the fields of a `fastdir.top` file), and an `end` line
+with `elapsed_ms`, `errors`, `limit`, `count` (files written) and `total`.
 
 `fastdir diff` (`schema: "fastdir.diff"`):
 
