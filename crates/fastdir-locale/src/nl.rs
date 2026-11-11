@@ -320,6 +320,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Bestandsformaat",
         "exp.csv" => "CSV (spreadsheet)",
         "exp.json" => "JSON (opnieuw te importeren)",
+        "exp.html" => "HTML-rapport",
+        "exp.html_hint" => {
+            "Eén op zichzelf staand bestand om te delen: samenvatting, treemap, grootste bestanden en mappenstructuur."
+        }
         "exp.include_files" => "Bestanden opnemen",
         "exp.files_hint" => "Uit exporteert alleen mappen.",
         "exp.max_depth" => "Max. diepte (niveaus onder de geëxporteerde map)",

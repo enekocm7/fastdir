@@ -44,6 +44,8 @@ pub fn is_cli_invocation(args: &[OsString]) -> bool {
 pub enum Format {
     Json,
     Csv,
+    /// One self-contained HTML report (scan only).
+    Html,
 }
 
 /// Where `--config` reads scan settings from.
@@ -301,10 +303,13 @@ fn parse_number(name: &str, raw: &str, min: usize) -> Result<usize, UsageError> 
     }
 }
 
-fn parse_format(raw: &str) -> Result<Format, UsageError> {
+fn parse_format(raw: &str, allow_html: bool) -> Result<Format, UsageError> {
     match raw.to_ascii_lowercase().as_str() {
         "json" => Ok(Format::Json),
         "csv" => Ok(Format::Csv),
+        "html" if allow_html => Ok(Format::Html),
+        "html" => err("--format html is only available for `fastdir scan`"),
+        _ if allow_html => err(format!("--format expects json, csv or html, got \"{raw}\"")),
         _ => err(format!("--format expects json or csv, got \"{raw}\"")),
     }
 }
@@ -431,7 +436,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_format(&cur.value(name, inline)?, is_scan)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -585,7 +590,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             "--mft" => use_mft = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_format(&cur.value(name, inline)?, false)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -697,7 +702,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_format(&cur.value(name, inline)?, false)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -893,7 +898,7 @@ fn parse_history(mut cur: Cursor) -> Result<Command, UsageError> {
             "--help" | "-h" => return Ok(Command::Help(HelpTopic::History)),
             "--dir" => dir = Some(normalize_path(&cur.value(name, inline)?)),
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_format(&cur.value(name, inline)?, false)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -992,12 +997,14 @@ Scans <path> and writes the tree to stdout (JSON by default). Progress and a
 summary go to stderr.
 
 Output:
-  --format json|csv       output format (default: json)
+  --format json|csv|html  output format (default: json); html writes one
+                          self-contained report file with the summary totals,
+                          a treemap image, the largest files and a folder tree
   -o, --output <file|->   write to a file instead of stdout
   --pretty                indent the JSON
   --max-depth <n>         only include entries up to <n> levels below <path>
                           (0 = just <path>); sizes still count everything
-  --no-files              only include folders
+  --no-files              only include folders (also limits the html report)
 
 Filtering:
   --name <text|glob>      only entries whose name matches; a glob when it
@@ -1616,7 +1623,11 @@ mod tests {
     fn usage_errors() {
         assert!(parse_err(&["scan"]).contains("missing <path>"));
         assert!(parse_err(&["scan", "a", "b"]).contains("extra argument"));
-        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json or csv"));
+        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json, csv or html"));
+        assert!(parse_err(&["top", "a", "--format", "xml"]).contains("json or csv"));
+        assert!(parse_err(&["top", "a", "--format", "html"]).contains("only available"));
+        assert!(parse_err(&["duplicates", "a", "--format", "html"]).contains("only available"));
+        assert!(parse_err(&["history", "a", "--format", "html"]).contains("only available"));
         assert!(parse_err(&["scan", "a", "--threads", "0"]).contains("at least 1"));
         assert!(parse_err(&["scan", "a", "--threads", "65"]).contains("between 1 and 64"));
         assert!(parse_err(&["scan", "a", "--threads"]).contains("needs a value"));

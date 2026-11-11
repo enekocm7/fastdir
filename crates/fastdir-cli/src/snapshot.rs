@@ -205,5 +205,6 @@ pub fn run_history_command(c: &HistoryCommand) -> Result<(), CliError> {
                 .and_then(|_| w.flush())
                 .map_err(io_error)
         }
+        Format::Html => Err(crate::html_not_supported()),
     }
 }

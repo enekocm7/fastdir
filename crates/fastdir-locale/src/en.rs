@@ -295,6 +295,8 @@ pub const KEYS: &[&str] = &[
     "exp.format",
     "exp.csv",
     "exp.json",
+    "exp.html",
+    "exp.html_hint",
     "exp.include_files",
     "exp.files_hint",
     "exp.max_depth",
@@ -934,6 +936,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "File format",
         "exp.csv" => "CSV (spreadsheet)",
         "exp.json" => "JSON (re-importable)",
+        "exp.html" => "HTML report",
+        "exp.html_hint" => {
+            "One self-contained file to share: summary, treemap, largest files and folder tree."
+        }
         "exp.include_files" => "Include files",
         "exp.files_hint" => "Off exports folders only.",
         "exp.max_depth" => "Max depth (levels below the exported folder)",

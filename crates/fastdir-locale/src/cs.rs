@@ -316,6 +316,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Formát souboru",
         "exp.csv" => "CSV (tabulka)",
         "exp.json" => "JSON (znovu importovatelné)",
+        "exp.html" => "HTML sestava",
+        "exp.html_hint" => {
+            "Jeden samostatný soubor ke sdílení: souhrn, treemap, největší soubory a strom složek."
+        }
         "exp.include_files" => "Zahrnout soubory",
         "exp.files_hint" => "Vypnuto exportuje pouze složky.",
         "exp.max_depth" => "Max. hloubka (úrovně pod exportovanou složkou)",

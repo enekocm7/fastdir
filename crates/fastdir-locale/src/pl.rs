@@ -316,6 +316,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Format pliku",
         "exp.csv" => "CSV (arkusz kalkulacyjny)",
         "exp.json" => "JSON (do ponownego importu)",
+        "exp.html" => "Raport HTML",
+        "exp.html_hint" => {
+            "Jeden samodzielny plik do udostępnienia: podsumowanie, treemap, największe pliki i drzewo folderów."
+        }
         "exp.include_files" => "Dołącz pliki",
         "exp.files_hint" => "Wyłączone eksportuje tylko foldery.",
         "exp.max_depth" => "Maks. głębokość (poziomy poniżej eksportowanego folderu)",

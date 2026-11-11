@@ -320,6 +320,10 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "Formato file",
         "exp.csv" => "CSV (foglio di calcolo)",
         "exp.json" => "JSON (reimportabile)",
+        "exp.html" => "Report HTML",
+        "exp.html_hint" => {
+            "Un unico file autonomo da condividere: riepilogo, treemap, file più grandi e albero delle cartelle."
+        }
         "exp.include_files" => "Includi file",
         "exp.files_hint" => "Disattivato esporta solo le cartelle.",
         "exp.max_depth" => "Profondità max (livelli sotto la cartella esportata)",

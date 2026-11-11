@@ -1657,6 +1657,7 @@ dependencies = [
  "chrono",
  "fastdir-core",
  "fastdir-settings",
+ "fastdir-treemap",
  "libc",
  "serde",
  "serde_json",
@@ -1704,6 +1705,7 @@ version = "0.3.2"
 dependencies = [
  "criterion",
  "fastdir-core",
+ "image",
  "rayon",
 ]
 

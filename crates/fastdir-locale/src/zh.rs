@@ -318,6 +318,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "exp.format" => "文件格式",
         "exp.csv" => "CSV（电子表格）",
         "exp.json" => "JSON（可重新导入）",
+        "exp.html" => "HTML 报告",
+        "exp.html_hint" => "用于分享的单一自包含文件：摘要、矩形树图、最大文件和文件夹树。",
         "exp.include_files" => "包含文件",
         "exp.files_hint" => "关闭则仅导出文件夹",
         "exp.max_depth" => "最大深度（导出文件夹以下的层级）",
