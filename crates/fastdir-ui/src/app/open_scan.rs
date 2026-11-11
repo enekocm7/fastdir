@@ -1,11 +1,13 @@
-//! Opening a scan saved earlier as JSON (`fastdir.scan`).
+//! Opening a scan saved earlier as JSON (`fastdir.scan`) or as the compact
+//! binary `.fdscan` format.
 //!
 //! The tree is read on a background thread so a multi-million-node document
 //! does not freeze the window. While a saved scan is shown, file operations
 //! only run when the paths really exist on this machine.
 
 use super::*;
-use fastdir_core::export::{self, ImportedScan};
+use fastdir_core::export::ImportedScan;
+use fastdir_core::scanfile;
 
 /// Where a loaded tree came from, so the UI can mark it offline.
 #[derive(Clone, Debug)]
@@ -17,7 +19,7 @@ pub(super) struct SavedScan {
 }
 
 impl FastDir {
-    /// `Open scan…`: pick a JSON document and load it.
+    /// `Open scan…`: pick a saved scan document and load it.
     pub(super) fn open_scan(&mut self, _: &OpenScan, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_busy() {
             return;
@@ -61,8 +63,7 @@ impl FastDir {
             let result = std::fs::File::open(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|file| {
-                    export::import_json_with_meta(std::io::BufReader::new(file))
-                        .map_err(|e| e.to_string())
+                    scanfile::import_scan(std::io::BufReader::new(file)).map_err(|e| e.to_string())
                 });
             (path, result)
         });
@@ -144,8 +145,8 @@ impl FastDir {
     }
 
     /// Open a path that arrived from the command line, a second instance or
-    /// a file dropped on the window: a folder is scanned, a `.json` file is
-    /// loaded as a saved scan.
+    /// a file dropped on the window: a folder is scanned, a saved scan
+    /// (`.json` or `.fdscan`) is loaded.
     pub(super) fn open_path_arg(
         &mut self,
         path: PathBuf,
@@ -271,14 +272,14 @@ pub(super) enum OpenTarget {
     SavedScan(PathBuf),
 }
 
-/// Classify a user-supplied path: a folder is scanned, a `.json` file is
-/// loaded as a saved scan. Anything else is ignored.
+/// Classify a user-supplied path: a folder is scanned, a saved scan file
+/// (`.json` or `.fdscan`) is loaded. Anything else is ignored.
 pub(super) fn classify_open_path(path: &std::path::Path) -> Option<OpenTarget> {
-    let is_json = path
+    let is_saved_scan = path
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    if is_json && !path.is_dir() {
+        .is_some_and(|e| e.eq_ignore_ascii_case("json") || e.eq_ignore_ascii_case("fdscan"));
+    if is_saved_scan && !path.is_dir() {
         Some(OpenTarget::SavedScan(path.to_path_buf()))
     } else if path.is_dir() {
         Some(OpenTarget::Folder(path.to_path_buf()))

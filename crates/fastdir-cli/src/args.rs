@@ -39,11 +39,14 @@ pub fn is_cli_invocation(args: &[OsString]) -> bool {
         .is_some_and(|a| CLI_WORDS.contains(&a))
 }
 
-/// Output format of `scan` and `top`.
+/// Output format of `scan`, `top` and the other command documents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Json,
     Csv,
+    /// Versioned binary scan (`.fdscan`), written by `scan` and read by
+    /// `diff` and the GUI's "Open scan…".
+    Binary,
 }
 
 /// Where `--config` reads scan settings from.
@@ -117,7 +120,8 @@ pub struct TopCommand {
     pub filter: Filter,
 }
 
-/// `fastdir diff <old.json> <new.json|path>`.
+/// `fastdir diff <old-scan> <new-scan|path>`; a saved scan may be JSON or a
+/// binary `.fdscan` file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffCommand {
     /// Saved scan to compare against (the baseline).
@@ -305,6 +309,17 @@ fn parse_format(raw: &str) -> Result<Format, UsageError> {
     match raw.to_ascii_lowercase().as_str() {
         "json" => Ok(Format::Json),
         "csv" => Ok(Format::Csv),
+        "bin" | "binary" | "fdscan" => Ok(Format::Binary),
+        _ => err(format!("--format expects json, csv or bin, got \"{raw}\"")),
+    }
+}
+
+/// Commands whose output is not a saved tree (`top`, `duplicates`, `diff`,
+/// `history`) do not accept the binary scan format.
+fn parse_non_binary_format(raw: &str) -> Result<Format, UsageError> {
+    match raw.to_ascii_lowercase().as_str() {
+        "json" => Ok(Format::Json),
+        "csv" => Ok(Format::Csv),
         _ => err(format!("--format expects json or csv, got \"{raw}\"")),
     }
 }
@@ -431,7 +446,14 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => {
+                let raw = cur.value(name, inline)?;
+                format = if is_scan {
+                    parse_format(&raw)?
+                } else {
+                    parse_non_binary_format(&raw)?
+                };
+            }
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -585,7 +607,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             "--mft" => use_mft = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_non_binary_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -697,7 +719,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_non_binary_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -721,7 +743,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
         }
     }
     if positional.len() != 2 {
-        return err("diff needs <old.json> and <new.json|path>");
+        return err("diff needs <old-scan> and <new-scan|path>");
     }
     let new = normalize_path(&positional[1]);
     let scan = ScanArgs {
@@ -893,7 +915,7 @@ fn parse_history(mut cur: Cursor) -> Result<Command, UsageError> {
             "--help" | "-h" => return Ok(Command::Help(HelpTopic::History)),
             "--dir" => dir = Some(normalize_path(&cur.value(name, inline)?)),
             "--config" => config = Some(cur.config_source(inline)),
-            "--format" => format = parse_format(&cur.value(name, inline)?)?,
+            "--format" => format = parse_non_binary_format(&cur.value(name, inline)?)?,
             "--output" | "-o" => {
                 let v = cur.value(name, inline)?;
                 output = if v == "-" {
@@ -960,7 +982,8 @@ FastDir - fast disk usage analyzer
 
 Usage:
   fastdir [<folder>]              open the GUI (optionally scanning <folder>)
-  fastdir scan <path> [options]   scan <path> and print the tree as JSON or CSV
+  fastdir scan <path> [options]   scan <path> and print the tree as JSON, CSV
+                                  or a compact binary .fdscan
   fastdir top <path> [options]    print the largest files under <path>
   fastdir duplicates <path> [options]
                                   list groups of identical files and the space they waste
@@ -992,7 +1015,9 @@ Scans <path> and writes the tree to stdout (JSON by default). Progress and a
 summary go to stderr.
 
 Output:
-  --format json|csv       output format (default: json)
+  --format json|csv|bin   output format (default: json); bin writes the compact
+                          binary .fdscan form (slower to read for humans,
+                          faster to reopen for very large scans)
   -o, --output <file|->   write to a file instead of stdout
   --pretty                indent the JSON
   --max-depth <n>         only include entries up to <n> levels below <path>
@@ -1075,12 +1100,12 @@ Scanning:
 ";
 
 pub const DIFF_HELP: &str = "\
-Usage: fastdir diff <old.json> <new.json|path> [options]
+Usage: fastdir diff <old> <new> [options]
 
 Compares a saved scan (the baseline) with another saved scan or with a fresh
 scan of a folder or drive, and lists what was added, removed, grew or shrank.
-Entries are matched by relative path, so the baseline may come from another
-machine.
+A saved scan may be JSON or a binary .fdscan document. Entries are matched by
+relative path, so the baseline may come from another machine.
 
 Output:
   --format json|csv       output format (default: json)
@@ -1272,6 +1297,15 @@ mod tests {
         assert!(!c.scan.collect_owners);
         assert!(!c.scan.quiet);
         assert!(!c.filter.is_active());
+    }
+
+    #[test]
+    fn scan_accepts_binary_output() {
+        let format = |raw: &str| scan_cmd(&["scan", "dir", "--format", raw]).out.format;
+        assert_eq!(format("bin"), Format::Binary);
+        assert_eq!(format("binary"), Format::Binary);
+        assert_eq!(format("fdscan"), Format::Binary);
+        assert_eq!(format("BIN"), Format::Binary);
     }
 
     #[test]
@@ -1616,7 +1650,12 @@ mod tests {
     fn usage_errors() {
         assert!(parse_err(&["scan"]).contains("missing <path>"));
         assert!(parse_err(&["scan", "a", "b"]).contains("extra argument"));
-        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json or csv"));
+        assert!(parse_err(&["scan", "a", "--format", "xml"]).contains("json, csv or bin"));
+        // Only `scan` writes a saved tree, so only it accepts the binary form.
+        assert!(parse_err(&["top", "a", "--format", "bin"]).contains("json or csv"));
+        assert!(parse_err(&["duplicates", "a", "--format", "bin"]).contains("json or csv"));
+        assert!(parse_err(&["diff", "a", "b", "--format", "bin"]).contains("json or csv"));
+        assert!(parse_err(&["history", "--format", "bin"]).contains("json or csv"));
         assert!(parse_err(&["scan", "a", "--threads", "0"]).contains("at least 1"));
         assert!(parse_err(&["scan", "a", "--threads", "65"]).contains("between 1 and 64"));
         assert!(parse_err(&["scan", "a", "--threads"]).contains("needs a value"));
@@ -1646,8 +1685,8 @@ mod tests {
         assert!(parse_err(&["--frobnicate"]).contains("unknown option"));
         assert!(parse_err(&["help", "nope"]).contains("unknown command"));
         // diff has its own positional pair and options.
-        assert!(parse_err(&["diff", "old.json"]).contains("old.json"));
-        assert!(parse_err(&["diff", "a", "b", "c"]).contains("old.json"));
+        assert!(parse_err(&["diff", "old.json"]).contains("old-scan"));
+        assert!(parse_err(&["diff", "a", "b", "c"]).contains("old-scan"));
         assert!(parse_err(&["diff", "a", "b", "--min-change", "lots"]).contains("size"));
         assert!(parse_err(&["diff", "a", "b", "--limit", "0"]).contains("at least 1"));
         assert!(parse_err(&["diff", "a", "b", "--max-depth", "x"]).contains("whole number"));

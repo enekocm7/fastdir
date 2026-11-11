@@ -4,12 +4,13 @@
 
 use super::*;
 use fastdir_core::diff::{self, ScanDiff};
-use fastdir_core::export::{self, ImportedScan};
+use fastdir_core::export::ImportedScan;
+use fastdir_core::scanfile;
 
 /// A finished comparison with the saved scan currently shown.
 pub(super) struct Comparison {
     pub diff: Arc<ScanDiff>,
-    /// Saved JSON the baseline was read from.
+    /// Saved scan file the baseline was read from (JSON or `.fdscan`).
     pub baseline: PathBuf,
     /// Unix seconds reported by that document (`0` when unknown).
     pub baseline_at: i64,
@@ -73,8 +74,7 @@ impl FastDir {
             let result = std::fs::File::open(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|file| {
-                    export::import_json_with_meta(std::io::BufReader::new(file))
-                        .map_err(|e| e.to_string())
+                    scanfile::import_scan(std::io::BufReader::new(file)).map_err(|e| e.to_string())
                 });
             (path, result)
         });
