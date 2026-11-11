@@ -90,6 +90,8 @@ const COLORBLIND_PALETTE: [(u8, u8, u8); 18] = [
 /// WinDirStat colours for the drive pseudo-items.
 pub const FREE_SPACE_COLOR: (u8, u8, u8) = (128, 128, 128);
 pub const UNKNOWN_COLOR: (u8, u8, u8) = (255, 255, 0);
+/// Colour of a folder's `<Alternate streams>` pseudo-item.
+pub const STREAMS_COLOR: (u8, u8, u8) = (0, 190, 190);
 const OTHER: (u8, u8, u8) = (200, 200, 200);
 
 /// One colour per file-type category, in `FileCategory::ALL` order.
@@ -192,6 +194,7 @@ pub fn node_color_with(palette: Palette, node: &Node) -> (u8, u8, u8) {
     match node.kind() {
         NodeKind::FreeSpace => FREE_SPACE_COLOR,
         NodeKind::Unknown => UNKNOWN_COLOR,
+        NodeKind::Streams => STREAMS_COLOR,
         _ => ext_color_with(palette, node.ext),
     }
 }
@@ -383,6 +386,7 @@ fn shade_node(
     let rgb = match node.kind() {
         NodeKind::FreeSpace => FREE_SPACE_COLOR,
         NodeKind::Unknown => UNKNOWN_COLOR,
+        NodeKind::Streams => STREAMS_COLOR,
         _ => match opts.color_mode {
             ColorMode::Extension => ext_color_with(opts.palette, node.ext),
             ColorMode::Age => age_color(node.modified(), opts.now, opts.palette),

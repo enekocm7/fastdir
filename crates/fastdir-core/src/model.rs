@@ -94,6 +94,11 @@ pub enum NodeKind {
     /// measured buckets split out of it (`<NTFS metadata>`) have this kind;
     /// their names tell them apart.
     Unknown = 3,
+    /// Pseudo-item inside a folder: the NTFS alternate data streams of the
+    /// folder's files (and of the folder itself), which a directory listing
+    /// does not report. Always named [`STREAMS_NAME`]. Only present when the
+    /// scan measured them ([`crate::scanner::ScanOptions::count_streams`]).
+    Streams = 4,
 }
 
 /// Display names for the drive pseudo-items (WinDirStat style).
@@ -105,6 +110,10 @@ pub const NTFS_METADATA_NAME: &str = "<NTFS metadata>";
 /// Drive pseudo-item (of kind [`NodeKind::Unknown`]) for the volume shadow
 /// copy storage (restore points) in `System Volume Information`.
 pub const SHADOW_COPIES_NAME: &str = "<Shadow copies>";
+/// Folder pseudo-item (of kind [`NodeKind::Streams`]) holding the alternate
+/// data streams of the folder's files. `<` and `>` cannot appear in a Windows
+/// file name, so it never clashes with a real entry.
+pub const STREAMS_NAME: &str = "<Alternate streams>";
 
 /// Used space measured outside the scan, split out of `<Unknown>` into its
 /// own pseudo-items by [`Tree::attach_volume_breakdown`]. `0` means "not
@@ -124,9 +133,10 @@ pub const MAX_NAME_LEN: usize = (1 << NAME_LEN_BITS) - 1;
 const NAME_LEN_BITS: u16 = 10;
 const NAME_LEN_MASK: u16 = (1 << NAME_LEN_BITS) - 1;
 const KIND_SHIFT: u16 = NAME_LEN_BITS;
-const EXPANDED: u16 = 1 << 12;
-const ERROR: u16 = 1 << 13;
-const HARD_LINK: u16 = 1 << 14;
+const KIND_MASK: u16 = 0b111;
+const EXPANDED: u16 = 1 << 13;
+const ERROR: u16 = 1 << 14;
+const HARD_LINK: u16 = 1 << 15;
 
 /// `block` of a node without children.
 const NO_BLOCK: u32 = u32::MAX;
@@ -201,11 +211,12 @@ impl Node {
 
     #[inline]
     pub fn kind(&self) -> NodeKind {
-        match (self.bits >> KIND_SHIFT) & 3 {
+        match (self.bits >> KIND_SHIFT) & KIND_MASK {
             0 => NodeKind::Dir,
             1 => NodeKind::File,
             2 => NodeKind::FreeSpace,
-            _ => NodeKind::Unknown,
+            3 => NodeKind::Unknown,
+            _ => NodeKind::Streams,
         }
     }
 
@@ -214,9 +225,19 @@ impl Node {
         self.kind() == NodeKind::Dir
     }
 
-    /// Either drive pseudo-item (`<Free space>` or `<Unknown>`).
+    /// Any pseudo-item: a drive item (`<Free space>`, `<Unknown>`, ...) or a
+    /// folder's `<Alternate streams>`. Pseudo-items are not real file-system
+    /// entries, so they cannot be opened, renamed, moved or deleted.
     #[inline]
     pub fn is_special(&self) -> bool {
+        !matches!(self.kind(), NodeKind::Dir | NodeKind::File)
+    }
+
+    /// A drive pseudo-item (`<Free space>`, `<Unknown>` and the buckets split
+    /// out of it). These only ever live directly under the root of a drive
+    /// scan and describe the volume rather than the scanned files.
+    #[inline]
+    pub fn is_volume_item(&self) -> bool {
         matches!(self.kind(), NodeKind::FreeSpace | NodeKind::Unknown)
     }
 
@@ -797,8 +818,22 @@ impl DirBuilder {
         self.push(name, Node::new(NodeKind::Dir, 0, 0, modified), owner);
     }
 
-    /// A drive pseudo-item (`<Free space>` or `<Unknown>`) read back from an
-    /// export, so its bytes are not mistaken for a real file.
+    /// The folder's `<Alternate streams>` pseudo-item: `size` logical and
+    /// `disk_size` allocated bytes of alternate data streams. Nothing is added
+    /// when both are zero.
+    pub fn add_streams(&mut self, size: u64, disk_size: u64) {
+        if size > 0 || disk_size > 0 {
+            self.push(
+                STREAMS_NAME,
+                Node::new(NodeKind::Streams, size, disk_size, 0),
+                NO_OWNER,
+            );
+        }
+    }
+
+    /// A pseudo-item (`<Free space>`, `<Unknown>`, `<Alternate streams>`)
+    /// read back from an export, so its bytes are not mistaken for a real
+    /// file.
     pub fn add_special(
         &mut self,
         kind: NodeKind,
@@ -807,7 +842,7 @@ impl DirBuilder {
         disk_size: u64,
         modified: i64,
     ) {
-        debug_assert!(matches!(kind, NodeKind::FreeSpace | NodeKind::Unknown));
+        debug_assert!(!matches!(kind, NodeKind::Dir | NodeKind::File));
         self.push(name, Node::new(kind, size, disk_size, modified), NO_OWNER);
     }
 
@@ -1643,7 +1678,7 @@ impl Tree {
         };
         if let Some(k) = existing {
             let old = self.detach(dir, k);
-            if !old.is_special() {
+            if !old.is_volume_item() {
                 self.grow_free(old.size);
             }
         }
@@ -1736,7 +1771,7 @@ impl Tree {
         while let Some(k) = self
             .children(self.root())
             .iter()
-            .position(|c| c.is_special())
+            .position(|c| c.is_volume_item())
         {
             self.detach(Slot::Root, k);
             changed = true;
@@ -1841,7 +1876,9 @@ impl Tree {
 
     /// Whether this is a drive scan with pseudo-items attached.
     pub fn is_drive_scan(&self) -> bool {
-        self.children(self.root()).iter().any(|c| c.is_special())
+        self.children(self.root())
+            .iter()
+            .any(|c| c.is_volume_item())
     }
 
     /// Bytes in `<Free space>`, if present.
@@ -1877,23 +1914,24 @@ impl Tree {
             .sum()
     }
 
-    /// Real scanned bytes (excluding pseudo-items).
+    /// Real scanned bytes (excluding the drive pseudo-items).
     pub fn scanned_bytes(&self) -> u64 {
         let pseudo: u64 = self
             .children(self.root())
             .iter()
-            .filter(|c| c.is_special())
+            .filter(|c| c.is_volume_item())
             .map(|c| c.size)
             .sum();
         self.root().size.saturating_sub(pseudo)
     }
 
-    /// Real scanned bytes as allocated on disk (excluding pseudo-items).
+    /// Real scanned bytes as allocated on disk (excluding the drive
+    /// pseudo-items).
     pub fn scanned_disk_bytes(&self) -> u64 {
         let pseudo: u64 = self
             .children(self.root())
             .iter()
-            .filter(|c| c.is_special())
+            .filter(|c| c.is_volume_item())
             .map(|c| c.disk_size)
             .sum();
         self.root().disk_size.saturating_sub(pseudo)
@@ -2003,6 +2041,65 @@ mod tests {
         assert_eq!(n.kind(), NodeKind::Unknown);
         assert_eq!(n.name_len(), 3);
         assert!(!n.expanded() && n.hard_link());
+
+        let mut s = Node::new(NodeKind::Streams, 0, 0, 0);
+        s.set_name(1, MAX_NAME_LEN);
+        s.set_expanded(true);
+        s.set_flag(ERROR, true);
+        s.set_flag(HARD_LINK, true);
+        assert_eq!(s.kind(), NodeKind::Streams);
+        assert_eq!(s.name_len(), MAX_NAME_LEN);
+        assert!(s.expanded() && s.error() && s.hard_link());
+    }
+
+    /// root / { sub / { a.txt 5, <Alternate streams> 7 }, c.txt 30,
+    /// <Alternate streams> 3 }.
+    fn streams_tree() -> Tree {
+        let mut arena = Arena::default();
+        let mut sub = DirBuilder::new(50);
+        sub.add_file("a.txt", 5, 5, 5);
+        sub.add_streams(7, 8);
+        // Nothing to show: no item.
+        sub.add_streams(0, 0);
+        let sub = sub.commit(&mut arena);
+        let mut root = DirBuilder::new(100);
+        root.add_dir("sub", sub);
+        root.add_file("c.txt", 30, 30, 7);
+        root.add_streams(3, 8);
+        let root = root.commit(&mut arena);
+        Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
+    }
+
+    #[test]
+    fn alternate_streams_are_pseudo_items_inside_folders() {
+        let mut tree = streams_tree();
+        let root = *tree.root();
+        assert_eq!((root.size, root.disk_size), (45, 51));
+        // They hold bytes but are neither files nor folders.
+        assert_eq!((root.files, root.dirs), (2, 1));
+        let streams = tree.find(Path::new("/root/<Alternate streams>")).unwrap();
+        let node = *tree.get(&streams).unwrap();
+        assert_eq!(node.kind(), NodeKind::Streams);
+        assert!(node.is_special() && !node.is_volume_item());
+        assert_eq!(tree.children(tree.get(&[1]).unwrap()).len(), 2);
+        // Not a drive scan, and every byte counts as scanned.
+        assert!(!tree.is_drive_scan());
+        assert_eq!(tree.scanned_bytes(), 45);
+        assert_eq!(tree.unattributed_bytes(), 0);
+        // Not a real entry: no renaming or removing it.
+        assert!(tree.rename(&streams, "x").is_none());
+        assert!(tree.remove(&streams).is_none());
+        assert!(tree.top_files(10).iter().all(|f| !f.name.starts_with('<')));
+
+        // A drive scan keeps the root's streams item and counts it as
+        // scanned, so `<Unknown>` shrinks by its size.
+        tree.attach_volume_info(200, 100);
+        assert!(tree.is_drive_scan());
+        assert_eq!(tree.scanned_bytes(), 45);
+        assert_eq!(tree.unknown_bytes(), Some(55));
+        assert!(tree.find(Path::new("/root/<Alternate streams>")).is_some());
+        tree.attach_volume_info(200, 100);
+        assert_eq!(tree.children(tree.root()).len(), 5);
     }
 
     #[test]

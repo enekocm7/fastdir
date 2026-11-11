@@ -206,7 +206,7 @@ fn visit(
     out: &mut Vec<DiffEntry>,
 ) {
     // Drive pseudo-items are bookkeeping, not comparable data.
-    if node.is_special() {
+    if node.is_volume_item() {
         return;
     }
     let change = diff.change(node);
