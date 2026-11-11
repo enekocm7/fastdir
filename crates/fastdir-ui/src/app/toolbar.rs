@@ -7,6 +7,7 @@ impl FastDir {
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let op_view = self.op.as_ref().map(|op| self.render_op(op, cx));
         let search = self.render_search(cx);
+        let basket_button = self.render_basket_button(cx);
         let scan_view = self.render_scan_progress(cx);
         let theme = cx.theme();
         let ready = matches!(self.phase, Phase::Ready);
@@ -168,6 +169,7 @@ impl FastDir {
                     .disabled(!has_sel || is_root || refreshing || special || !self.can_touch_selected())
                     .on_click(cx.listener(|this, _, w, cx| this.delete_item(&DeleteItem, w, cx))),
             )
+            .child(basket_button)
             .child(Separator::vertical().h(sp(20.)).mx_1())
             .child(search)
             .child(

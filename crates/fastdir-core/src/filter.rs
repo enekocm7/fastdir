@@ -8,6 +8,29 @@ use crate::model::{Node, NodeKind, Tree};
 use chrono::{Local, NaiveDate, TimeZone};
 use std::collections::HashSet;
 
+/// Windows' default path limit (`MAX_PATH`), in characters.
+pub const DEFAULT_PATH_LIMIT: usize = 260;
+
+/// A cleanup check that narrows a [`Filter`] to a kind of item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Finder {
+    /// Folders with no file anywhere below them (readable folders only).
+    EmptyFolders,
+    /// Files whose size is zero bytes.
+    ZeroByteFiles,
+    /// Files and folders whose full path is longer than the path limit.
+    LongPaths,
+}
+
+impl Finder {
+    /// Every finder, in the order the UI lists them.
+    pub const ALL: [Finder; 3] = [
+        Finder::EmptyFolders,
+        Finder::ZeroByteFiles,
+        Finder::LongPaths,
+    ];
+}
+
 /// A parsed, ready-to-use filter. An all-default filter matches every real
 /// node (drive pseudo-items are always excluded).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -24,6 +47,10 @@ pub struct Filter {
     /// Unix seconds; both bounds are inclusive and optional.
     modified_after: Option<i64>,
     modified_before: Option<i64>,
+    /// A cleanup check every match must also pass.
+    finder: Option<Finder>,
+    /// Longest path (in characters) that [`Finder::LongPaths`] accepts.
+    path_limit: usize,
 }
 
 impl Filter {
@@ -132,12 +159,23 @@ impl Filter {
             extensions: normalized,
             modified_after,
             modified_before,
+            finder: None,
+            path_limit: DEFAULT_PATH_LIMIT,
         }
+    }
+
+    /// This filter restricted to one cleanup check. `path_limit` only matters
+    /// for [`Finder::LongPaths`]: paths longer than it match.
+    pub fn with_finder(mut self, finder: Option<Finder>, path_limit: usize) -> Self {
+        self.finder = finder;
+        self.path_limit = path_limit;
+        self
     }
 
     /// Whether any restriction is set.
     pub fn is_active(&self) -> bool {
-        !self.query.is_empty()
+        self.finder.is_some()
+            || !self.query.is_empty()
             || self.min_size > 0
             || !self.extensions.is_empty()
             || self.modified_after.is_some()
@@ -164,12 +202,42 @@ impl Filter {
         self.modified_before
     }
 
+    pub fn finder(&self) -> Option<Finder> {
+        self.finder
+    }
+
+    pub fn path_limit(&self) -> usize {
+        self.path_limit
+    }
+
     /// Whether `node` (named `name`) passes every restriction in this filter.
     ///
     /// `ext` is the node's extension from the tree (`None` for directories and
     /// files without one). Drive pseudo-items never match.
+    ///
+    /// The path length is unknown here, so a [`Finder::LongPaths`] filter
+    /// matches nothing; use [`Filter::matches_at`] when the length is known.
     pub fn matches(&self, name: &str, node: &Node, ext: Option<&str>) -> bool {
+        self.matches_at(name, node, ext, 0)
+    }
+
+    /// [`Filter::matches`] for a node whose full path is `path_len`
+    /// characters long (see [`child_path_len`]).
+    pub fn matches_at(&self, name: &str, node: &Node, ext: Option<&str>, path_len: usize) -> bool {
         if node.is_special() {
+            return false;
+        }
+        let finder_ok = match self.finder {
+            None => true,
+            // Unreadable folders may well hold files, so they never count.
+            Some(Finder::EmptyFolders) => node.is_dir() && !node.error() && node.files == 0,
+            // Later hard links also have size 0 but are not empty files.
+            Some(Finder::ZeroByteFiles) => {
+                node.kind() == NodeKind::File && node.size == 0 && !node.hard_link()
+            }
+            Some(Finder::LongPaths) => path_len > self.path_limit,
+        };
+        if !finder_ok {
             return false;
         }
         if node.size < self.min_size {
@@ -243,26 +311,57 @@ pub struct FilterView<'a> {
     filter: &'a Filter,
     /// Blocks of directories with at least one match somewhere below them.
     dirs: HashSet<u32>,
+    /// Ids of the nodes over the path limit, when looking for long paths
+    /// (a node does not know its own path).
+    long: HashSet<u32>,
 }
 
 impl<'a> FilterView<'a> {
     pub fn new(tree: &Tree, filter: &'a Filter) -> Self {
-        let mut dirs = HashSet::new();
-        fn walk(tree: &Tree, filter: &Filter, node: &Node, dirs: &mut HashSet<u32>) -> bool {
-            let mut any = false;
-            for child in tree.children(node) {
-                let below = child.is_dir() && walk(tree, filter, child, dirs);
-                if below || filter.matches(tree.name(child), child, tree.ext_name(child)) {
-                    any = true;
-                }
-            }
-            if any {
-                dirs.insert(node.block_id());
-            }
-            any
+        struct Walk<'t> {
+            tree: &'t Tree,
+            filter: &'t Filter,
+            dirs: HashSet<u32>,
+            long: HashSet<u32>,
         }
-        walk(tree, filter, tree.root(), &mut dirs);
-        Self { filter, dirs }
+        impl Walk<'_> {
+            fn walk(&mut self, node: &Node, path_len: usize) -> bool {
+                let mut any = false;
+                for child in self.tree.children(node) {
+                    let name = self.tree.name(child);
+                    let len = child_path_len(path_len, name);
+                    if self.filter.finder() == Some(Finder::LongPaths)
+                        && len > self.filter.path_limit()
+                    {
+                        self.long.insert(child.id());
+                    }
+                    let below = child.is_dir() && self.walk(child, len);
+                    if below
+                        || self
+                            .filter
+                            .matches_at(name, child, self.tree.ext_name(child), len)
+                    {
+                        any = true;
+                    }
+                }
+                if any {
+                    self.dirs.insert(node.block_id());
+                }
+                any
+            }
+        }
+        let mut walk = Walk {
+            tree,
+            filter,
+            dirs: HashSet::new(),
+            long: HashSet::new(),
+        };
+        walk.walk(tree.root(), root_path_len(tree));
+        Self {
+            filter,
+            dirs: walk.dirs,
+            long: walk.long,
+        }
     }
 
     /// Whether `node` itself matches or is an ancestor of a match.
@@ -273,9 +372,31 @@ impl<'a> FilterView<'a> {
         if node.is_dir() && self.dirs.contains(&node.block_id()) {
             return true;
         }
+        // Only "over the limit or not" matters to the filter.
+        let path_len = if self.long.contains(&node.id()) {
+            usize::MAX
+        } else {
+            0
+        };
         self.filter
-            .matches(tree.name(node), node, tree.ext_name(node))
+            .matches_at(tree.name(node), node, tree.ext_name(node), path_len)
     }
+}
+
+/// Length in characters of the scan root's path without a trailing
+/// separator, the starting point for [`child_path_len`].
+pub fn root_path_len(tree: &Tree) -> usize {
+    tree.root_path
+        .to_string_lossy()
+        .trim_end_matches(['/', '\\'])
+        .chars()
+        .count()
+}
+
+/// Length in characters of the path of a child called `name` of a directory
+/// whose path is `parent_len` characters long (one separator in between).
+pub fn child_path_len(parent_len: usize, name: &str) -> usize {
+    parent_len + 1 + name.chars().count()
 }
 
 /// Parse a byte size such as `500`, `1.5 GB`, `20MB` or `2 TiB`. Units are
@@ -509,5 +630,122 @@ mod tests {
         assert!(view.shows(&tree, child(docs, "keep.iso")));
         assert!(!view.shows(&tree, child(docs, "skip.txt")));
         assert!(!view.shows(&tree, child(tree.root(), "other.txt")));
+    }
+
+    /// root/
+    ///   empty/            (no files)
+    ///   nested/empty-too/ (no files)
+    ///   docs/zero.txt (0 bytes), docs/full.txt (10 bytes)
+    fn finder_tree() -> Tree {
+        let mut arena = crate::model::Arena::default();
+        let mut nested = DirBuilder::new(0);
+        nested.add_empty_dir("empty-too", 0);
+        let nested = nested.commit(&mut arena);
+        let mut docs = DirBuilder::new(0);
+        docs.add_file("zero.txt", 0, 0, 0);
+        docs.add_file("full.txt", 10, 10, 0);
+        let docs = docs.commit(&mut arena);
+        let mut root = DirBuilder::new(0);
+        root.add_empty_dir("empty", 0);
+        root.add_dir("nested", nested);
+        root.add_dir("docs", docs);
+        let root = root.commit(&mut arena);
+        Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"))
+    }
+
+    fn matched_names(tree: &Tree, filter: &Filter) -> Vec<String> {
+        fn walk(tree: &Tree, filter: &Filter, node: &Node, len: usize, out: &mut Vec<String>) {
+            for child in tree.children(node) {
+                let name = tree.name(child);
+                let len = child_path_len(len, name);
+                if filter.matches_at(name, child, tree.ext_name(child), len) {
+                    out.push(name.to_string());
+                }
+                walk(tree, filter, child, len, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(tree, filter, tree.root(), root_path_len(tree), &mut out);
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn empty_folder_finder_matches_folders_without_files() {
+        let tree = finder_tree();
+        let filter = Filter::default().with_finder(Some(Finder::EmptyFolders), 260);
+        assert!(filter.is_active());
+        // `nested` holds only an empty folder, so it counts too.
+        assert_eq!(
+            matched_names(&tree, &filter),
+            ["empty", "empty-too", "nested"]
+        );
+    }
+
+    #[test]
+    fn zero_byte_finder_matches_only_empty_files() {
+        let tree = finder_tree();
+        let filter = Filter::default().with_finder(Some(Finder::ZeroByteFiles), 260);
+        assert_eq!(matched_names(&tree, &filter), ["zero.txt"]);
+        // It still combines with the other restrictions.
+        let filter = Filter::parse("full", "", "", "", "")
+            .unwrap()
+            .with_finder(Some(Finder::ZeroByteFiles), 260);
+        assert!(matched_names(&tree, &filter).is_empty());
+    }
+
+    #[test]
+    fn zero_byte_finder_ignores_hard_link_duplicates() {
+        let mut arena = crate::model::Arena::default();
+        let mut root = DirBuilder::new(0);
+        root.add_file("real", 5, 5, 0);
+        root.add_hard_link("link", 0);
+        let root = root.commit(&mut arena);
+        let tree = Tree::new(Subtree::new(arena, "root", root), PathBuf::from("/root"));
+        let filter = Filter::default().with_finder(Some(Finder::ZeroByteFiles), 260);
+        assert!(matched_names(&tree, &filter).is_empty());
+    }
+
+    #[test]
+    fn long_path_finder_uses_the_full_path_length() {
+        let tree = finder_tree();
+        // "/root/docs/zero.txt" is 19 characters, "/root/docs" is 10.
+        let at = |limit| Filter::default().with_finder(Some(Finder::LongPaths), limit);
+        assert_eq!(matched_names(&tree, &at(18)).len(), 3);
+        assert_eq!(
+            matched_names(&tree, &at(18)),
+            ["empty-too", "full.txt", "zero.txt"]
+        );
+        assert_eq!(matched_names(&tree, &at(19)), ["empty-too"]);
+        assert!(matched_names(&tree, &at(260)).is_empty());
+        // Without a known path length nothing can be "too long".
+        let (name, node) = ("x", tree.root());
+        assert!(!at(0).matches(name, node, None));
+    }
+
+    #[test]
+    fn root_path_length_ignores_a_trailing_separator() {
+        let mk = |path: &str| Tree::empty(PathBuf::from(path));
+        assert_eq!(root_path_len(&mk("C:\\")), 2);
+        assert_eq!(root_path_len(&mk(r"C:\Users")), 8);
+        assert_eq!(root_path_len(&mk("/")), 0);
+        assert_eq!(child_path_len(2, "é"), 4);
+    }
+
+    #[test]
+    fn filter_view_finds_long_paths_and_keeps_ancestors() {
+        let tree = finder_tree();
+        let filter = Filter::default().with_finder(Some(Finder::LongPaths), 18);
+        let view = FilterView::new(&tree, &filter);
+        let child = |parent: &Node, name: &str| {
+            tree.children(parent)
+                .iter()
+                .find(|node| tree.name(node) == name)
+                .expect("child exists")
+        };
+        let docs = child(tree.root(), "docs");
+        assert!(view.shows(&tree, docs), "ancestor of a match");
+        assert!(view.shows(&tree, child(docs, "zero.txt")));
+        assert!(!view.shows(&tree, child(tree.root(), "empty")));
     }
 }

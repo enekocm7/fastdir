@@ -36,6 +36,14 @@ pub fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
+/// Inverse of [`iso_time`] / [`now_iso`]: Unix seconds, or `None` when the
+/// text is not a timestamp this crate writes.
+pub fn parse_iso(text: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|dt| dt.timestamp())
+}
+
 pub fn kind_label(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Dir => "dir",

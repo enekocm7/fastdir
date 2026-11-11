@@ -38,6 +38,7 @@ impl FastDir {
         let no_ops = is_root || special;
         let offline = !self.can_touch_selected();
         let can_compress = self.can_compress_selected();
+        let in_basket = self.selection_in_basket();
         menu.separator()
             .menu_with_icon_and_disabled(
                 self.tr("menu.zoom_in"),
@@ -91,6 +92,20 @@ impl FastDir {
                 self.tree.is_none(),
             )
             .separator()
+            .menu_with_icon_and_disabled(
+                if in_basket {
+                    self.tr("menu.basket_remove")
+                } else {
+                    self.tr("menu.basket_add")
+                },
+                if in_basket {
+                    IconName::Minus
+                } else {
+                    IconName::Plus
+                },
+                Box::new(AddToBasket),
+                no_ops || !matches!(self.phase, Phase::Ready),
+            )
             .menu_with_icon_and_disabled(
                 self.tr_fmt("menu.recycle", &[("trash", self.trash_name())]),
                 IconName::Recycle,

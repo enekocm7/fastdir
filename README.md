@@ -105,6 +105,10 @@ culprit? Rename, move, recycle or delete it right there.
   - **Search and filters** – `Ctrl+F` filters the tree by name or glob
     (`*.iso`), expanding to every match. Filter by minimum size, extension and
     modified date (`Ctrl+Shift+F`).
+  - **Cleanup finders** – the same dialog (`Ctrl+Shift+F`) has a *cleanup
+    finders* choice that narrows the list to empty folders, zero-byte files or
+    paths longer than a length limit (260 characters by default). Results are
+    ordinary rows: select, open, delete or move them as usual.
   - **Top files** – a flat, sortable list of the N largest files in the whole
     scan (bounded heap, default 1,000), the quickest way to find cleanup
     targets.
@@ -157,6 +161,12 @@ culprit? Rename, move, recycle or delete it right there.
   the treemap, where every selected cell is outlined). The status bar shows
   the count and total size; move / recycle / delete run on the whole
   selection after one confirmation.
+- **Deletion basket**: press **Ctrl+B** to collect the selection while you
+  browse (across folders, tabs, filters and rescans) — the toolbar button
+  shows the item count and total size. **Ctrl+Shift+B** (or the toolbar
+  button) opens the basket to review the list, take items out, empty it,
+  then recycle or delete everything in one confirmed step. Items inside a
+  collected folder are covered by it and never counted or deleted twice.
 - **Light, dark and system themes, plus deep settings** (`Ctrl+,`). The
   *System* option follows the Windows light / dark setting. Everything is
   remembered between launches: window geometry, panel sizes, sort order, the
@@ -242,16 +252,17 @@ fastdir.exe              open the drive overview
 fastdir.exe D:\          scan a drive right away
 fastdir.exe "C:\Users"   scan a folder right away
 fastdir.exe scan.json    open a scan saved earlier
+fastdir.exe scan.fdscan  open a binary scan saved earlier
 ```
 
 ### Opening a saved scan
 
-A scan exported from the GUI (JSON) or written by `fastdir-cli scan` can be
-opened again without rescanning, which is handy when the data came from a
-server, a NAS or another machine:
+A scan exported from the GUI (JSON) or written by `fastdir-cli scan` (JSON or
+the compact binary `.fdscan` format) can be opened again without rescanning,
+which is handy when the data came from a server, a NAS or another machine:
 
 - **Open scan…** in the toolbar `…` menu or on the drive overview
-  (`Ctrl+Shift+O`), with a `.json` file picker.
+  (`Ctrl+Shift+O`), with a `.json` / `.fdscan` file picker.
 - Pass the file on the command line (`fastdir.exe scan.json`) or drop it on
   the window.
 - A banner marks the tree as a **saved scan** and shows the root and the time
@@ -260,13 +271,14 @@ server, a NAS or another machine:
   path still exists on this machine. **Rescan** starts a real scan of the
   saved root (or asks for a folder when it no longer exists).
 
-JSON is a browsing snapshot: hard-link markers come back as plain files, so
-those bytes are kept but the UI cannot tell them apart. Drive pseudo-items
-(`<Free space>`, `<Unknown>`) keep their kind, which is what lets a later
-comparison report the change in free space. Owner names, when the document
-has them, are kept and shown again. Opening a truncated document
-(`--max-depth` or `--no-files`) also means totals only reflect the entries
-that were written.
+Both formats keep hard-link markers: an extra link is listed without its
+bytes, which are counted once at the entry that owns them. JSON documents
+written by older versions have no markers, so those entries come back as
+plain files (the bytes are still kept). Drive pseudo-items (`<Free space>`,
+`<Unknown>`) keep their kind, which is what lets a later comparison report
+the change in free space. Owner names, when the document has them, are kept
+and shown again. Opening a truncated document (`--max-depth` or `--no-files`)
+also means totals only reflect the entries that were written.
 
 ### Custom actions
 
@@ -315,9 +327,9 @@ confirm = false
 ### Comparing two scans
 
 **Compare with a saved scan…** in the toolbar `…` menu diffs the current tree
-(possibly itself a saved scan) against a JSON scan opened from disk. Items are
-matched by their relative path under the root, so the saved scan does not have
-to come from this machine.
+(possibly itself a saved scan) against a saved scan (JSON or `.fdscan`)
+opened from disk. Items are matched by their relative path under the root, so
+the saved scan does not have to come from this machine.
 
 - The tree gets **Δ size**, **Δ %** and **Status** (New / Grew / Shrank /
   Unchanged) columns. Click them to sort; the initial order is the folder that
@@ -464,6 +476,9 @@ fastdir-cli duplicates D:\ --min-size 100MB --ext .mp4 --pretty
 # What grew on D: since Monday's saved scan (saved.json)?
 fastdir-cli diff saved.json D:\ --min-change 1GB
 
+# Save a whole drive as a compact binary scan (loads faster than JSON)
+fastdir-cli scan D:\ --format bin -o D.fdscan
+
 # ISO files over 1 GB that were not touched this year
 fastdir-cli top D:\ --ext .iso --min-size 1GB --older-than 1y
 
@@ -481,16 +496,17 @@ removes nothing; with `--config` it uses the `[snapshots]` folder and
 retention of `config.toml` (flags still win). `history` reads the snapshots
 only and never scans.
 
-`diff` takes a saved scan as `<old>` and either another saved scan or a
-folder to scan now as `<new>`. It uses the same matcher as the GUI: entries
+`diff` takes a saved scan (JSON or binary `.fdscan`) as `<old>` and either
+another saved scan or a folder to scan now as `<new>`. It uses the same
+matcher as the GUI: entries
 are paired by relative path, so the baseline can come from another machine.
 A new or removed folder is one row with its subtree total, and every other
 row has its own sizes.
 
 | Option | Commands | |
 |---|---|---|
-| `--format json\|csv` | scan, top, duplicates, diff | Output format (default `json`; CSV uses the export dialog's columns) |
-| `--format html` | scan | One self-contained HTML report (summary, treemap image, largest files, folder tree; honours `--max-depth` and `--no-files`). Cannot be combined with filters. |
+| `--format json\|csv\|bin\|html` | scan | Output format (default `json`; `bin` writes the compact `.fdscan` scan; `html` writes one self-contained report with the summary, a treemap image, the largest files and a folder tree, honouring `--max-depth` and `--no-files` but not filters) |
+| `--format json\|csv` | top, duplicates, diff | Output format (default `json`; CSV uses the export dialog's columns) |
 | `-o, --output <file\|->` | scan, top, duplicates, diff | Write to a file instead of stdout |
 | `--pretty` | scan, top, duplicates, diff | Indent the JSON |
 | `--max-depth <n>` | scan | List entries up to `<n>` levels below `<path>` (`0` = just the root). Sizes always count everything. |
@@ -568,6 +584,15 @@ Ctrl+C ends the process at once.
 Each document has a `schema` name and a `version` (currently `1`). Within a
 version, fields may be added but are never renamed or removed. Sizes are
 bytes, and timestamps are ISO 8601 UTC (`null` when unknown).
+
+`fastdir scan --format bin` does not write JSON: it writes a separate compact
+binary document (a `.fdscan` file, magic `FDSCAN`, format version `1`). It
+carries the same facts as the JSON tree, keeps hard-link markers, and loads
+much faster for very large scans. It is read back by `diff`, the GUI's *Open
+scan…* / *Compare with…* and MCP `compare_scans`; use JSON when another
+program has to read the document. The binary format is independent of the
+`fastdir.scan` schema and its version number only moves on incompatible
+changes.
 
 `fastdir scan` (`schema: "fastdir.scan"`):
 
@@ -744,16 +769,16 @@ rescan. A tool given a folder outside every cached scan scans it first.
 | `search` | Find entries by name substring or glob, minimum size, extension, modified date or type |
 | `path_info` | One entry's sizes and counts, and its share of its parent and of the scan |
 | `find_duplicates` | Groups of identical files under a folder and the space they waste; reuses the cached scan |
-| `compare_scans` | What changed since a cached scan or a saved JSON scan (`fastdir.diff`) |
-| `export_scan` | Write a folder to a JSON (`fastdir.scan`) or CSV file, or a standalone HTML report (`format: "html"`) |
+| `compare_scans` | What changed since a cached scan or a saved scan (JSON or `.fdscan`), as `fastdir.diff` |
+| `export_scan` | Write a folder to a JSON (`fastdir.scan`), CSV or binary `.fdscan` file, or a standalone HTML report (`format: "html"`) |
 
 `largest_files` and `search` take the same optional filter fields as the
 command line: `query` (or `name`), `min_size`, `extension` (a string or a
 list), `newer_than` and `older_than` (`2026-01-01` or an age such as `30d`).
 
 `compare_scans` takes `old` (a scan root cached in this session, or a saved
-JSON scan file) and `new` (a folder scanned now, or a saved JSON scan file),
-plus optional `min_change`, `max_depth` and `limit`. It returns the same
+scan file, JSON or `.fdscan`) and `new` (a folder scanned now, or a saved scan
+file), plus optional `min_change`, `max_depth` and `limit`. It returns the same
 `fastdir.diff` document as the CLI command.
 
 Only read-only tools are offered by default. Start the server with
@@ -801,11 +826,13 @@ as the app. Per-call `scan_path` arguments add to or override it. Without
 | Ctrl+M | Move to… |
 | Del | Move to Recycle Bin |
 | Shift+Del | Delete permanently |
+| Ctrl+B | Add the selection to the deletion basket (or take it out) |
+| Ctrl+Shift+B | Open the deletion basket |
 | F5 | Refresh the selected folder |
 | Ctrl+R | Rescan everything |
 | Ctrl+O | Scan a folder… |
 | Ctrl+F | Focus the search box |
-| Ctrl+Shift+F | Minimum size / extension / date filters |
+| Ctrl+Shift+F | Minimum size / extension / date filters and cleanup finders |
 | Ctrl+1 … Ctrl+9 | Run the custom action bound to that number |
 | Esc | Stop scanning, clear the filter, cancel a move or delete |
 | Ctrl+T | Toggle light / dark |

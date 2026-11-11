@@ -91,7 +91,9 @@ impl FastDir {
         let diff = self.compare.as_ref().map(|compare| compare.diff.clone());
         let diff = diff.as_deref();
         let tree = tree.read();
-        let hide_empty = self.settings.list.hide_empty_folders;
+        // The empty-folder finder would otherwise find nothing.
+        let hide_empty = self.settings.list.hide_empty_folders
+            && self.filter.finder() != Some(Finder::EmptyFolders);
         /// A folder is "empty" when nothing below it is a file (so a folder
         /// holding only empty folders counts too). Unreadable folders are
         /// kept: their contents are unknown. The root is never hidden.
@@ -150,6 +152,7 @@ impl FastDir {
             filter: &Filter,
             owner_filter: Option<u16>,
             hide_empty: bool,
+            path_len: usize,
         ) -> bool {
             if hidden(node, depth, hide_empty) {
                 return false;
@@ -160,10 +163,11 @@ impl FastDir {
                 let children = tree.children(node);
                 for i in FastDir::child_order(tree, diff, node, sort) {
                     path.push(i);
+                    let child = &children[i as usize];
                     any |= walk_filtered(
                         tree,
                         diff,
-                        &children[i as usize],
+                        child,
                         path,
                         depth + 1,
                         rows,
@@ -171,12 +175,16 @@ impl FastDir {
                         filter,
                         owner_filter,
                         hide_empty,
+                        child_path_len(path_len, tree.name(child)),
                     );
                     path.pop();
                 }
             }
             let owner_ok = owner_filter.is_none_or(|want| tree.owner_at(path) == want);
-            let matched = owner_ok && filter.matches(tree.name(node), node, tree.ext_name(node));
+            // The scan root is the context of a finder, never a result.
+            let matched = owner_ok
+                && (depth > 0 || filter.finder().is_none())
+                && filter.matches_at(tree.name(node), node, tree.ext_name(node), path_len);
             if matched || any {
                 rows.insert(
                     start,
@@ -205,6 +213,7 @@ impl FastDir {
                 &self.filter,
                 owner_filter,
                 hide_empty,
+                root_path_len(&tree),
             );
             // Start on the first actual match, not on an ancestor shown for
             // context.

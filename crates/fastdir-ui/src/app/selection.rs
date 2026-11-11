@@ -228,7 +228,11 @@ impl FastDir {
         self.clear_comparison(cx);
         // Deleted, moved or hard-linked copies no longer waste space.
         self.prune_duplicates();
+<<<<<<< HEAD
+        self.sync_basket();
+=======
         self.prune_cleanup();
+>>>>>>> origin/main
         if let Some(p) = &select {
             // Make sure the new selection is visible.
             if let Some(tree) = &self.tree {
@@ -287,7 +291,11 @@ impl FastDir {
             return;
         };
         self.prune_duplicates();
+<<<<<<< HEAD
+        self.sync_basket();
+=======
         self.prune_cleanup();
+>>>>>>> origin/main
         // Node paths shifted, so a multi-selection no longer points anywhere.
         self.marked.clear();
         self.selected = None;

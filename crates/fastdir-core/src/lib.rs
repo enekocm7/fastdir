@@ -5,6 +5,7 @@
 //! benchmarked on its own.
 
 pub mod actions;
+pub mod basket;
 pub mod categories;
 pub mod cleanup;
 pub mod compress;
@@ -20,6 +21,7 @@ pub mod history;
 pub mod integration;
 pub mod mft;
 pub mod model;
+pub mod scanfile;
 pub mod scanner;
 pub mod sysprefs;
 pub mod windows_apps;
