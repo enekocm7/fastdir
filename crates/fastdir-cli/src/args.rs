@@ -73,8 +73,9 @@ pub struct ScanArgs {
     pub skip_hidden_system: bool,
     pub skip_windows_dir: bool,
     pub collect_owners: bool,
-    /// `--mft`: read the NTFS MFT when possible (falls back to a walk).
-    pub use_mft: bool,
+    /// `--mft` / `--no-mft`: `None` keeps the default (read the NTFS MFT
+    /// when possible, falling back to a walk); a flag overrides the config.
+    pub use_mft: Option<bool>,
     /// `--streams`: measure NTFS alternate data streams.
     pub count_streams: bool,
     pub quiet: bool,
@@ -93,7 +94,7 @@ impl ScanArgs {
             threads: self.threads,
             collect_owners: self.collect_owners,
             skip_windows_dir: self.skip_windows_dir,
-            use_mft: self.use_mft,
+            use_mft: self.use_mft.unwrap_or(true),
             count_streams: self.count_streams,
         }
     }
@@ -407,7 +408,7 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
-    let mut use_mft = false;
+    let mut use_mft: Option<bool> = None;
     let mut count_streams = false;
     let mut collect_owners = false;
     let mut quiet = false;
@@ -470,7 +471,8 @@ fn parse_scan_like(mut cur: Cursor, topic: HelpTopic) -> Result<Command, UsageEr
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
-            "--mft" => use_mft = true,
+            "--mft" => use_mft = Some(true),
+            "--no-mft" => use_mft = Some(false),
             "--streams" => count_streams = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
@@ -583,7 +585,7 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
-    let mut use_mft = false;
+    let mut use_mft: Option<bool> = None;
     let mut count_streams = false;
     let mut quiet = false;
     let mut config = None;
@@ -635,7 +637,8 @@ fn parse_duplicates(mut cur: Cursor) -> Result<Command, UsageError> {
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
-            "--mft" => use_mft = true,
+            "--mft" => use_mft = Some(true),
+            "--no-mft" => use_mft = Some(false),
             "--streams" => count_streams = true,
             "--quiet" | "-q" => quiet = true,
             "--config" => config = Some(cur.config_source(inline)),
@@ -699,7 +702,7 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
-    let mut use_mft = false;
+    let mut use_mft: Option<bool> = None;
     let mut count_streams = false;
     let mut collect_owners = false;
     let mut quiet = false;
@@ -749,7 +752,8 @@ fn parse_diff(mut cur: Cursor) -> Result<Command, UsageError> {
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
-            "--mft" => use_mft = true,
+            "--mft" => use_mft = Some(true),
+            "--no-mft" => use_mft = Some(false),
             "--streams" => count_streams = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
@@ -834,7 +838,7 @@ fn parse_snapshot(mut cur: Cursor) -> Result<Command, UsageError> {
     let mut cross_volumes = false;
     let mut skip_hidden_system = false;
     let mut skip_windows_dir = false;
-    let mut use_mft = false;
+    let mut use_mft: Option<bool> = None;
     let mut count_streams = false;
     let mut collect_owners = false;
     let mut quiet = false;
@@ -884,7 +888,8 @@ fn parse_snapshot(mut cur: Cursor) -> Result<Command, UsageError> {
             "--cross-volumes" => cross_volumes = true,
             "--skip-hidden" | "--skip-system" | "--skip-hidden-system" => skip_hidden_system = true,
             "--skip-windows" => skip_windows_dir = true,
-            "--mft" => use_mft = true,
+            "--mft" => use_mft = Some(true),
+            "--no-mft" => use_mft = Some(false),
             "--streams" => count_streams = true,
             "--owners" => collect_owners = true,
             "--quiet" | "-q" => quiet = true,
@@ -1088,8 +1093,9 @@ Scanning:
   --skip-windows          skip the Windows folder (%SystemRoot%) for a faster
                           system-drive scan
   --mft                   read the NTFS Master File Table directly (much faster;
-                          needs administrator rights, falls back to a normal
-                          scan otherwise)
+                          the default; needs administrator rights, falls back
+                          to a normal scan otherwise)
+  --no-mft                always walk the folders instead of reading the MFT
   --streams               measure NTFS alternate data streams, shown per folder
                           as <Alternate streams> (free with --mft, slower
                           otherwise)
@@ -1118,7 +1124,7 @@ Filtering (chooses which files are ranked):
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --skip-windows, --mft, --streams, --owners, -q/--quiet, --config
+  --skip-hidden, --skip-windows, --mft, --no-mft, --streams, --owners, -q/--quiet, --config
                           as for `fastdir scan`
 ";
 
@@ -1144,7 +1150,7 @@ Duplicates:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --skip-windows, --mft, --streams, -q/--quiet, --config
+  --skip-hidden, --skip-windows, --mft, --no-mft, --streams, -q/--quiet, --config
                           as for `fastdir scan`
 ";
 
@@ -1174,8 +1180,9 @@ Scanning (only when <new> is a folder):
   --skip-windows          skip the Windows folder (%SystemRoot%) for a faster
                           system-drive scan
   --mft                   read the NTFS Master File Table directly (much faster;
-                          needs administrator rights, falls back to a normal
-                          scan otherwise)
+                          the default; needs administrator rights, falls back
+                          to a normal scan otherwise)
+  --no-mft                always walk the folders instead of reading the MFT
   --streams               measure NTFS alternate data streams, shown per folder
                           as <Alternate streams> (free with --mft, slower
                           otherwise)
@@ -1210,7 +1217,7 @@ Snapshot:
 
 Scanning:
   --threads <n>, --exclude <glob>, --follow-junctions, --cross-volumes,
-  --skip-hidden, --skip-windows, --mft, --streams, --owners, -q/--quiet
+  --skip-hidden, --skip-windows, --mft, --no-mft, --streams, --owners, -q/--quiet
                           as for `fastdir scan`
   --config[=<file>]       use the [scan] and [snapshots] sections of
                           config.toml (dir, keep_count, max_age_days);
@@ -1446,7 +1453,7 @@ mod tests {
         assert!(c.scan.follow_junctions && c.scan.cross_volumes);
         assert!(c.scan.skip_hidden_system && c.scan.quiet && c.scan.collect_owners);
         assert!(c.scan.skip_windows_dir && c.scan.scan_options().skip_windows_dir);
-        assert!(c.scan.use_mft && c.scan.scan_options().use_mft);
+        assert!(c.scan.use_mft == Some(true) && c.scan.scan_options().use_mft);
         assert!(c.scan.count_streams && c.scan.scan_options().count_streams);
         assert_eq!(c.scan.path, PathBuf::from("dir"));
         let opts = c.scan.scan_options();

@@ -157,6 +157,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "scan.done_files" => "已扫描 {files} 个文件（{size}），用时 {dur}",
         "scan.stopped" => "扫描已停止",
         "scan.complete" => "扫描完成",
+        "scan.via_mft" => "已从 NTFS MFT 读取",
+        "scan.via_walk" => "MFT 不可用，已遍历文件夹",
         "win.scanning" => "FastDir — 正在扫描 {path}",
         "win.ready" => "FastDir — {path}{suffix}",
         "win.incomplete" => "（不完整）",

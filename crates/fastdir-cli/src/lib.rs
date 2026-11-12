@@ -155,7 +155,10 @@ fn run_mcp_command(c: &McpCommand) -> Result<(), CliError> {
         Some(source) => {
             config::options_from(&config::load(source).map_err(|e| CliError::new(exit::USAGE, e))?)
         }
-        None => ScanOptions::default(),
+        None => ScanOptions {
+            use_mft: true,
+            ..ScanOptions::default()
+        },
     };
     mcp::serve(c.allow_destructive, defaults).map_err(io_error)
 }

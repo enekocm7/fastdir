@@ -157,6 +157,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "scan.done_files" => "{files}개 파일({size})을 {dur}에 검사했습니다",
         "scan.stopped" => "검사가 중지됨",
         "scan.complete" => "검사 완료",
+        "scan.via_mft" => "NTFS MFT에서 읽음",
+        "scan.via_walk" => "MFT를 사용할 수 없어 폴더를 순회함",
         "win.scanning" => "FastDir — {path} 검사 중",
         "win.ready" => "FastDir — {path}{suffix}",
         "win.incomplete" => " (불완전)",

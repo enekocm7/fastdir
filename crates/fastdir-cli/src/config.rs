@@ -35,7 +35,8 @@ pub fn options_from(s: &ScanSettings) -> ScanOptions {
 
 /// Layers explicit `over` options on top of `base`: exclusions are added,
 /// a thread count wins, and switches turn on if either side has them on.
-pub fn layer(base: &ScanOptions, over: &ScanOptions) -> ScanOptions {
+/// `mft` is the explicit `--mft` / `--no-mft` choice, which wins over `base`.
+pub fn layer(base: &ScanOptions, over: &ScanOptions, mft: Option<bool>) -> ScanOptions {
     let mut excluded_globs = base.excluded_globs.clone();
     for g in &over.excluded_globs {
         if !excluded_globs.contains(g) {
@@ -50,7 +51,7 @@ pub fn layer(base: &ScanOptions, over: &ScanOptions) -> ScanOptions {
         threads: over.threads.or(base.threads),
         collect_owners: base.collect_owners || over.collect_owners,
         skip_windows_dir: base.skip_windows_dir || over.skip_windows_dir,
-        use_mft: base.use_mft || over.use_mft,
+        use_mft: mft.unwrap_or(base.use_mft),
         count_streams: base.count_streams || over.count_streams,
     }
 }
@@ -60,7 +61,11 @@ pub fn apply(args: &mut ScanArgs) -> Result<(), String> {
     let Some(source) = args.config.clone() else {
         return Ok(());
     };
-    let merged = layer(&options_from(&load(&source)?), &args.scan_options());
+    let merged = layer(
+        &options_from(&load(&source)?),
+        &args.scan_options(),
+        args.use_mft,
+    );
     args.exclude = merged.excluded_globs;
     args.skip_hidden_system = merged.skip_hidden_system;
     args.follow_junctions = merged.follow_junctions;
@@ -68,7 +73,7 @@ pub fn apply(args: &mut ScanArgs) -> Result<(), String> {
     args.threads = merged.threads;
     args.collect_owners = merged.collect_owners;
     args.skip_windows_dir = merged.skip_windows_dir;
-    args.use_mft = merged.use_mft;
+    args.use_mft = Some(merged.use_mft);
     args.count_streams = merged.count_streams;
     Ok(())
 }
@@ -115,7 +120,7 @@ mod tests {
             skip_hidden_system: false,
             skip_windows_dir: false,
             collect_owners: false,
-            use_mft: false,
+            use_mft: None,
             count_streams: false,
             quiet: true,
             config,
@@ -136,11 +141,11 @@ mod tests {
             threads: Some(2),
             ..Default::default()
         };
-        let m = layer(&base, &over);
+        let m = layer(&base, &over, None);
         assert_eq!(m.excluded_globs, vec!["*.tmp", "node_modules"]);
         assert!(m.follow_junctions && m.skip_hidden_system);
         assert_eq!(m.threads, Some(2));
-        assert_eq!(layer(&base, &ScanOptions::default()).threads, Some(8));
+        assert_eq!(layer(&base, &ScanOptions::default(), None).threads, Some(8));
     }
 
     #[test]
@@ -169,6 +174,18 @@ mod tests {
         let before = a.clone();
         apply(&mut a).unwrap();
         assert_eq!(a, before);
+    }
+
+    #[test]
+    fn mft_flag_overrides_config() {
+        let base = ScanOptions {
+            use_mft: true,
+            ..Default::default()
+        };
+        let none = ScanOptions::default();
+        assert!(layer(&base, &none, None).use_mft);
+        assert!(!layer(&base, &none, Some(false)).use_mft);
+        assert!(layer(&none, &none, Some(true)).use_mft);
     }
 
     #[test]
