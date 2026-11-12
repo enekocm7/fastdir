@@ -3,7 +3,7 @@
 # Template for the AUR `fastdir-bin` package. The release workflow fills in
 # pkgver and the checksum and pushes it to the AUR for every stable tag.
 pkgname=fastdir-bin
-pkgver=0.4.0
+pkgver=0.4.1
 pkgrel=1
 pkgdesc="Blazing fast disk usage analyzer with a WinDirStat-style treemap (GUI and CLI)"
 arch=('x86_64')
