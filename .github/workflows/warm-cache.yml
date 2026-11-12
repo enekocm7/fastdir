@@ -1,0 +1,115 @@
+name: Warm the release cache
+
+# Release runs are triggered by tags, and a tag run can only restore caches
+# saved by that tag or by main. This builds the release profile's
+# dependencies on main whenever they change, so the next release starts with
+# them compiled instead of building them all from scratch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - "**/build.rs"
+      - .github/workflows/warm-cache.yml
+      - .github/workflows/release.yml
+      - .github/scripts/stub-workspace.sh
+  # Checks a change to this workflow; the cache is only saved on main.
+  pull_request:
+    paths:
+      - .github/workflows/warm-cache.yml
+      - .github/scripts/stub-workspace.sh
+  # Run by hand after a new stable Rust, which changes the cache key.
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+# Must match release.yml: CARGO* variables are part of the cache key.
+env:
+  CARGO_TERM_COLOR: always
+
+# Each job mirrors its release.yml counterpart (runner, container, system
+# packages), so the cache key and the compiled dependencies match.
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Stub out the workspace crates
+        shell: bash
+        run: bash .github/scripts/stub-workspace.sh
+
+      - name: Build dependencies
+        run: cargo build --release --locked
+
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-24.04
+    # Same glibc 2.35 container as the release build.
+    container: ubuntu:22.04
+    steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          apt-get install -y sudo curl git ca-certificates jq xz-utils file
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install system dependencies
+        run: |
+          # Same packages as release.yml.
+          sudo apt-get install -y gcc g++ clang pkg-config libfontconfig-dev \
+            libwayland-dev libwebkit2gtk-4.1-dev libxkbcommon-x11-dev \
+            libx11-xcb-dev libssl-dev libzstd-dev libasound2-dev \
+            vulkan-validationlayers libvulkan1
+
+      - name: Stub out the workspace crates
+        shell: bash
+        run: bash .github/scripts/stub-workspace.sh
+
+      - name: Build dependencies
+        run: cargo build --release --locked
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Stub out the workspace crates
+        shell: bash
+        run: bash .github/scripts/stub-workspace.sh
+
+      - name: Build dependencies
+        run: cargo build --release --locked
