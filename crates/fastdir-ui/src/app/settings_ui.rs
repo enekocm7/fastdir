@@ -419,6 +419,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -431,6 +433,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-skip-hidden")
+                                        .flex_shrink_0()
                                             .checked(scan.skip_hidden_system)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -452,6 +455,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -464,6 +469,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-skip-windows")
+                                        .flex_shrink_0()
                                             .checked(scan.skip_windows_dir)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -485,6 +491,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -497,6 +505,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-use-mft")
+                                        .flex_shrink_0()
                                             .checked(scan.use_mft)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -518,6 +527,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -530,6 +541,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-count-streams")
+                                        .flex_shrink_0()
                                             .checked(scan.count_streams)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -551,6 +563,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -564,6 +578,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-follow-junctions")
+                                        .flex_shrink_0()
                                             .checked(scan.follow_junctions)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -585,6 +600,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div().text_xs().child(tr("set.scan.cross")),
@@ -595,6 +612,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-cross-volumes")
+                                        .flex_shrink_0()
                                             .checked(scan.cross_volumes)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -615,6 +633,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div().text_xs().child(tr("set.scan.auto_threads")),
@@ -626,6 +646,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-auto-threads")
+                                        .flex_shrink_0()
                                             .checked(scan.thread_count.is_none())
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -699,6 +720,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -712,6 +735,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-partial")
+                                        .flex_shrink_0()
                                             .checked(scan.show_partial_results)
                                             .on_change(cx.listener(
                                                 move |_, _checked: &bool, _window, cx| {
@@ -730,6 +754,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div().text_xs().child(tr("set.scan.owners")),
@@ -740,6 +766,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-collect-owners")
+                                        .flex_shrink_0()
                                             .checked(scan.collect_owners)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -767,6 +794,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(div().text_xs().child(tr("set.tree.show")))
                                             .child(caption(
@@ -775,6 +804,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-tm-show")
+                                        .flex_shrink_0()
                                             .checked(treemap.show)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -796,6 +826,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(div().text_xs().child(tr("set.tree.free")))
                                             .child(caption(
@@ -804,6 +836,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-tm-free")
+                                        .flex_shrink_0()
                                             .checked(treemap.show_free_space)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -826,6 +859,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(div().text_xs().child(tr("set.tree.unknown")))
                                             .child(caption(
@@ -834,6 +869,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-tm-unknown")
+                                        .flex_shrink_0()
                                             .checked(treemap.show_unknown)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -856,6 +892,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div().text_xs().child(tr("set.tree.disk")),
@@ -867,6 +905,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-tm-disk")
+                                        .flex_shrink_0()
                                             .checked(treemap.disk_size)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1000,6 +1039,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(div().text_xs().child(tr("set.tree.cushion")))
                                             .child(caption(
@@ -1008,6 +1049,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-cushion")
+                                        .flex_shrink_0()
                                             .checked(treemap.cushion)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1078,6 +1120,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(div().text_xs().child(tr("set.tree.borders")))
                                             .child(caption(
@@ -1086,6 +1130,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-borders")
+                                        .flex_shrink_0()
                                             .checked(treemap.borders)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1253,6 +1298,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(div().text_xs().child(tr("set.list.age_tint")))
                                             .child(caption(
@@ -1261,6 +1308,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-age-tint")
+                                        .flex_shrink_0()
                                             .checked(list.age_tint)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1279,9 +1327,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.items_col")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.items_col")))
                                     .child(
                                         Switch::new("settings-col-items")
+                                        .flex_shrink_0()
                                             .checked(list.show_items)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1300,9 +1349,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.files_col")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.files_col")))
                                     .child(
                                         Switch::new("settings-col-files")
+                                        .flex_shrink_0()
                                             .checked(list.show_files)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1321,9 +1371,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.folders_col")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.folders_col")))
                                     .child(
                                         Switch::new("settings-col-folders")
+                                        .flex_shrink_0()
                                             .checked(list.show_folders)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1342,9 +1393,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.modified_col")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.modified_col")))
                                     .child(
                                         Switch::new("settings-col-modified")
+                                        .flex_shrink_0()
                                             .checked(list.show_modified)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1363,9 +1415,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.disk_col")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.disk_col")))
                                     .child(
                                         Switch::new("settings-col-disk")
+                                        .flex_shrink_0()
                                             .checked(list.show_disk)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1384,9 +1437,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.owner_col")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.owner_col")))
                                     .child(
                                         Switch::new("settings-col-owner")
+                                        .flex_shrink_0()
                                             .checked(list.show_owner)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1405,9 +1459,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.list.hide_empty")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.list.hide_empty")))
                                     .child(
                                         Switch::new("settings-hide-empty")
+                                        .flex_shrink_0()
                                             .checked(list.hide_empty_folders)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1435,6 +1490,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         div()
+                                            .flex_1()
+                                            .min_w_0()
                                             .text_xs()
                                             .child(fastdir_locale::fmt(
                                                 &lang_setting,
@@ -1447,6 +1504,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-confirm-recycle")
+                                        .flex_shrink_0()
                                             .checked(ops.confirm_recycle)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1470,6 +1528,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-confirm-permanent")
+                                        .flex_shrink_0()
                                             .checked(ops.confirm_permanent)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1492,9 +1551,10 @@ impl Render for SettingsView {
                                     .items_center()
                                     .w_full()
                                     .gap_4()
-                                    .child(div().text_xs().child(tr("set.ops.confirm_move")))
+                                    .child(div().text_xs().flex_1().min_w_0().child(tr("set.ops.confirm_move")))
                                     .child(
                                         Switch::new("settings-confirm-move")
+                                        .flex_shrink_0()
                                             .checked(ops.confirm_move)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1519,11 +1579,14 @@ impl Render for SettingsView {
                                             .gap_4()
                                             .child(
                                                 div()
+                                                    .flex_1()
+                                                    .min_w_0()
                                                     .text_xs()
                                                     .child(tr("set.ops.keep_view")),
                                             )
                                             .child(
                                                 Switch::new("settings-keep-view")
+                                                .flex_shrink_0()
                                                     .checked(ops.keep_selection_after_delete)
                                                     .on_change(cx.listener(
                                                         move |_, checked: &bool, _window, cx| {
@@ -1577,6 +1640,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -1658,6 +1723,8 @@ impl Render for SettingsView {
                                         .gap_4()
                                         .child(
                                             v_flex()
+                                                .flex_1()
+                                                .min_w_0()
                                                 .gap_1()
                                                 .child(
                                                     div()
@@ -1675,6 +1742,7 @@ impl Render for SettingsView {
                                         )
                                         .child(
                                             Switch::new("settings-context-menu")
+                                            .flex_shrink_0()
                                                 .checked(integration.context_menu)
                                                 .disabled(machine_managed)
                                                 .on_change(cx.listener(
@@ -1721,6 +1789,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div().text_xs().child(tr("set.integration.single")),
@@ -1732,6 +1802,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-single-instance")
+                                        .flex_shrink_0()
                                             .checked(integration.single_instance)
                                             .on_change(cx.listener(
                                                 move |_, checked: &bool, _window, cx| {
@@ -1759,6 +1830,8 @@ impl Render for SettingsView {
                                     .gap_4()
                                     .child(
                                         v_flex()
+                                            .flex_1()
+                                            .min_w_0()
                                             .gap_1()
                                             .child(
                                                 div()
@@ -1772,6 +1845,7 @@ impl Render for SettingsView {
                                     )
                                     .child(
                                         Switch::new("settings-auto-update")
+                                        .flex_shrink_0()
                                             .checked(updates.auto_check)
                                             .on_change(cx.listener(
                                                 move |_, _checked: &bool, _window, cx| {
