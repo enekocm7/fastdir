@@ -173,8 +173,18 @@ impl FastDir {
             return;
         }
         let LiveScanResult {
-            elapsed, cancelled, ..
+            elapsed,
+            cancelled,
+            used_mft,
         } = result;
+        // Say which path read the disk, so the MFT default is never silent.
+        let method = if used_mft {
+            Some(self.tr("scan.via_mft"))
+        } else if self.settings.scan.use_mft {
+            Some(self.tr("scan.via_walk"))
+        } else {
+            None
+        };
         // Drive scans get `<Free space>` and `<Unknown>` pseudo-items so the
         // picture is complete (scanned vs used), with what could be measured
         // (NTFS metadata, shadow copies) split out of `<Unknown>`. Volume
@@ -218,6 +228,10 @@ impl FastDir {
                 ],
             );
             drop(t);
+            let done = match method {
+                Some(m) => format!("{done} · {m}"),
+                None => done,
+            };
             self.announce(done, cx);
         }
         // Keep the folder the user was browsing selected across the finish.
@@ -250,6 +264,10 @@ impl FastDir {
                 ("dur", &format::duration(elapsed)),
             ],
         );
+        let msg = match method {
+            Some(m) => format!("{msg} · {m}"),
+            None => msg,
+        };
         window.push_notification(
             Notification::new()
                 .message(msg)

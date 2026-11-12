@@ -392,7 +392,7 @@ pub struct ScanSettings {
     pub skip_windows_dir: bool,
     /// Read the NTFS Master File Table directly instead of walking folders
     /// (much faster). Needs administrator rights; scans fall back to the
-    /// normal walk when the MFT cannot be read. Off by default.
+    /// normal walk when the MFT cannot be read. On by default.
     pub use_mft: bool,
     /// Measure NTFS alternate data streams and show them per folder as an
     /// `<Alternate streams>` item. Free with the MFT scan, slower with the
@@ -411,7 +411,7 @@ impl Default for ScanSettings {
             show_partial_results: true,
             collect_owners: false,
             skip_windows_dir: false,
-            use_mft: false,
+            use_mft: true,
             count_streams: false,
         }
     }
@@ -1463,6 +1463,25 @@ follow_junctions = true
         };
         assert_eq!(empty.effective_dir(), default_snapshot_dir());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mft_scan_is_on_by_default_but_explicit_off_is_kept() {
+        assert!(ScanSettings::default().use_mft);
+        let missing: Settings = toml::from_str(
+            "[scan]
+skip_hidden_system = true
+",
+        )
+        .unwrap();
+        assert!(missing.scan.use_mft);
+        let off: Settings = toml::from_str(
+            "[scan]
+use_mft = false
+",
+        )
+        .unwrap();
+        assert!(!off.scan.use_mft);
     }
 
     #[test]

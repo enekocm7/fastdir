@@ -153,6 +153,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "scan.done_files" => "Проскановано {files} файлів ({size}) за {dur}",
         "scan.stopped" => "Сканування зупинено",
         "scan.complete" => "Сканування завершено",
+        "scan.via_mft" => "Прочитано з MFT NTFS",
+        "scan.via_walk" => "MFT недоступна, папки обійдено",
         "win.scanning" => "FastDir — сканування {path}",
         "win.ready" => "FastDir — {path}{suffix}",
         "win.incomplete" => " (неповне)",

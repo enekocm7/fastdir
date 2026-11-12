@@ -157,6 +157,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "scan.done_files" => "Naskenováno {files} souborů ({size}) za {dur}",
         "scan.stopped" => "Skenování zastaveno",
         "scan.complete" => "Skenování dokončeno",
+        "scan.via_mft" => "Načteno z NTFS MFT",
+        "scan.via_walk" => "MFT není dostupná, složky byly projity",
         "win.scanning" => "FastDir — skenování {path}",
         "win.ready" => "FastDir — {path}{suffix}",
         "win.incomplete" => " (neúplné)",

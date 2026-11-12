@@ -157,6 +157,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "scan.done_files" => "{files} arquivos verificados ({size}) em {dur}",
         "scan.stopped" => "Verificação interrompida",
         "scan.complete" => "Verificação concluída",
+        "scan.via_mft" => "Lido da MFT do NTFS",
+        "scan.via_walk" => "MFT indisponível, pastas percorridas",
         "win.scanning" => "FastDir — verificando {path}",
         "win.ready" => "FastDir — {path}{suffix}",
         "win.incomplete" => " (incompleta)",

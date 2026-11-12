@@ -23,13 +23,17 @@ culprit? Rename, move, recycle or delete it right there.
   `GetFileInformationByHandleEx` call (`FileIdBothDirectoryInfo`) that returns
   names, sizes, timestamps and file IDs together, so there's no per-file
   `stat`. ~2.7 million files / 500 GB in about 17 s on a warm cache.
-- **Fast NTFS scan (opt-in)** - with *Settings → Fast NTFS scan (MFT)* (or
-  `--mft` on the command line) and FastDir running as administrator, an NTFS
+- **Fast NTFS scan (default)** - with *Settings → Fast NTFS scan (MFT)* (on
+  by default; `--no-mft` turns it off on the command line) and FastDir
+  running as administrator, an NTFS
   volume is scanned by reading its Master File Table directly: large
   sequential reads instead of one listing per folder. Sizes, size on disk,
   hard links and `<Unknown>` follow the same rules as the normal scan. On
   other file systems, without administrator rights, or when following
-  junctions or collecting owners, the normal scan runs instead.
+  junctions or collecting owners, the normal scan runs instead, and the scan
+  notice says which path was used. The MFT path opens the raw volume device
+  (for example `\\.\C:`), which is why it needs administrator rights. An explicit
+  `use_mft = false` in `config.toml` is kept.
 - **NTFS alternate data streams (opt-in)** - with *Settings → Count alternate
   data streams* (or `--streams` on the command line), named streams such as
   the `Zone.Identifier` a downloaded file carries are measured too and shown
@@ -199,7 +203,7 @@ culprit? Rename, move, recycle or delete it right there.
   colour-blind-safe one), flat shading, cell borders, age-tinted dates,
   list-only mode, excluded
     paths, hidden/system skipping, skipping the Windows folder (opt-in, makes
-  system-drive scans much faster), fast NTFS scanning through the MFT (opt-in,
+  system-drive scans much faster), fast NTFS scanning through the MFT (default,
   needs administrator rights), junction following (opt-in), thread count,
   startup mode, single-instance mode, interface scale, update channel and
   frequency, per-action delete confirmations, custom cleanup actions, whether
@@ -560,7 +564,8 @@ row has its own sizes.
 | `--cross-volumes` | scan, top, duplicates, diff, snapshot | With `--follow-junctions`, also enter other volumes |
 | `--skip-hidden` (`--skip-system`) | scan, top, duplicates, diff, snapshot | Skip hidden and system entries |
 | `--skip-windows` | scan, top, duplicates, diff, snapshot | Skip the Windows folder (`%SystemRoot%`, usually `C:\Windows`) for a much faster system-drive scan; its bytes count as `<Unknown>` |
-| `--mft` | scan, top, duplicates, diff, snapshot | Read the NTFS Master File Table directly (much faster on large volumes). Needs administrator rights; otherwise a normal scan runs and the summary on stderr says so |
+| `--mft` | scan, top, duplicates, diff, snapshot | Read the NTFS Master File Table directly (much faster on large volumes). On by default. Needs administrator rights; otherwise a normal scan runs and the summary on stderr says so |
+| `--no-mft` | scan, top, duplicates, diff, snapshot | Always walk the folders instead of reading the MFT (overrides the config file) |
 | `--streams` | scan, top, duplicates, diff, snapshot | Measure NTFS alternate data streams and show them in each folder as `<Alternate streams>`. Free with `--mft`; the normal scan opens every file, so it is slower. Off by default |
 | `--owners` | scan, top, diff, snapshot | Record the owning account of every entry (Owner field, per-user totals) |
 | `-q, --quiet` | scan, top, duplicates, diff, snapshot | Nothing on stderr except errors |

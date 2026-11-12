@@ -153,6 +153,8 @@ pub fn get(key: &str) -> Option<&'static str> {
         "scan.done_files" => "{files} dosya ({size}) {dur} içinde tarandı",
         "scan.stopped" => "Tarama durduruldu",
         "scan.complete" => "Tarama tamamlandı",
+        "scan.via_mft" => "NTFS MFT'den okundu",
+        "scan.via_walk" => "MFT kullanılamadı, klasörler gezildi",
         "win.scanning" => "FastDir — {path} taranıyor",
         "win.ready" => "FastDir — {path}{suffix}",
         "win.incomplete" => " (eksik)",
